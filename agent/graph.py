@@ -1,87 +1,93 @@
 """Граф агента: LLM + MCP-инструменты Earth + отчёты (файл в чате и callback-доставка).
 
-Отчёты: тул save_report кладёт data-URL в artifact своего ToolMessage (artifact
-не уходит в модель). node_llm собирает артефакты из ToolMessage после последнего
-сообщения пользователя и лепит их в AIMessage.artifacts — UI (ArtifactsDownload
-в ai.tsx) показывает кнопку скачивания прямо в чате (паттерн pack_agent/packing-ui).
-Граница run'а — последнее сообщение пользователя: отчёты прошлых run'а к новому
-ответу не прилепляются, отдельного канала и сброса не нужно.
-
-Расследования: тул send_report доставляет отчёт на callback_url из данных
-запуска (вебхук Логикора несёт callback_url в payload); при успехе файл
-прикрепляется к ответу, при сбое модель зовёт save_report.
+Улучшения:
+- Артефакты храним в State через редьюсер, убираем хрупкий перебор сообщений.
+- Нода entry сбрасывает артефакты/находки при новом сообщении пользователя.
+- Тулз log_finding: принудительная фиксация хода расследования.
+- Асинхронная доставка отчётов с ретраями (tenacity).
+- ToolRuntime используется напрямую, без getattr-костылей.
 """
 
 import base64
 import datetime
 import httpx
 import json
+import operator
 import re
-from typing import Annotated, Any, Sequence, TypedDict
+from typing import Annotated, Any, Sequence
+
 from typing_extensions import TypedDict
 
-from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, SystemMessage, ToolMessage
+from langchain_core.messages import (
+    AIMessage, BaseMessage, HumanMessage, SystemMessage, ToolMessage,
+)
 from langchain_core.tools import tool
 from langchain.chat_models import init_chat_model
 from langgraph.graph import StateGraph, START, END
 from langgraph.graph.message import add_messages
 from langgraph.prebuilt import ToolNode, ToolRuntime, tools_condition
-from langgraph.types import Command
+from langgraph.types import Command, Overwrite
+from tenacity import retry, stop_after_attempt, wait_exponential
 
 from mcp_client import get_mcp_tools
 from config import Settings
+
 settings = Settings()
 
-# 1. Инициализация LLM (Явный контракт, production-ready настройки)
+# ──────────────────────────────────────────────
+# 1. LLM
+# ──────────────────────────────────────────────
 llm = init_chat_model(
-    model_provider='openai',
+    model_provider="openai",
     model=settings.llm_model,
     base_url=settings.llm_base_url,
     api_key=settings.llm_token,
-    temperature=0.0,          # Детерминизм для предсказуемости
-    max_retries=3             # Устойчивость к сетевым сбоям провайдера
+    temperature=0.0,
+    max_retries=3,
 )
 
+# ──────────────────────────────────────────────
+# 2. Системный промпт
+# ──────────────────────────────────────────────
 SYSTEM_PROMPT = """\
 Ты — инженер-аналитик по журналу событий Earth (Логикор).
-Все факты о событиях — только через инструменты (search_events, count_events,
-timeline, top_values, field_lookup, get_event и др.); прикидывать цифры в уме нельзя.
-Время «сейчас» бери из server_time, окна — от него.
 
-Когда пользователь просит отчёт, сохранить результаты файлом или выгрузить данные —
-сформируй markdown-отчёт (вердикты, числа с окнами, uuid-якоря) и вызови тул
-save_report(title, markdown, filename?). Файл прикрепится к следующему за вызовом
-ответу автоматически: кнопку скачивания НЕ описывай и не выдумывай ссылки — просто
-назови файл в финальном ответе. В режиме расследования (ниже) этот тул не нужен —
-вместо него работает send_report.
+Правила:
+- Все факты о событиях — только через инструменты (search_events, count_events,
+  timeline, top_values, field_lookup, get_event и др.). Прикидывать цифры в уме нельзя.
+- Время «сейчас» бери из server_time, окна — от него.
 
-Если входящее сообщение — задача расследования аномалии (пометка вебхука/автоматического
-запуска, «расследуй», «аномалия», «нарушение»), проведи полное расследование инструментами
-и на финише вызови send_report(title, markdown): отчёт будет доставлен на принимающий
-эндпоинт — callback_url уже задан в данных запуска, URL выдумывать и пересказывать нельзя.
-В этом режиме НЕ вызывай save_report — send_report сам прикрепляет отчёт файлом к ответу,
-двойной вызов даст два одинаковых файла. Финальный ответ в таком режиме — краткий вердикт
-(2–4 предложения). Если send_report вернул ошибку (эндпоинт не задан или доставка не
-удалась) — вызови save_report и в финальном ответе укажи, что доставка не выполнена.
+Алгоритм расследования (если задача — расследование аномалии):
+1. Определи время и контекст аномалии из входящего сообщения.
+2. Выполни поисковые запросы через MCP-инструменты.
+3. ПОСЛЕ КАЖДОГО осмысленного запроса ОБЯЗАТЕЛЬНО вызови
+   log_finding(finding, next_action) — зафиксируй, что нашёл и что дальше.
+4. Повторяй шаги 2–3, пока не соберёшь достаточно улик.
+5. Сформируй markdown-отчёт и доставь его.
+
+Отчёты:
+- Если пользователь просит отчёт / сохранить файл — вызови save_report(title, markdown).
+- Если задача — расследование аномалии (вебхук, «расследуй») — вызови
+  send_report(title, markdown). callback_url уже в данных запуска.
+- НЕ вызывай save_report и send_report одновременно.
+- Если send_report вернул ошибку — вызови save_report.
 """
 
-# 2. Инструменты Логикора (MCP, streamable-http — ADR-0010), инициализация один раз
-mcp_tools = get_mcp_tools()
-
-# 2b. Тул отчётов: data-URL в artifact ToolMessage, к финальному сообщению пришьёт node_llm
+# ──────────────────────────────────────────────
+# 3. Утилиты отчётов
+# ──────────────────────────────────────────────
 _SAFE_SEGMENT = re.compile(r"[^A-Za-z0-9._-]+")
 
 
 def _slug(value: str, fallback: str) -> str:
     segment = _SAFE_SEGMENT.sub("-", value.strip()).strip("-.")
-    # Без латиницы в имени (кириллический заголовок) — фолбэк, чтобы не получить «24.md»
     if not any(c.isascii() and c.isalpha() for c in segment):
         return fallback
     return segment or fallback
 
 
 def _build_report(title: str, markdown: str, filename: str | None = None) -> tuple[str, str, int]:
-    """Собирает (имя файла, data-URL отчёта, размер в байтах). Общий для save_report и send_report."""
+    """Собирает (имя файла, data-URL отчёта, размер в байтах)."""
     name = _slug(filename, "report") if filename else _slug(title, "report")
     if not name.lower().endswith(".md"):
         name += ".md"
@@ -99,32 +105,48 @@ def _build_report(title: str, markdown: str, filename: str | None = None) -> tup
     return fname, url, len(data)
 
 
-def _tool_msg(
-    name: str, content: str, runtime: ToolRuntime = None, artifact: str | None = None
-) -> ToolMessage:
-    return ToolMessage(
-        content=content,
-        tool_call_id=runtime.tool_call_id if runtime is not None else "",
-        name=name,
-        artifact=artifact,
-    )
+# ──────────────────────────────────────────────
+# 4. State
+# ──────────────────────────────────────────────
+class State(TypedDict):
+    messages: Annotated[Sequence[BaseMessage], add_messages]
+    callback_url: str
+    # Артефакты (data-URL отчётов) текущего run'а
+    artifacts: Annotated[list[str], operator.add]
+    # Сжатые находки расследования (из log_finding)
+    findings: Annotated[list[str], operator.add]
 
 
-def _pending_report_artifacts(messages: Sequence[BaseMessage]) -> list[str]:
-    """data-URL отчётов текущего run'а: артефакты ToolMessage после последнего сообщения пользователя."""
-    last_human = -1
-    for i, m in enumerate(messages):
-        if isinstance(m, HumanMessage):
-            last_human = i
-    if last_human < 0:
-        return []
-    urls: list[str] = []
-    for m in messages[last_human + 1:]:
-        if isinstance(m, ToolMessage) and m.artifact:
-            url = str(m.artifact)
-            if url not in urls:
-                urls.append(url)
-    return urls
+# ──────────────────────────────────────────────
+# 5. Тулзы
+# ──────────────────────────────────────────────
+mcp_tools = get_mcp_tools()
+
+
+@tool
+def log_finding(
+    finding: str,
+    next_action: str,
+    runtime: ToolRuntime = None,
+) -> Command:
+    """Зафиксировать результат анализа и следующий шаг.
+    ОБЯЗАТЕЛЬНО вызывай после каждого осмысленного запроса в MCP.
+
+    Аргументы:
+    - finding: что нашёл (1–2 предложения)
+    - next_action: что будешь делать дальше
+    """
+    ts = datetime.datetime.now(datetime.UTC).strftime("%H:%M:%S")
+    note = f"[{ts}] {finding} → {next_action}"
+    # ToolMessage обязателен: без ответа на tool_call ToolNode поднимет ValueError
+    return Command(update={
+        "findings": [note],
+        "messages": [ToolMessage(
+            content=note,
+            tool_call_id=runtime.tool_call_id if runtime else "",
+            name="log_finding",
+        )],
+    })
 
 
 @tool
@@ -134,26 +156,32 @@ def save_report(
     filename: str | None = None,
     runtime: ToolRuntime = None,
 ) -> Command:
-    """Сохранить отчёт расследования файлом, который пользователь скачает из чата.
+    """Сохранить отчёт файлом, который пользователь скачает из чата.
 
-    Когда вызывать: просят «отчёт», «сохрани/выгрузи в файл», «скачай» — по итогам анализа.
-    Аргументы:
-    - title: заголовок отчёта; идёт в front matter и в имя файла, если filename не задан.
-    - markdown: тело отчёта (вердикты, числа с окнами, uuid-якоря). Пишется как есть.
-    - filename: опционально, имя файла (без расширения — добавится .md).
-    Файл прикрепится к следующему за вызовом ответу автоматически: кнопку скачивания
-    показывать не нужно, просто назови файл в финальном ответе.
-    Ответ: {"ok": true, "filename": "<имя>.md", "bytes": N}.
+    Когда вызывать: просят «отчёт», «сохрани/выгрузи в файл», «скачай».
+    Файл прикрепится к следующему за вызовом ответу автоматически.
     """
     fname, url, nbytes = _build_report(title, markdown, filename)
     payload = json.dumps({"ok": True, "filename": fname, "bytes": nbytes}, ensure_ascii=False)
-    return Command(
-        update={"messages": [_tool_msg("save_report", payload, runtime, artifact=url)]}
-    )
+    return Command(update={
+        "messages": [ToolMessage(
+            content=payload,
+            tool_call_id=runtime.tool_call_id if runtime else "",
+            name="save_report",
+        )],
+        "artifacts": [url],
+    })
+
+
+@retry(stop=stop_after_attempt(3), wait=wait_exponential(multiplier=1, min=1, max=10))
+async def _post_report(target: str, payload: dict) -> httpx.Response:
+    """POST с ретраями: 3 попытки, экспоненциальная задержка 1с → 2с → 4с."""
+    async with httpx.AsyncClient(timeout=15.0) as client:
+        return await client.post(target, json=payload)
 
 
 @tool
-def send_report(
+async def send_report(
     title: str,
     markdown: str,
     callback_url: str | None = None,
@@ -161,34 +189,27 @@ def send_report(
 ) -> Command:
     """Доставить готовый отчёт расследования на принимающий эндпоинт (callback).
 
-    Когда вызывать: задача — расследование аномалии (сообщение помечено как вебхук/
-    автоматический запуск, «расследуй») и анализ завершён — результат нужно доставить
-    получателю, а не только показать в чате.
-    Аргументы:
-    - title: заголовок отчёта.
-    - markdown: тело отчёта (вердикты, числа с окнами, uuid-якоря).
-    - callback_url: принимающий URL; обычно НЕ нужен — эндпоинт уже в данных запуска,
-      явное значение переопределяет его.
-    При успешной доставке отчёт прикрепляется файлом к следующему за вызовом ответу;
-    при сбое доставку не выполняли — вместо этого вызови save_report.
-    Ответ: {"ok": true, "status": N, "filename": ...} — доставлено;
-    {"ok": false, "error": "..."} — доставка не выполнена.
+    Когда вызывать: задача — расследование аномалии и анализ завершён.
+    При успешной доставке отчёт прикрепляется файлом к ответу;
+    при сбое — вместо этого вызови save_report.
     """
     fname, url, nbytes = _build_report(title, markdown)
-    target = (callback_url or "").strip()
-    if not target and runtime is not None:
-        state = getattr(runtime, "state", None)
-        if isinstance(state, dict):
-            target = str(state.get("callback_url") or "").strip()
+
+    # Берём стейт напрямую из ToolRuntime
+    state = runtime.state if runtime else {}
+    target = (callback_url or "").strip() or str(state.get("callback_url") or "").strip()
+
     result: dict[str, Any] = {"filename": fname, "bytes": nbytes}
+
     if not target:
         result["ok"] = False
         result["error"] = "callback_url не задан: эндпоинт отсутствует в данных запуска"
     else:
         thread_id = None
-        config = getattr(runtime, "config", None) or {}
+        config = runtime.config if runtime else {}
         if isinstance(config, dict):
             thread_id = (config.get("configurable") or {}).get("thread_id")
+
         payload = {
             "event": "investigation_report",
             "title": title,
@@ -198,7 +219,7 @@ def send_report(
             "thread_id": thread_id,
         }
         try:
-            resp = httpx.post(target, json=payload, timeout=30.0)
+            resp = await _post_report(target, payload)
             result["status"] = resp.status_code
             result["ok"] = 200 <= resp.status_code < 300
             if not result["ok"]:
@@ -206,55 +227,71 @@ def send_report(
         except Exception as exc:
             result["ok"] = False
             result["error"] = f"POST не удался: {type(exc).__name__}: {exc}"
-    # Artifact только при успешной доставке: при сбое модель зовёт save_report
-    # (см. system prompt) — к ответу прикрепится один файл.
-    artifact = url if result["ok"] else None
-    return Command(
-        update={"messages": [_tool_msg("send_report", json.dumps(result, ensure_ascii=False), runtime, artifact=artifact)]}
-    )
+
+    update: dict = {
+        "messages": [ToolMessage(
+            content=json.dumps(result, ensure_ascii=False),
+            tool_call_id=runtime.tool_call_id if runtime else "",
+            name="send_report",
+        )],
+    }
+    # Артефакт только при успешной доставке
+    if result["ok"]:
+        update["artifacts"] = [url]
+
+    return Command(update=update)
 
 
-tools = list(mcp_tools or []) + [save_report, send_report]
-llm_with_tools = llm.bind_tools(tools) if tools else llm
-
-# 3. Схема состояния (Строгий контракт для agent-chat-ui и PostgreSQL чекпоинтов)
-class State(TypedDict):
-    messages: Annotated[Sequence[BaseMessage], add_messages]
-    callback_url: str  # эндпоинт доставки отчёта, задаётся input запуска (вебхук)
+tools = list(mcp_tools or []) + [save_report, send_report, log_finding]
+llm_with_tools = llm.bind_tools(tools)
 
 
-# 4. Узел с реальным вызовом LLM
+# ──────────────────────────────────────────────
+# 6. Ноды
+# ──────────────────────────────────────────────
+def entry(state: State) -> dict:
+    """Сбрасывает артефакты и находки при новом пользовательском сообщении.
+    Это обеспечивает границу run'а: отчёты прошлых run'ов не прилепляются к новому ответу.
+    """
+    if state["messages"] and isinstance(state["messages"][-1], HumanMessage):
+        # Overwrite обходит редьюсер и ставит канал в пустой список
+        return {"artifacts": Overwrite([]), "findings": Overwrite([])}
+    return {}
+
+
 def node_llm(state: State) -> dict:
-    messages: list[BaseMessage] = [SystemMessage(content=SYSTEM_PROMPT), *state["messages"]]
+    # Подмешиваем накопленные находки в системный промпт
+    system = SYSTEM_PROMPT
+    if state.get("findings"):
+        findings_text = "\n".join(state["findings"])
+        system += f"\n\nСобранные находки:\n{findings_text}"
+
+    messages: list[BaseMessage] = [SystemMessage(content=system), *state["messages"]]
     response = llm_with_tools.invoke(messages)
 
-    update: dict = {"messages": [response]}
-    # Финальный ответ (без tool_calls) забирает отчёты, сохранённые этим run'ом
-    if not getattr(response, "tool_calls", None):
-        pending = _pending_report_artifacts(state["messages"])
-        if pending:
-            response.artifacts = list(pending)
-    return update
+    # Финальный ответ (без tool_calls) забирает артефакты из State
+    if not getattr(response, "tool_calls", None) and state.get("artifacts"):
+        response.artifacts = list(state["artifacts"])
+
+    return {"messages": [response]}
 
 
-# 5. Сборка графа (Декларативное описание конечного автомата)
+# ──────────────────────────────────────────────
+# 7. Сборка графа
+# ──────────────────────────────────────────────
 def build_graph():
     builder = StateGraph(State)
 
-    # Регистрация узлов
+    builder.add_node("entry", entry)
     builder.add_node("llm", node_llm)
-    if tools:
-        builder.add_node("tools", ToolNode(tools))
+    builder.add_node("tools", ToolNode(tools))
 
-    # Определение потока выполнения (Edges)
-    builder.add_edge(START, "llm")
-    if tools:
-        builder.add_conditional_edges("llm", tools_condition, ["tools", END])
-        builder.add_edge("tools", "llm")  # результат инструмента — обратно к LLM
-    else:
-        builder.add_edge("llm", END)
+    builder.add_edge(START, "entry")
+    builder.add_edge("entry", "llm")
+    builder.add_conditional_edges("llm", tools_condition, ["tools", END])
+    builder.add_edge("tools", "llm")
 
     return builder.compile()
 
-# Глобальный экземпляр скомпилированного графа для регистрации в Aegra
+
 graph = build_graph()
