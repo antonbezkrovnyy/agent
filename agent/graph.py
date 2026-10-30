@@ -2,8 +2,12 @@
 
 Улучшения:
 - Артефакты храним в State через редьюсер, убираем хрупкий перебор сообщений.
-- Нода entry сбрасывает артефакты/находки при новом сообщении пользователя.
-- Тулз log_finding: принудительная фиксация хода расследования.
+- Нода entry сбрасывает только артефакты при новом сообщении; findings и last_report
+  живут весь тред — нужны для правок и продолжения расследования.
+- Тулз log_finding: принудительная фиксация хода расследования;
+  доступ к записям — list_findings / get_finding.
+- last_report хранит сырой текст последнего отчёта — модель видит его
+  в системном промпте и может вносить правки.
 - Асинхронная доставка отчётов с ретраями (tenacity).
 - ToolRuntime используется напрямую, без getattr-костылей.
 """
@@ -64,6 +68,8 @@ SYSTEM_PROMPT = """\
    log_finding(finding, next_action) — зафиксируй, что нашёл и что дальше.
 4. Повторяй шаги 2–3, пока не соберёшь достаточно улик.
 5. Сформируй markdown-отчёт и доставь его.
+6. Чтобы вспомнить свои же записи — list_findings (весь список)
+   или get_finding (конкретная запись по номеру).
 
 Отчёты:
 - Если пользователь просит отчёт / сохранить файл — вызови save_report(title, markdown).
@@ -71,11 +77,15 @@ SYSTEM_PROMPT = """\
   send_report(title, markdown). callback_url уже в данных запуска.
 - НЕ вызывай save_report и send_report одновременно.
 - Если send_report вернул ошибку — вызови save_report.
+- Если пользователь просит внести правки в отчёт — бери текст из блока
+  «Последний созданный отчёт», вноси изменения и снова вызови save_report.
 """
 
 # ──────────────────────────────────────────────
 # 3. Утилиты отчётов
 # ──────────────────────────────────────────────
+REPORT_INJECT_LIMIT = 8000  # сколько символов отчёта подмешивать в системный промпт
+
 _SAFE_SEGMENT = re.compile(r"[^A-Za-z0-9._-]+")
 
 
@@ -113,8 +123,10 @@ class State(TypedDict):
     callback_url: str
     # Артефакты (data-URL отчётов) текущего run'а
     artifacts: Annotated[list[str], operator.add]
-    # Сжатые находки расследования (из log_finding)
+    # Записи расследования (из log_finding), живут весь тред
     findings: Annotated[list[str], operator.add]
+    # Сырой текст последнего отчёта — для правок (обычный канал: последнее значение)
+    last_report: dict
 
 
 # ──────────────────────────────────────────────
@@ -170,6 +182,8 @@ def save_report(
             name="save_report",
         )],
         "artifacts": [url],
+        # Сырой текст — для будущих правок
+        "last_report": {"title": title, "markdown": markdown, "filename": fname},
     })
 
 
@@ -235,14 +249,39 @@ async def send_report(
             name="send_report",
         )],
     }
-    # Артефакт только при успешной доставке
+    # Артефакт и текст отчёта — только при успешной доставке
     if result["ok"]:
         update["artifacts"] = [url]
+        update["last_report"] = {"title": title, "markdown": markdown, "filename": fname}
 
     return Command(update=update)
 
 
-tools = list(mcp_tools or []) + [save_report, send_report, log_finding]
+@tool
+def list_findings(runtime: ToolRuntime = None) -> str:
+    """Весь список записей, сделанных через log_finding (с номерами).
+
+    Когда вызывать: нужно вспомнить, что уже найдено — правки отчёта,
+    продолжение расследования, вопрос «что ты нашёл».
+    """
+    state = runtime.state if runtime else {}
+    findings = state.get("findings") or []
+    if not findings:
+        return "Записей нет: log_finding ещё не вызывался."
+    return "\n".join(f"{i + 1}. {note}" for i, note in enumerate(findings))
+
+
+@tool
+def get_finding(index: int, runtime: ToolRuntime = None) -> str:
+    """Конкретная запись из log_finding по номеру (номера — в выводе list_findings)."""
+    state = runtime.state if runtime else {}
+    findings = state.get("findings") or []
+    if not 1 <= index <= len(findings):
+        return f"Записи №{index} нет: всего записей {len(findings)}."
+    return findings[index - 1]
+
+
+tools = list(mcp_tools or []) + [save_report, send_report, log_finding, list_findings, get_finding]
 llm_with_tools = llm.bind_tools(tools)
 
 
@@ -250,21 +289,31 @@ llm_with_tools = llm.bind_tools(tools)
 # 6. Ноды
 # ──────────────────────────────────────────────
 def entry(state: State) -> dict:
-    """Сбрасывает артефакты и находки при новом пользовательском сообщении.
-    Это обеспечивает границу run'а: отчёты прошлых run'ов не прилепляются к новому ответу.
+    """Сбрасывает только артефакты при новом пользовательском сообщении:
+    файлы прошлых run'ов не прилепляются к новому ответу.
+    findings и last_report живут весь тред — нужны для правок и продолжения.
     """
     if state["messages"] and isinstance(state["messages"][-1], HumanMessage):
         # Overwrite обходит редьюсер и ставит канал в пустой список
-        return {"artifacts": Overwrite([]), "findings": Overwrite([])}
+        return {"artifacts": Overwrite([])}
     return {}
 
 
 def node_llm(state: State) -> dict:
-    # Подмешиваем накопленные находки в системный промпт
+    # Подмешиваем текст последнего отчёта — модель может вносить в него правки
     system = SYSTEM_PROMPT
-    if state.get("findings"):
-        findings_text = "\n".join(state["findings"])
-        system += f"\n\nСобранные находки:\n{findings_text}"
+    last_report = state.get("last_report")
+    if last_report:
+        markdown = str(last_report.get("markdown") or "")
+        if len(markdown) > REPORT_INJECT_LIMIT:
+            markdown = (
+                markdown[:REPORT_INJECT_LIMIT]
+                + "\n\n[Отчёт обрезан: полный текст — в аргументах save_report/send_report в истории]"
+            )
+        system += (
+            f"\n\nПоследний созданный отчёт ({last_report.get('filename', 'report')}):\n"
+            f"```markdown\n{markdown}\n```"
+        )
 
     messages: list[BaseMessage] = [SystemMessage(content=system), *state["messages"]]
     response = llm_with_tools.invoke(messages)
