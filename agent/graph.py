@@ -12,7 +12,6 @@ import base64
 import datetime
 import httpx
 import json
-import operator
 import re
 from typing import Annotated, Any, Sequence, TypedDict
 from typing_extensions import TypedDict
@@ -21,7 +20,8 @@ from langchain_core.messages import AIMessage, BaseMessage, SystemMessage, ToolM
 from langchain_core.tools import tool
 from langchain.chat_models import init_chat_model
 from langgraph.graph import StateGraph, START, END
-from langgraph.prebuilt import ToolNode, ToolRuntime
+from langgraph.graph.message import add_messages
+from langgraph.prebuilt import ToolNode, ToolRuntime, tools_condition
 from langgraph.types import Command
 
 from mcp_client import get_mcp_tools
@@ -211,7 +211,7 @@ llm_with_tools = llm.bind_tools(tools) if tools else llm
 
 # 3. Схема состояния (Строгий контракт для agent-chat-ui и PostgreSQL чекпоинтов)
 class State(TypedDict):
-    messages: Annotated[Sequence[BaseMessage], operator.add]
+    messages: Annotated[Sequence[BaseMessage], add_messages]
     reports: Annotated[list, _merge_reports]  # data-URL отчётов текущего запуска
     callback_url: str  # эндпоинт доставки отчёта, задаётся input запуска (вебхук)
 
@@ -236,14 +236,6 @@ def node_llm(state: State) -> dict:
     return update
 
 
-def should_continue(state: State) -> str:
-    """Роутер: в ответе LLM есть tool_calls — к узлу tools, иначе — завершение."""
-    last_message = state["messages"][-1]
-    if getattr(last_message, "tool_calls", None):
-        return "tools"
-    return END
-
-
 # 6. Сборка графа (Декларативное описание конечного автомата)
 def build_graph():
     builder = StateGraph(State)
@@ -258,7 +250,7 @@ def build_graph():
     builder.add_edge(START, "preprocess")
     builder.add_edge("preprocess", "llm")
     if tools:
-        builder.add_conditional_edges("llm", should_continue, ["tools", END])
+        builder.add_conditional_edges("llm", tools_condition, ["tools", END])
         builder.add_edge("tools", "llm")  # результат инструмента — обратно к LLM
     else:
         builder.add_edge("llm", END)

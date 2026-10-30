@@ -4,6 +4,10 @@
     "agent": {
       "path": "./custom_agent/graph.py:graph",
       "description": "Агент расследования аномалий Логикора"
+    },
+    "agent2": {
+      "path": "./custom_agent/agent2.py:graph",
+      "description": "A/B: тот же агент, граф на create_agent + middleware"
     }
   }
 }
