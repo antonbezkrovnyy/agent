@@ -3,7 +3,7 @@
   "graphs": {
     "agent": {
       "path": "./custom_agent/graph.py:graph",
-      "description": "Мой кастомный Simple Graph из Module 1"
+      "description": "Агент расследования аномалий Логикора"
     }
   }
 }

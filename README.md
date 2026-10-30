@@ -89,7 +89,7 @@ docker compose up -d
 ```
 ├── docker-compose.yml   # стопка сервисов
 ├── aegra.json           # декларация графов agra
-├── agent/               # агент: graph.py, mcp_client.py, config.py, register.py
+├── agent/               # агент: graph.py, mcp_client.py, config.py
 ├── logicore-mcp/        # MCP-сервер (Mars API)
 ├── anomaly-relay/       # аномали-вебхук → agra
 └── ui/                  # agent-chat-ui
