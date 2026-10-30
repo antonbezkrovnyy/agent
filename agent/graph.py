@@ -1,23 +1,28 @@
-"""Граф агента: интент → скаут (параллельно) → агент → критик.
+"""Граф агента: интент + скаут параллельно, затем агент по интенту, критик.
 
-Структура:
-- entry — сбрасывает артефакты и служебные каналы при новом сообщении;
-- intent и scout — параллельно: интент классифицирует сообщение
-  (simple/complex/continuation), скаут делает 1–2 быстрых запроса в MCP
-  и кладёт короткий ориентир в диалог;
-- dispatch — точка слияния: агенты пускаются только когда готовы обе
-  ветки (счётчик ready в стейте; первая прибывшая ветка уходит в
-  терминальный no-op wait), затем агент выбирается по интенту и
-  контексту стейта (continuation: есть last_report → репортёр, есть
-  findings → инвестигейтор, иначе чат);
-- chat / investigator / reporter — агенты со своими промптами и тулзами
-  (промпты — prompts/*.md, тулзы — tools.py, ноды — agents.py);
+Структура (параллельные ветки — по паттерну state-reducers из
+LangChain Academy module-2):
+- entry — сбрасывает служебные каналы текущего run'а и пишет в диалог
+  служебное сообщение;
+- intent и scout — параллельные ветки: интент классифицирует сообщение
+  (simple/complex/continuation) и кладёт результат в канал intent;
+  скаут делает 1–2 быстрых запроса в MCP и кладёт короткий ориентир в
+  канал scout_note. Ветки не сходятся в ноде-барьере: каждая пишет в
+  свои каналы, а дальше идёт та, что по построению заканчивается
+  последней, — скаут (у него tool-цикл, у интента один вызов LLM);
+- scout → выбор агента по интенту и контексту стейта (continuation:
+  есть last_report → репортёр, есть findings → инвестигейтор, иначе чат);
+- chat / investigator / reporter — агенты со своими промптами
+  (prompts/*.md) и тулзами (tools.py); tool-цикл каждого — в приватном
+  канале стейта, в диалог попадают только служебные сообщения и
+  финальный ответ;
 - критик — после инвестигейтора (улики) и после репортёра (отчёт);
-  вердикт rework отправляет назад на доработку, не больше max_rework раз
-  за run (settings.critic_enabled отключает его полностью).
+  rework_data возвращает на добор данных, rework_report — на доработку
+  отчёта; не больше max_rework раз за run
+  (settings.critic_enabled отключает его полностью).
 
-findings и last_report живут весь тред — нужны для правок отчёта
-и продолжения расследования.
+findings, last_report и inv_summary живут весь тред — нужны для правок
+отчёта и продолжения расследования.
 """
 
 from langchain_core.messages import HumanMessage
@@ -26,6 +31,9 @@ from langgraph.prebuilt import ToolNode
 from langgraph.types import Overwrite
 
 from agents import (
+    SVC_START,
+    _intent_heuristic,
+    _service,
     node_chat,
     node_critic_evidence,
     node_critic_report,
@@ -35,7 +43,7 @@ from agents import (
     node_scout,
 )
 from config import Settings
-from state import State
+from state import INV_MSGS, REP_MSGS, SCOUT_MSGS, State
 from tools import investigator_tools, reporter_tools, scout_tools
 
 settings = Settings()
@@ -44,62 +52,42 @@ settings = Settings()
 # ── Ноды ─────────────────────────────────────────────────────────
 
 def entry(state: State) -> dict:
-    """Сбрасывает артефакты и служебные каналы при новом сообщении.
+    """Сбрасывает служебные каналы и артефакты при новом сообщении.
 
-    Overwrite обходит редьюсер и ставит канал в пустой список —
-    файлы прошлых run'ов не прилепляются к новому ответу.
+    Overwrite обходит редьюсер — артефакты прошлых run'ов не
+    прилепляются к новому ответу, приватные tool-циклы чистятся.
     """
     if state["messages"] and isinstance(state["messages"][-1], HumanMessage):
         return {
+            "messages": [_service(SVC_START)],
             "artifacts": Overwrite([]),
+            "scout_msgs": Overwrite([]),
+            "inv_msgs": Overwrite([]),
+            "rep_msgs": Overwrite([]),
             "intent": {},
+            "scout_note": "",
             "critic": {},
             "rework": 0,
-            # Overwrite обходит редьюсер operator.add и сбрасывает счётчик
-            "ready": Overwrite(0),
+            "intro": 0,
         }
-    return {}
-
-
-def dispatch(state: State) -> dict:
-    """Точка слияния параллельных веток: ждёт, пока готовы и intent, и scout."""
-    return {}
-
-
-def wait(state: State) -> dict:
-    """Мертвая ветка: одна из параллельных веток успела раньше,
-    вторая ещё в работе — ждём её на dispatch."""
     return {}
 
 
 # ── Маршрутизация ────────────────────────────────────────────────
 
-def _agent_done(state: State) -> bool:
-    """Агент закончил ход: последнее сообщение — ответ без tool_calls."""
-    messages = state.get("messages") or []
-    return bool(messages) and not getattr(messages[-1], "tool_calls", None)
+def _has_tool_calls(state: State, work_key: str) -> bool:
+    """Агент крутит tool-цикл: последнее в его приватном канале —
+    ответ с tool_calls (ToolMessage и пустой канал — цикл закончен)."""
+    last = (state.get(work_key) or [None])[-1]
+    return bool(getattr(last, "tool_calls", None))
 
 
-def route_after_scout(state: State) -> str:
-    return "scout_tools" if not _agent_done(state) else "dispatch"
-
-
-def route_dispatch(state: State) -> str:
-    """Агенты пускаются, когда готовы обе ветки (intent + scout).
-
-    Нода с двумя входящими ребрами активизируется по первому прибытию
-    обновления, а не по последнему (граф-api: «a node becomes active
-    when it receives a new message on any of its incoming edges»),
-    поэтому пока ready < 2 уводим в терминальный no-op wait.
-    """
-    if state.get("ready", 0) < 2:
-        return "wait"
-    return dispatch_agent(state)
-
-
-def dispatch_agent(state: State) -> str:
+def pick_agent(state: State) -> str:
     """Выбор агента: по интенту; continuation — по контексту стейта."""
-    label = (state.get("intent") or {}).get("label") or "simple"
+    label = (state.get("intent") or {}).get("label")
+    if not label:
+        # Редкая гонка: скаут завершился раньше интента — берём эвристику
+        label = _intent_heuristic(state)["label"]
     if label == "complex":
         return "investigator"
     if label == "continuation":
@@ -111,9 +99,15 @@ def dispatch_agent(state: State) -> str:
     return "chat"
 
 
+def route_after_scout(state: State) -> str:
+    if _has_tool_calls(state, SCOUT_MSGS):
+        return "scout_tools"
+    return pick_agent(state)
+
+
 def route_after_investigator(state: State) -> str:
-    if not _agent_done(state):
-        return "investigator_tools"
+    if _has_tool_calls(state, INV_MSGS):
+        return "inv_tools"
     if settings.critic_enabled:
         return "critic_evidence"
     return "reporter"
@@ -130,8 +124,8 @@ def route_after_critic_evidence(state: State) -> str:
 
 
 def route_after_reporter(state: State) -> str:
-    if not _agent_done(state):
-        return "reporter_tools"
+    if _has_tool_calls(state, REP_MSGS):
+        return "rep_tools"
     # Критик отчёта — только если репортёр реально отчёт создал
     if settings.critic_enabled and state.get("artifacts"):
         return "critic_report"
@@ -140,11 +134,12 @@ def route_after_reporter(state: State) -> str:
 
 def route_after_critic_report(state: State) -> str:
     critic = state.get("critic") or {}
+    verdict = critic.get("verdict")
     if (
-        critic.get("verdict") == "rework_report"
+        verdict in ("rework_report", "rework_data")
         and state.get("rework", 0) <= settings.max_rework
     ):
-        return "reporter"
+        return "reporter" if verdict == "rework_report" else "investigator"
     return END
 
 
@@ -158,14 +153,12 @@ def build_graph(checkpointer=None):
     builder.add_node("entry", entry)
     builder.add_node("intent", node_intent)
     builder.add_node("scout", node_scout)
-    builder.add_node("scout_tools", ToolNode(scout_tools))
-    builder.add_node("dispatch", dispatch)
-    builder.add_node("wait", wait)
+    builder.add_node("scout_tools", ToolNode(scout_tools, messages_key=SCOUT_MSGS))
     builder.add_node("chat", node_chat)
     builder.add_node("investigator", node_investigator)
-    builder.add_node("investigator_tools", ToolNode(investigator_tools))
+    builder.add_node("inv_tools", ToolNode(investigator_tools, messages_key=INV_MSGS))
     builder.add_node("reporter", node_reporter)
-    builder.add_node("reporter_tools", ToolNode(reporter_tools))
+    builder.add_node("rep_tools", ToolNode(reporter_tools, messages_key=REP_MSGS))
     builder.add_node("critic_evidence", node_critic_evidence)
     builder.add_node("critic_report", node_critic_report)
 
@@ -173,30 +166,40 @@ def build_graph(checkpointer=None):
     # Параллельные ветки: интент и скаут стартуют одновременно
     builder.add_edge("entry", "intent")
     builder.add_edge("entry", "scout")
-    builder.add_edge("intent", "dispatch")
-    builder.add_conditional_edges("scout", route_after_scout, ["scout_tools", "dispatch"])
-    builder.add_edge("scout_tools", "scout")
-
+    # Интент кладёт результат в канал intent и закрывается;
+    # дальше идёт скаут (по построению — последняя ветка)
+    builder.add_edge("intent", END)
     builder.add_conditional_edges(
-        "dispatch", route_dispatch, ["chat", "investigator", "reporter", "wait"],
+        "scout",
+        route_after_scout,
+        ["scout_tools", "chat", "investigator", "reporter"],
     )
+    builder.add_edge("scout_tools", "scout")
     builder.add_edge("chat", END)
 
     builder.add_conditional_edges(
         "investigator",
         route_after_investigator,
-        ["investigator_tools", "critic_evidence", "reporter"],
+        ["inv_tools", "critic_evidence", "reporter"],
     )
-    builder.add_edge("investigator_tools", "investigator")
+    builder.add_edge("inv_tools", "investigator")
     builder.add_conditional_edges(
-        "critic_evidence", route_after_critic_evidence, ["investigator", "reporter"],
+        "critic_evidence",
+        route_after_critic_evidence,
+        ["investigator", "reporter"],
     )
 
     builder.add_conditional_edges(
-        "reporter", route_after_reporter, ["reporter_tools", "critic_report", END],
+        "reporter",
+        route_after_reporter,
+        ["rep_tools", "critic_report", END],
     )
-    builder.add_edge("reporter_tools", "reporter")
-    builder.add_conditional_edges("critic_report", route_after_critic_report, ["reporter", END])
+    builder.add_edge("rep_tools", "reporter")
+    builder.add_conditional_edges(
+        "critic_report",
+        route_after_critic_report,
+        ["reporter", "investigator", END],
+    )
 
     return builder.compile(checkpointer=checkpointer)
 

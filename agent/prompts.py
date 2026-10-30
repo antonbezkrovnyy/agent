@@ -27,6 +27,19 @@ def system_prompt(*parts: str) -> str:
     return "\n\n".join(part for part in parts if part)
 
 
+def scout_block(state: dict) -> str:
+    """Быстрая проверка скаута — контекст для следующих агентов."""
+    note = (state.get("scout_note") or "").strip()
+    if not note:
+        return ""
+    return f"Быстрая проверка скаута: {note}"
+
+
+def inv_summary_block(inv_summary: str) -> str:
+    """Резюме инвестигейтора — для репортёра и критика."""
+    return f"Резюме инвестигейтора:\n{inv_summary.strip()}"
+
+
 def last_report_block(last_report: dict) -> str:
     """Блок «Последний созданный отчёт» для промпта репортёра."""
     markdown = str(last_report.get("markdown") or "")

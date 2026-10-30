@@ -1,13 +1,22 @@
 """Локальные тесты многоагентного графа: фейки LLM и MCP, реальный ToolNode.
 
 Покрыто:
-1. simple → скаут (параллельно) + чат-агент, без тулз и отчётов
+1. simple → скаут (параллельно с интентом) + чат-агент; в диалоге —
+   только служебные сообщения и финальный ответ, tool-цикл скаута —
+   в приватном канале
 2. complex → инвестигейтор (log_finding ×2) → критик улик → репортёр
    (send_report в реальный локальный callback) → критик отчёта
 3. continuation с last_report → репортёр правит отчёт, findings живут
-4. критик отчёта возвращает на доработку (лимит 1 итерация)
+4. критик отчёта возвращает на доработку: репортёр переписывает свой
+   ответ (в диалоге остаётся один финальный), артефактов — две версии
 5. критик выключен — инвестигейтор сразу в репортёр
 6. сбой структурированного интента → JSON-fallback на обычной модели
+7. критик отчёта: rework_data → задача уходит инвестигейтору доискивать,
+   затем репортёр переписывает отчёт
+
+Каждый сценарий проверяет, ЧТО ВИДИТ ПОЛЬЗОВАТЕЛЬ: в messages нет
+tool-сообщений и ответов с tool_calls, есть объединённое «интент +
+скаут» и служебные сообщения переходов, один финальный ответ за run.
 
 Фейк LLM возвращает ответы по ролям (system-промпт), а не по позиции в
 очереди — параллельные ветки (intent/scout) не гоняются за скриптом.
@@ -56,6 +65,7 @@ _mcp_stub = types.ModuleType("mcp_client")
 _mcp_stub.get_mcp_tools = lambda: [server_time, search_events, count_events]
 sys.modules["mcp_client"] = _mcp_stub
 
+import agents as agents_mod
 import graph as graph_mod
 import llm as llm_mod
 from llm import CriticEvidence, CriticReport, IntentDecision
@@ -124,9 +134,11 @@ class FakeStructured:
         self.results = list(results) if results else []
         self.error = error
         self.calls = 0
+        self.systems = []
 
     def invoke(self, messages):
         self.calls += 1
+        self.systems.append(messages[0].content)
         if self.error is not None:
             raise self.error
         return self.results.pop(0) if self.results else self.result
@@ -139,8 +151,17 @@ def patch(agent_llm, intent, crit_ev, crit_rep):
     llm_mod.critic_report_llm = crit_rep
 
 
-def contents(result):
+def texts(result):
     return [m.content if isinstance(m.content, str) else "" for m in result["messages"]]
+
+
+def assert_dialog_clean(result):
+    """В диалоге нет tool-chatter: только человек, сервис и финальные ответы."""
+    msgs = result["messages"]
+    assert not any(isinstance(m, ToolMessage) for m in msgs), \
+        f"ToolMessage в диалоге: {[m.name for m in msgs if isinstance(m, ToolMessage)]}"
+    assert not any(getattr(m, "tool_calls", None) for m in msgs), \
+        "ответ с tool_calls в диалоге"
 
 
 # ── Callback-сервер для send_report ──────────────────────────────
@@ -194,16 +215,24 @@ async def scenario_1_simple():
     assert result["intent"]["label"] == "simple"
     assert result["artifacts"] == []
 
-    texts = contents(result)
-    assert any("Скаут:" in t for t in texts), "ответ скаута не в диалоге"
-    assert "Привет! Я аналитик Логикора." in texts
-    assert texts.index("Скаут: время 12:00, аномалий нет.") < texts.index("Привет! Я аналитик Логикора."), \
-        "скаут должен завершиться до чат-агента (барьер dispatch)"
-    assert isinstance(result["messages"][2], ToolMessage), "tool-ответ server_time не в диалоге"
-    assert not any("save_report" in t or "send_report" in t for t in texts)
+    # В диалоге ровно: человек, «определяем интент», «интент + скаут», ответ чата
+    assert_dialog_clean(result)
+    t = texts(result)
+    assert len(t) == 4, f"ожидаются 4 видимых сообщения, было {len(t)}: {t}"
+    assert t[0] == "Привет, что ты умеешь?"
+    assert t[1] == agents_mod.SVC_START
+    assert t[2].startswith("Интент: simple") and "Скаут: время 12:00, аномалий нет." in t[2], t[2]
+    assert t[3] == "Привет! Я аналитик Логикора."
 
+    # Ответ скаута не в диалоге, а в приватном канале и scout_note
+    assert result["scout_note"] == "Скаут: время 12:00, аномалий нет."
+    assert len(result["scout_msgs"]) == 2 and isinstance(result["scout_msgs"][1], ToolMessage), \
+        "tool-цикл скаута должен быть в приватном канале"
+
+    # Контекст скаута подмешан в промпт чат-агента
     assert "Ты — чат-агент" in agent.systems[-1]
-    assert any("Ты — скаут" in s for s in agent.systems)
+    assert any("Быстрая проверка скаута:" in s for s in agent.systems)
+    assert not any("save_report" in x or "send_report" in x for x in t)
 
 
 async def scenario_2_3_report_and_revision():
@@ -244,8 +273,9 @@ async def scenario_2_3_report_and_revision():
     assert len(result1["findings"]) == 2, f"findings: {result1['findings']}"
     assert len(result1["artifacts"]) == 1 and result1["artifacts"][0].startswith("data:text/markdown")
     assert result1["last_report"]["title"] == "Расследование host-1"
+    assert result1["inv_summary"] == "Резюме: скачок CPU на host-1 в 11:58, 17 событий за час."
 
-    sent = [m for m in result1["messages"] if isinstance(m, ToolMessage) and m.name == "send_report"]
+    sent = [m for m in result1["rep_msgs"] if isinstance(m, ToolMessage) and m.name == "send_report"]
     assert sent and '"ok": true' in sent[0].content, f"send_report: {sent and sent[0].content}"
 
     assert len(POSTS) == 1, f"callback должен получить ровно 1 POST, было {len(POSTS)}"
@@ -255,6 +285,27 @@ async def scenario_2_3_report_and_revision():
     final = result1["messages"][-1]
     assert getattr(final, "artifacts", None) and len(final.artifacts) == 1, \
         "artifacts не переехали на финальное сообщение"
+
+    # Видимые сообщения: человек, старт, «интент + скаут», переход к критику, финал
+    assert_dialog_clean(result1)
+    t = texts(result1)
+    assert len(t) == 5, f"ожидаются 5 видимых сообщений, было {len(t)}: {t}"
+    assert t[1] == agents_mod.SVC_START
+    assert t[2].startswith("Интент: complex") and "Скаут: вижу скачок CPU" in t[2]
+    assert t[3] == agents_mod.SVC_EVIDENCE
+    assert t[4] == "Отчёт доставлен."
+
+    # Критик видит ВСЕ сообщения пользователя, интент и роль ИБ/ИТ
+    ev_sys = crit_ev1.systems[0]
+    assert "Расследуй аномалию CPU на host-1" in ev_sys, "у критика нет запроса пользователя"
+    assert "Интент текущего запроса: complex" in ev_sys, "интент не передан критику"
+    assert "ИБ-" in ev_sys, "критик не в роли ИБ/ИТ-специалиста"
+    assert "Резюме инвестигейтора" in ev_sys, "резюме не передано критику"
+    assert "Последний созданный отчёт" in crit_rep1.systems[0], "отчёт не передан критику"
+
+    # Репортёр видит резюме инвестигейтора и скаута в промпте
+    assert any("Резюме инвестигейтора" in s for s in agent1.systems)
+    assert any("Быстрая проверка скаута" in s for s in agent1.systems)
 
     # run 2 — continuation: правка отчёта тем же тредом
     agent2 = FakeAgent({
@@ -286,6 +337,14 @@ async def scenario_2_3_report_and_revision():
     assert len(result2["artifacts"]) == 1, "artifacts нового run'а должны быть только от save_report"
     assert len(result2["findings"]) == 2, "findings прошлого run'а должны жить весь тред"
 
+    assert_dialog_clean(result2)
+    t = texts(result2)
+    assert len(t) == 9, f"ожидаются 5 + 4 видимых сообщения, было {len(t)}: {t}"
+    assert "Отчёт доставлен." in t, "финальный ответ прошлого run'а должен остаться в истории"
+    assert t[6] == agents_mod.SVC_START
+    assert t[7].startswith("Интент: continuation") and "Скаут: событий по-прежнему 17." in t[7]
+    assert t[-1] == "Готово, короткий отчёт сохранён."
+
 
 async def scenario_4_rework():
     agent = FakeAgent({
@@ -295,7 +354,7 @@ async def scenario_4_rework():
         ],
         "Ты — инвестигейтор": [
             AI(calls=[tc("search_events", {"query": "host-1"})]),
-            AI(calls=[tc("log_finding", {"finding": "Скачок CPU в 11:58", "next_action": "делаю вывод"})]),
+            AI(calls=[tc("log_finding", {"finding": "Скачок CPU на 11:58", "next_action": "делаю вывод"})]),
             AI("Резюме: скачок CPU в 11:58."),
         ],
         "Ты — репортёр": [
@@ -325,6 +384,19 @@ async def scenario_4_rework():
     assert len(result["artifacts"]) == 2, "две версии отчёта (оригинал + доработка)"
     assert any("Критик вернул работу на доработку" in s for s in agent.systems), \
         "замечания критика не подмешаны в промпт при доработке"
+
+    # В диалоге ОДИН ответ репортёра: доработанный стоит в хвосте,
+    # оригинал удалён
+    assert_dialog_clean(result)
+    t = texts(result)
+    assert len(t) == 7, f"ожидаются 7 видимых сообщений, было {len(t)}: {t}"
+    finals = [m for m in result["messages"] if getattr(m, "agent_name", None) == "reporter"]
+    assert len(finals) == 1 and finals[0].content == "Отчёт доработан.", \
+        "в диалоге должен остаться только доработанный отчёт"
+    assert result["messages"][-1] is finals[0], "финальный ответ должен быть последним"
+    assert "Отчёт готов." not in t, "оригинальный ответ не удалён"
+    assert agents_mod.SVC_REWORK_REPORT in t, "нет служебного сообщения о доработке"
+    assert len(finals[0].artifacts) == 2, "финальный ответ должен нести обе версии отчёта"
 
 
 async def scenario_5_critic_disabled():
@@ -361,6 +433,13 @@ async def scenario_5_critic_disabled():
     assert len(result["artifacts"]) == 1
     assert result["critic"] == {}, "критик не должен писать в стейт"
 
+    assert_dialog_clean(result)
+    t = texts(result)
+    assert len(t) == 4, f"ожидаются 4 видимых сообщения, было {len(t)}: {t}"
+    assert agents_mod.SVC_EVIDENCE not in t and agents_mod.SVC_REPORT not in t, \
+        "без критика не должно быть сообщений о передаче ему"
+    assert t[-1] == "Готово."
+
 
 async def scenario_6_intent_fallback():
     agent = FakeAgent({
@@ -396,18 +475,93 @@ async def scenario_6_intent_fallback():
     assert agent.calls == 6, f"ожидается 6 LLM-вызовов, было {agent.calls}"
     assert len(result["artifacts"]) == 1
 
+    assert_dialog_clean(result)
+    t = texts(result)
+    assert len(t) == 5, f"ожидаются 5 видимых сообщений, было {len(t)}: {t}"
+    assert t[2].startswith("Интент: complex"), f"combined: {t[2]}"
+    assert t[-1] == "Готово."
+
+
+async def scenario_7_rework_data():
+    """Критик отчёта: не хватает данных → инвестигейтор доискивает →
+    репортёр переписывает отчёт."""
+    agent = FakeAgent({
+        "Ты — скаут": [
+            AI(calls=[tc("count_events", {"window": "1h"})]),
+            AI(calls=[tc("log_finding", {"finding": "17 событий за час, пик в 11:58", "next_action": "расследовать"})]),
+            AI("Скаут: пик событий в 11:58, стоит копать."),
+        ],
+        "Ты — инвестигейтор": [
+            AI(calls=[tc("search_events", {"query": "host-1"})]),
+            AI(calls=[tc("log_finding", {"finding": "Скачок CPU на host-1 в 11:58", "next_action": "делаю вывод"})]),
+            AI("Резюме: скачок CPU на host-1 в 11:58."),
+            AI(calls=[tc("search_events", {"query": "host-1 сеть"})]),
+            AI("Резюме: скачок CPU на host-1 в 11:58; сеть в норме, источник — процесс."),
+        ],
+        "Ты — репортёр": [
+            AI(calls=[tc("save_report", {"title": "host-1", "markdown": "# Отчёт\nСкачок CPU."})]),
+            AI("Отчёт готов."),
+            AI(calls=[tc("save_report", {"title": "host-1", "markdown": "# Отчёт\nСкачок CPU. Источник — процесс."})]),
+            AI("Отчёт дополнен и готов."),
+        ],
+    })
+    intent = FakeStructured(IntentDecision(intent="complex", rationale="аномалия"))
+    crit_ev = FakeStructured(CriticEvidence(verdict="ok", feedback=""))
+    crit_rep = FakeStructured(results=[
+        CriticReport(verdict="rework_data", feedback="Не хватает данных о сети: допроси события по сети host-1"),
+        CriticReport(verdict="ok", feedback=""),
+    ])
+    patch(agent, intent, crit_ev, crit_rep)
+
+    g = graph_mod.build_graph(InMemorySaver())
+    result = await g.ainvoke(
+        {"messages": [HumanMessage(content="Расследуй аномалию на host-1")]},
+        {"configurable": {"thread_id": "t-rework-data"}},
+    )
+
+    # скаут×3 + инвестигейтор×3 + репортёр×2 + инвестигейтор×2 + репортёр×2
+    assert agent.calls == 12, f"ожидается 12 LLM-вызовов, было {agent.calls}"
+    assert crit_ev.calls == 2, "критик улик должен сработать дважды"
+    assert crit_rep.calls == 2
+    assert result["rework"] == 1, f"rework: {result['rework']}"
+    assert len(result["findings"]) == 2, f"findings: {result['findings']}"
+    assert len(result["artifacts"]) == 2, "две версии отчёта"
+    assert result["inv_summary"] == "Резюме: скачок CPU на host-1 в 11:58; сеть в норме, источник — процесс.", \
+        "резюме инвестигейтора не обновлено после добора"
+    assert any("Критик вернул работу на доработку" in s for s in agent.systems), \
+        "замечания критика не подмешаны в промпт инвестигейтора"
+
+    # Критик отчёта видел интент, все запросы пользователя и роль ИБ/ИТ
+    rep_sys = crit_rep.systems[0]
+    assert "Интент текущего запроса: complex" in rep_sys
+    assert "Расследуй аномалию на host-1" in rep_sys
+    assert "ИБ-" in rep_sys
+
+    # В диалоге один финальный ответ репортёра в хвосте, без tool-chatter
+    assert_dialog_clean(result)
+    t = texts(result)
+    assert len(t) == 8, f"ожидаются 8 видимых сообщений, было {len(t)}: {t}"
+    finals = [m for m in result["messages"] if getattr(m, "agent_name", None) == "reporter"]
+    assert len(finals) == 1 and finals[0].content == "Отчёт дополнен и готов."
+    assert result["messages"][-1] is finals[0], "финальный ответ должен быть последним"
+    assert "Отчёт готов." not in t, "оригинальный ответ не удалён"
+    assert agents_mod.SVC_REWORK_DATA in t, "нет сообщения об отправке инвестигейтору"
+    assert len(finals[0].artifacts) == 2
+
 
 async def main():
     await scenario_1_simple()
-    print("OK 1: simple → скаут + чат")
+    print("OK 1: simple → скаут + чат, диалог чистый")
     await scenario_2_3_report_and_revision()
     print("OK 2/3: complex → отчёт → правка (continuation)")
     await scenario_4_rework()
-    print("OK 4: критик → доработка отчёта (лимит 1)")
+    print("OK 4: критик → доработка отчёта (один финальный в диалоге)")
     await scenario_5_critic_disabled()
     print("OK 5: критик выключен")
     await scenario_6_intent_fallback()
     print("OK 6: fallback интента (JSON)")
+    await scenario_7_rework_data()
+    print("OK 7: критик отчёта → rework_data → инвестигейтор → репортёр")
     print("ALL PASS")
 
 

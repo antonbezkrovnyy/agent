@@ -4,6 +4,10 @@
 - log_finding / list_findings / get_finding — журнал расследования.
 - save_report / send_report — отчёты (файл в чате и callback-доставка).
 
+ToolMessage у тулз, возвращающих Command, уходит в приватный tool-цикл
+агента (scout_msgs / inv_msgs / rep_msgs), а не в общий диалог —
+поэтому log_finding собирается под каждого агента отдельно.
+
 Перечни тулз на каждого агента — в конце модуля.
 """
 
@@ -18,34 +22,41 @@ from langgraph.types import Command
 
 from mcp_client import get_mcp_tools
 from reporting import build_report, post_report
+from state import INV_MSGS, REP_MSGS, SCOUT_MSGS
 
 mcp_tools = get_mcp_tools()
 
 
-@tool
-def log_finding(
-    finding: str,
-    next_action: str,
-    runtime: ToolRuntime = None,
-) -> Command:
-    """Зафиксировать результат анализа и следующий шаг.
-    ОБЯЗАТЕЛЬНО вызывай после каждого осмысленного запроса в MCP.
+def _make_log_finding(work_key: str):
+    """log_finding для конкретного агента: ToolMessage — в его цикл."""
 
-    Аргументы:
-    - finding: что нашёл (1–2 предложения)
-    - next_action: что будешь делать дальше
-    """
-    ts = datetime.datetime.now(datetime.UTC).strftime("%H:%M:%S")
-    note = f"[{ts}] {finding} → {next_action}"
-    # ToolMessage обязателен: без ответа на tool_call ToolNode поднимет ValueError
-    return Command(update={
-        "findings": [note],
-        "messages": [ToolMessage(
-            content=note,
-            tool_call_id=runtime.tool_call_id if runtime else "",
-            name="log_finding",
-        )],
-    })
+    @tool
+    def log_finding(
+        finding: str,
+        next_action: str,
+        runtime: ToolRuntime = None,
+    ) -> Command:
+        """Зафиксировать результат анализа и следующий шаг.
+        Вызывай после каждого осмысленного запроса, если нашлось что-то,
+        что пригодится дальше.
+
+        Аргументы:
+        - finding: что нашёл (1–2 предложения)
+        - next_action: что будешь делать дальше
+        """
+        ts = datetime.datetime.now(datetime.UTC).strftime("%H:%M:%S")
+        note = f"[{ts}] {finding} → {next_action}"
+        # ToolMessage обязателен: без ответа на tool_call ToolNode поднимет ValueError
+        return Command(update={
+            "findings": [note],
+            work_key: [ToolMessage(
+                content=note,
+                tool_call_id=runtime.tool_call_id if runtime else "",
+                name="log_finding",
+            )],
+        })
+
+    return log_finding
 
 
 @tool
@@ -63,7 +74,7 @@ def save_report(
     fname, url, nbytes = build_report(title, markdown, filename)
     payload = json.dumps({"ok": True, "filename": fname, "bytes": nbytes}, ensure_ascii=False)
     return Command(update={
-        "messages": [ToolMessage(
+        REP_MSGS: [ToolMessage(
             content=payload,
             tool_call_id=runtime.tool_call_id if runtime else "",
             name="save_report",
@@ -123,7 +134,7 @@ async def send_report(
             result["error"] = f"POST не удался: {type(exc).__name__}: {exc}"
 
     update: dict = {
-        "messages": [ToolMessage(
+        REP_MSGS: [ToolMessage(
             content=json.dumps(result, ensure_ascii=False),
             tool_call_id=runtime.tool_call_id if runtime else "",
             name="send_report",
@@ -162,10 +173,14 @@ def get_finding(index: int, runtime: ToolRuntime = None) -> str:
 
 
 # ── Тулзы на агента ──────────────────────────────────────────────
-# У скаута — только MCP: он не фиксирует findings и не пишет отчёты
-scout_tools = list(mcp_tools or [])
+# Скаут — MCP + журнал: увиденную улику подхватит следующая сторона
+scout_tools = list(mcp_tools or []) + [_make_log_finding(SCOUT_MSGS)]
 # Инвестигейтор — MCP + журнал расследования
-investigator_tools = list(mcp_tools or []) + [log_finding, list_findings, get_finding]
+investigator_tools = list(mcp_tools or []) + [
+    _make_log_finding(INV_MSGS),
+    list_findings,
+    get_finding,
+]
 # Репортёр — отчёты и чтение журнала
 reporter_tools = [save_report, send_report, list_findings, get_finding]
 # Чат-агент — без тулз

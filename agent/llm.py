@@ -50,10 +50,13 @@ class CriticEvidence(BaseModel):
 class CriticReport(BaseModel):
     """Вердикт критика по отчёту."""
 
-    verdict: Literal["ok", "rework_report"] = Field(
-        description="ok — отчёт готов; rework_report — отправить на доработку"
+    verdict: Literal["ok", "rework_report", "rework_data"] = Field(
+        description=(
+            "ok — отчёт готов; rework_report — править сам отчёт; "
+            "rework_data — данных не хватает, доискать у инвестигейтора"
+        )
     )
-    feedback: str = Field(description="Что исправить; пусто при ok")
+    feedback: str = Field(description="Что исправить или доискать; пусто при ok")
 
 
 intent_llm = llm.with_structured_output(IntentDecision, method="function_calling")
