@@ -99,12 +99,14 @@ class FakeAgent(FakeMessagesListChatModel):
     by_role: dict = {}
     calls: int = 0
     systems: list = []
+    convos: list = []
 
     def __init__(self, by_role: dict):
         super().__init__(responses=[AIMessage(content="")])
         self.by_role = {role: list(queue) for role, queue in by_role.items()}
         self.calls = 0
         self.systems = []
+        self.convos = []
 
     def bind_tools(self, tools, **kwargs):
         return self
@@ -120,6 +122,7 @@ class FakeAgent(FakeMessagesListChatModel):
     def _generate(self, messages, stop=None, run_manager=None, **kwargs):
         self.calls += 1
         self.systems.append(messages[0].content)
+        self.convos.append(list(messages))
         return ChatResult(generations=[ChatGeneration(message=self._next(messages[0].content))])
 
     async def _agenerate(self, messages, stop=None, run_manager=None, **kwargs):
@@ -162,6 +165,16 @@ def assert_dialog_clean(result):
         f"ToolMessage в диалоге: {[m.name for m in msgs if isinstance(m, ToolMessage)]}"
     assert not any(getattr(m, "tool_calls", None) for m in msgs), \
         "ответ с tool_calls в диалоге"
+
+
+def assert_no_service_in_convo(agent):
+    """В модельном разговоре агента — только пользователь и ответы агентов:
+    служебные и объединённые сообщения (без agent_name) туда не попадают —
+    в проде они сбивали провайдер: модель повторяла их вместо работы."""
+    for convo in agent.convos:
+        for m in convo[1:]:
+            if isinstance(m, AIMessage) and not m.tool_calls and not getattr(m, "agent_name", None):
+                raise AssertionError(f"служебное сообщение в промпте агента: {m.content[:80]!r}")
 
 
 # ── Callback-сервер для send_report ──────────────────────────────
@@ -217,6 +230,7 @@ async def scenario_1_simple():
 
     # В диалоге ровно: человек, «определяем интент», «интент + скаут», ответ чата
     assert_dialog_clean(result)
+    assert_no_service_in_convo(agent)
     t = texts(result)
     assert len(t) == 4, f"ожидаются 4 видимых сообщения, было {len(t)}: {t}"
     assert t[0] == "Привет, что ты умеешь?"
@@ -288,6 +302,7 @@ async def scenario_2_3_report_and_revision():
 
     # Видимые сообщения: человек, старт, «интент + скаут», переход к критику, финал
     assert_dialog_clean(result1)
+    assert_no_service_in_convo(agent1)
     t = texts(result1)
     assert len(t) == 5, f"ожидаются 5 видимых сообщений, было {len(t)}: {t}"
     assert t[1] == agents_mod.SVC_START
@@ -338,6 +353,7 @@ async def scenario_2_3_report_and_revision():
     assert len(result2["findings"]) == 2, "findings прошлого run'а должны жить весь тред"
 
     assert_dialog_clean(result2)
+    assert_no_service_in_convo(agent2)
     t = texts(result2)
     assert len(t) == 9, f"ожидаются 5 + 4 видимых сообщения, было {len(t)}: {t}"
     assert "Отчёт доставлен." in t, "финальный ответ прошлого run'а должен остаться в истории"
@@ -388,6 +404,7 @@ async def scenario_4_rework():
     # В диалоге ОДИН ответ репортёра: доработанный стоит в хвосте,
     # оригинал удалён
     assert_dialog_clean(result)
+    assert_no_service_in_convo(agent)
     t = texts(result)
     assert len(t) == 7, f"ожидаются 7 видимых сообщений, было {len(t)}: {t}"
     finals = [m for m in result["messages"] if getattr(m, "agent_name", None) == "reporter"]
@@ -539,6 +556,7 @@ async def scenario_7_rework_data():
 
     # В диалоге один финальный ответ репортёра в хвосте, без tool-chatter
     assert_dialog_clean(result)
+    assert_no_service_in_convo(agent)
     t = texts(result)
     assert len(t) == 8, f"ожидаются 8 видимых сообщений, было {len(t)}: {t}"
     finals = [m for m in result["messages"] if getattr(m, "agent_name", None) == "reporter"]

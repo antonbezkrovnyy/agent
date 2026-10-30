@@ -124,12 +124,24 @@ def _agent_final(state: State, response: AIMessage, agent: str) -> dict:
     return update
 
 
+def _agent_convo_messages(state: State) -> list[BaseMessage]:
+    """Диалог для модельного разговора: сообщения пользователя и ответы
+    агентов. Служебные сообщения (без agent_name) в разговор не попадают —
+    они для пользователя, а будучи хвостом разговора, сбивают провайдер:
+    модель «продолжает ход ассистента» и повторяет их в ответе (проверено
+    в проде: репортёр ответил дословно «Определяем интент...»)."""
+    return [
+        m for m in state["messages"]
+        if isinstance(m, HumanMessage) or getattr(m, "agent_name", None)
+    ]
+
+
 def _agent_invoke(state: State, prompt: str, tools: list, blocks: list[str], work_key: str) -> AIMessage:
     """Один ход LLM-агента: системный промпт + диалог + свой tool-цикл."""
     system = system_prompt(compose("base", prompt), *blocks)
     convo: list[BaseMessage] = [
         SystemMessage(content=system),
-        *state["messages"],
+        *_agent_convo_messages(state),
         *(state.get(work_key) or []),
     ]
     model = llm_mod.llm.bind_tools(tools) if tools else llm_mod.llm
@@ -167,7 +179,9 @@ def node_investigator(state: State) -> dict:
     response = _agent_invoke(state, "investigator", investigator_tools, blocks, INV_MSGS)
     if response.tool_calls:
         return {INV_MSGS: [response]}
-    update: dict = {INV_MSGS: [response], "inv_summary": response.content}
+    final = AIMessage(content=response.content)
+    final.agent_name = "investigator"
+    update: dict = {INV_MSGS: [final], "inv_summary": response.content}
     intro = _intro_messages(state)
     if intro:
         update["messages"] = intro
@@ -197,7 +211,7 @@ _INTENT_LABELS = ("simple", "complex", "continuation")
 
 def _intent_messages(state: State) -> list[BaseMessage]:
     system = system_prompt(compose("base", "intent"), intent_hint_block(state))
-    return [SystemMessage(content=system), *state["messages"]]
+    return [SystemMessage(content=system), *_agent_convo_messages(state)]
 
 
 def _last_human_text(state: State) -> str:
