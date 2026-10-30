@@ -55,35 +55,6 @@ docker compose up -d --build
 Менялся только .env — `docker compose up -d`: env_file читается при создании контейнера,
 restart новые переменные не подхватит.
 
-## Деплой на машину без сборки
-
-На Astra docker не умеет собирать: из docker-сети DNS на pypi/npm отдаёт только AAAA,
-IPv6-маршрута нет, pip и pnpm в сборке виснут. Поэтому: собрать на dev-ПК, перенести
-образы, поднять без --build.
-
-```
-# dev-ПК
-docker compose build
-docker tag my-agent-stack-aegra:latest logicore_agent-aegra:latest
-docker tag my-agent-stack-agent-chat-ui:latest logicore_agent-agent-chat-ui:latest
-docker tag my-agent-stack-logicore-mcp:latest logicore_agent-logicore-mcp:latest
-docker tag my-agent-stack-anomaly-relay:latest logicore_agent-anomaly-relay:latest
-docker save logicore_agent-aegra logicore_agent-agent-chat-ui \
-    logicore_agent-logicore-mcp logicore_agent-anomaly-relay -o images.tar
-```
-
-```
-# цель
-git clone https://gitlab.jet.su/aa.bezkrovnyy/logicore_agent.git /opt/logicore_agent
-cp .env /opt/logicore_agent/.env
-docker load -i images.tar
-cd /opt/logicore_agent
-docker compose up -d
-```
-
-Тег образа привязан к имени compose-проекта, оно равно имени каталога. Базовые образы
-(postgres, redis, phoenix) цель подтянет из Docker Hub сама.
-
 ## Структура
 
 ```
