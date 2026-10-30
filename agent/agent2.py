@@ -25,11 +25,16 @@ class ReportMiddleware(AgentMiddleware):
     """Отчёты: data-URL из artifact ToolMessage — в artifacts финального сообщения."""
 
     def after_model(self, state, runtime):
-        last = state["messages"][-1]
+        messages = state["messages"]
+        last = messages[-1] if messages else None
         if isinstance(last, AIMessage) and not getattr(last, "tool_calls", None):
-            pending = _pending_report_artifacts(state["messages"][:-1])
+            pending = _pending_report_artifacts(messages[:-1])
             if pending:
-                last.artifacts = list(pending)
+                # Явное обновление, а не in-place мутация: с Postgres-чекпоинтером
+                # и стримингом мутация объекта из входного state не доходит до
+                # чекпоинта (проверено на проде). add_messages заменит сообщение
+                # с тем же id — дублей не будет.
+                return {"messages": [last.model_copy(update={"artifacts": list(pending)})]}
         return None
 
 
