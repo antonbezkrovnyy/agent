@@ -21,3 +21,8 @@ class Settings(BaseSettings):
         default="",
         validation_alias=AliasChoices("LOGICORE_MCP_TOKEN", "LOGIQ_API_TOKEN"),
     )
+
+    # Критик: проверка улик после инвестигейтора и отчёта после репортёра
+    critic_enabled: bool = True
+    # Сколько раз за run критик может отправить на доработку (улики + отчёт, суммарно)
+    max_rework: int = 1
