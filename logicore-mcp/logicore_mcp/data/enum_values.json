@@ -1,0 +1,756 @@
+{
+ "action": [
+  {
+   "value": "access",
+   "description": "Получение доступа"
+  },
+  {
+   "value": "alert",
+   "description": "Получение предупреждения"
+  },
+  {
+   "value": "allow",
+   "description": "Разрешение"
+  },
+  {
+   "value": "apply",
+   "description": "Применение"
+  },
+  {
+   "value": "assign",
+   "description": "Сопоставление одного объекта с другим"
+  },
+  {
+   "value": "backup",
+   "description": "Резервное копирование"
+  },
+  {
+   "value": "bind",
+   "description": "Присвоение IP-адреса, добавление политики в группу"
+  },
+  {
+   "value": "call",
+   "description": "Звонок"
+  },
+  {
+   "value": "check",
+   "description": "Проверка"
+  },
+  {
+   "value": "clean",
+   "description": "Очистка"
+  },
+  {
+   "value": "close",
+   "description": "Закрытие"
+  },
+  {
+   "value": "configure",
+   "description": "Настройка"
+  },
+  {
+   "value": "connect",
+   "description": "Соединение"
+  },
+  {
+   "value": "copy",
+   "description": "Копирование"
+  },
+  {
+   "value": "create",
+   "description": "Создание"
+  },
+  {
+   "value": "decrypt",
+   "description": "Расшифровка"
+  },
+  {
+   "value": "deescalate",
+   "description": "Завершение сессии с повышенными привилегиями"
+  },
+  {
+   "value": "deliver",
+   "description": "Доставка"
+  },
+  {
+   "value": "deny",
+   "description": "Запрет"
+  },
+  {
+   "value": "detect",
+   "description": "Обнаружение"
+  },
+  {
+   "value": "disable",
+   "description": "Выключение"
+  },
+  {
+   "value": "disconnect",
+   "description": "Разъединение"
+  },
+  {
+   "value": "down",
+   "description": "Изменение состояния интерфейса на down"
+  },
+  {
+   "value": "download",
+   "description": "Скачивание"
+  },
+  {
+   "value": "enable",
+   "description": "Включение"
+  },
+  {
+   "value": "encrypt",
+   "description": "Зашифровка"
+  },
+  {
+   "value": "escalate",
+   "description": "Начало сессии с повышенными привилегиями"
+  },
+  {
+   "value": "exclude",
+   "description": "Исключение"
+  },
+  {
+   "value": "execute",
+   "description": "Выполнение"
+  },
+  {
+   "value": "extract",
+   "description": "Извлечение"
+  },
+  {
+   "value": "grant",
+   "description": "Предоставление права, привилегии"
+  },
+  {
+   "value": "info",
+   "description": "Информационное событие без выделенного действия"
+  },
+  {
+   "value": "initiate",
+   "description": "Инициирование"
+  },
+  {
+   "value": "inject",
+   "description": "Внедрение внешнего содержимого"
+  },
+  {
+   "value": "install",
+   "description": "Установка"
+  },
+  {
+   "value": "leak",
+   "description": "Утечка данных"
+  },
+  {
+   "value": "lock",
+   "description": "Блокирование"
+  },
+  {
+   "value": "login",
+   "description": "Вход в систему"
+  },
+  {
+   "value": "logout",
+   "description": "Выход из системы"
+  },
+  {
+   "value": "modify",
+   "description": "Изменение"
+  },
+  {
+   "value": "move",
+   "description": "Перемещение"
+  },
+  {
+   "value": "open",
+   "description": "Открывание"
+  },
+  {
+   "value": "print",
+   "description": "Распечатывание"
+  },
+  {
+   "value": "protect",
+   "description": "Защита"
+  },
+  {
+   "value": "quarantine",
+   "description": "Изолирование"
+  },
+  {
+   "value": "read",
+   "description": "Чтение или загрузка содержимого"
+  },
+  {
+   "value": "receive",
+   "description": "Принятие"
+  },
+  {
+   "value": "reject",
+   "description": "Отмена"
+  },
+  {
+   "value": "remove",
+   "description": "Удаление"
+  },
+  {
+   "value": "rename",
+   "description": "Переименование"
+  },
+  {
+   "value": "request",
+   "description": "Запрос объекта или информации об объекте"
+  },
+  {
+   "value": "reset",
+   "description": "Сброс к состоянию по умолчанию"
+  },
+  {
+   "value": "restart",
+   "description": "Перезапуск"
+  },
+  {
+   "value": "restore",
+   "description": "Восстановление"
+  },
+  {
+   "value": "revoke",
+   "description": "Отзыв права, привилегии"
+  },
+  {
+   "value": "rollback",
+   "description": "Откат к предыдущему состоянию"
+  },
+  {
+   "value": "scan",
+   "description": "Сканирование"
+  },
+  {
+   "value": "search",
+   "description": "Поиск"
+  },
+  {
+   "value": "send",
+   "description": "Отправка"
+  },
+  {
+   "value": "start",
+   "description": "Запуск"
+  },
+  {
+   "value": "state",
+   "description": "Изменение состояния из заданного перечня"
+  },
+  {
+   "value": "stop",
+   "description": "Остановка"
+  },
+  {
+   "value": "sync",
+   "description": "Синхронизация"
+  },
+  {
+   "value": "terminate",
+   "description": "Аварийное завершение"
+  },
+  {
+   "value": "truncate",
+   "description": "Удаление содержимого объекта"
+  },
+  {
+   "value": "unassign",
+   "description": "Отмена сопоставления объектов"
+  },
+  {
+   "value": "unbind",
+   "description": "Удаление политики из группы, освобождение IP"
+  },
+  {
+   "value": "uninstall",
+   "description": "Удаление продукта"
+  },
+  {
+   "value": "unlock",
+   "description": "Разблокирование"
+  },
+  {
+   "value": "up",
+   "description": "Изменение состояния интерфейса на up"
+  },
+  {
+   "value": "update",
+   "description": "Обновление (минорное)"
+  },
+  {
+   "value": "upgrade",
+   "description": "Обновление (мажорное)"
+  },
+  {
+   "value": "upload",
+   "description": "Загрузка"
+  },
+  {
+   "value": "validate",
+   "description": "Валидация"
+  },
+  {
+   "value": "view",
+   "description": "Просмотр"
+  }
+ ],
+ "object": [
+  {
+   "value": "account",
+   "description": "Учетная запись"
+  },
+  {
+   "value": "alert",
+   "description": "Оповещение"
+  },
+  {
+   "value": "application",
+   "description": "Приложение"
+  },
+  {
+   "value": "arp_table",
+   "description": "Таблица ARP"
+  },
+  {
+   "value": "attack",
+   "description": "Атака"
+  },
+  {
+   "value": "certificate",
+   "description": "Сертификат"
+  },
+  {
+   "value": "check",
+   "description": "Проверка"
+  },
+  {
+   "value": "client",
+   "description": "Клиент"
+  },
+  {
+   "value": "cmdlet",
+   "description": "Командлет"
+  },
+  {
+   "value": "command",
+   "description": "Команда"
+  },
+  {
+   "value": "compliance",
+   "description": "Соответствие требованиям безопасности"
+  },
+  {
+   "value": "computer",
+   "description": "Компьютер"
+  },
+  {
+   "value": "configuration",
+   "description": "Конфигурация"
+  },
+  {
+   "value": "connection",
+   "description": "Соединение"
+  },
+  {
+   "value": "database",
+   "description": "База данных"
+  },
+  {
+   "value": "db_object",
+   "description": "Объект базы данных"
+  },
+  {
+   "value": "device",
+   "description": "Устройство"
+  },
+  {
+   "value": "ds_object",
+   "description": "Объект службы каталогов"
+  },
+  {
+   "value": "file",
+   "description": "Файл"
+  },
+  {
+   "value": "file_object",
+   "description": "Объект файловой системы"
+  },
+  {
+   "value": "flow",
+   "description": "Поток данных"
+  },
+  {
+   "value": "handle",
+   "description": "Ссылка на ресурс в памяти процесса"
+  },
+  {
+   "value": "host",
+   "description": "Узел (известен только IP или MAC)"
+  },
+  {
+   "value": "infected_object",
+   "description": "Инфицированный объект"
+  },
+  {
+   "value": "interface",
+   "description": "Интерфейс"
+  },
+  {
+   "value": "ip_address",
+   "description": "IP-адрес"
+  },
+  {
+   "value": "link",
+   "description": "Ссылка"
+  },
+  {
+   "value": "log",
+   "description": "Файл журнала"
+  },
+  {
+   "value": "logging",
+   "description": "Журналирование"
+  },
+  {
+   "value": "mailbox",
+   "description": "Почтовый ящик"
+  },
+  {
+   "value": "malware",
+   "description": "Вредоносный объект"
+  },
+  {
+   "value": "message",
+   "description": "Сообщение"
+  },
+  {
+   "value": "mode",
+   "description": "Режим"
+  },
+  {
+   "value": "module",
+   "description": "Модуль"
+  },
+  {
+   "value": "network",
+   "description": "Сеть"
+  },
+  {
+   "value": "node",
+   "description": "Сетевой узел"
+  },
+  {
+   "value": "package",
+   "description": "Дистрибутив приложения"
+  },
+  {
+   "value": "packet",
+   "description": "Пакет"
+  },
+  {
+   "value": "policy",
+   "description": "Политика"
+  },
+  {
+   "value": "port",
+   "description": "Порт"
+  },
+  {
+   "value": "process",
+   "description": "Процесс"
+  },
+  {
+   "value": "profile",
+   "description": "Профиль"
+  },
+  {
+   "value": "reg_object",
+   "description": "Объект системного реестра"
+  },
+  {
+   "value": "report",
+   "description": "Отчет"
+  },
+  {
+   "value": "request",
+   "description": "Запрос"
+  },
+  {
+   "value": "resource",
+   "description": "Ресурс"
+  },
+  {
+   "value": "rule",
+   "description": "Правило"
+  },
+  {
+   "value": "scan",
+   "description": "Результат сканирования"
+  },
+  {
+   "value": "service",
+   "description": "Сервис"
+  },
+  {
+   "value": "session",
+   "description": "Сессия"
+  },
+  {
+   "value": "socket",
+   "description": "Сокет"
+  },
+  {
+   "value": "system",
+   "description": "Система"
+  },
+  {
+   "value": "table",
+   "description": "Таблица"
+  },
+  {
+   "value": "task",
+   "description": "Задача"
+  },
+  {
+   "value": "thread",
+   "description": "Поток команд"
+  },
+  {
+   "value": "transaction",
+   "description": "Транзакция"
+  },
+  {
+   "value": "translation",
+   "description": "Запись NAT"
+  },
+  {
+   "value": "trust",
+   "description": "Доверительное отношение"
+  },
+  {
+   "value": "tunnel",
+   "description": "Туннель"
+  },
+  {
+   "value": "update",
+   "description": "Обновление"
+  },
+  {
+   "value": "user_group",
+   "description": "Группа пользователей"
+  },
+  {
+   "value": "virtual_machine",
+   "description": "Виртуальная машина"
+  },
+  {
+   "value": "volume",
+   "description": "Том"
+  },
+  {
+   "value": "vulnerability",
+   "description": "Уязвимость"
+  }
+ ],
+ "status": [
+  {
+   "value": "failure",
+   "description": "Неуспешная попытка"
+  },
+  {
+   "value": "success",
+   "description": "Успешная попытка"
+  },
+  {
+   "value": "ongoing",
+   "description": "Действие происходит сейчас, результат ещё неизвестен"
+  }
+ ],
+ "subject": [
+  {
+   "value": "account",
+   "description": "Пользователь (от имени учётной записи)"
+  },
+  {
+   "value": "application",
+   "description": "Приложение"
+  },
+  {
+   "value": "host",
+   "description": "Узел"
+  },
+  {
+   "value": "process",
+   "description": "Процесс"
+  },
+  {
+   "value": "rule",
+   "description": "Правило"
+  },
+  {
+   "value": "service",
+   "description": "Служба"
+  },
+  {
+   "value": "system",
+   "description": "Система"
+  }
+ ],
+ "event_src_category": [
+  {
+   "value": "AAA",
+   "description": "Аутентификация, авторизация, учетные записи"
+  },
+  {
+   "value": "Anti-virus",
+   "description": "Антивирусное ПО"
+  },
+  {
+   "value": "Application security",
+   "description": "Защита приложений"
+  },
+  {
+   "value": "Application server",
+   "description": "Сервер приложений"
+  },
+  {
+   "value": "Backup server",
+   "description": "Резервное копирование"
+  },
+  {
+   "value": "Certification authority",
+   "description": "Служба сертификации"
+  },
+  {
+   "value": "Database server",
+   "description": "Сервер БД"
+  },
+  {
+   "value": "DHCP server",
+   "description": "Сервер DHCP"
+  },
+  {
+   "value": "Directory service",
+   "description": "Служба каталогов"
+  },
+  {
+   "value": "DLP",
+   "description": "DLP"
+  },
+  {
+   "value": "DNS server",
+   "description": "Сервер DNS"
+  },
+  {
+   "value": "DPI",
+   "description": "Система DPI"
+  },
+  {
+   "value": "File service",
+   "description": "Файловая служба"
+  },
+  {
+   "value": "Firewall",
+   "description": "Межсетевой экран"
+  },
+  {
+   "value": "Honeypot",
+   "description": "Honeypot"
+  },
+  {
+   "value": "Host security",
+   "description": "Защита узлов"
+  },
+  {
+   "value": "IDS/IPS",
+   "description": "IDS/IPS"
+  },
+  {
+   "value": "Mail server",
+   "description": "Почтовый сервер"
+  },
+  {
+   "value": "Mobile",
+   "description": "Мобильное устройство"
+  },
+  {
+   "value": "Network device",
+   "description": "Сетевое оборудование"
+  },
+  {
+   "value": "Network monitoring system",
+   "description": "Мониторинг сети"
+  },
+  {
+   "value": "Network security",
+   "description": "Защита сети"
+  },
+  {
+   "value": "Operating system",
+   "description": "ОС"
+  },
+  {
+   "value": "Other",
+   "description": "Другое"
+  },
+  {
+   "value": "Physical security",
+   "description": "Физическая защита"
+  },
+  {
+   "value": "Proxy server",
+   "description": "Прокси-сервер"
+  },
+  {
+   "value": "SCADA",
+   "description": "SCADA"
+  },
+  {
+   "value": "SIEM",
+   "description": "SIEM"
+  },
+  {
+   "value": "Storage device",
+   "description": "СХД"
+  },
+  {
+   "value": "Telecom",
+   "description": "Система связи"
+  },
+  {
+   "value": "Terminal services",
+   "description": "Службы удалённых рабочих столов"
+  },
+  {
+   "value": "Virtualization",
+   "description": "Виртуализация"
+  },
+  {
+   "value": "Voice over IP",
+   "description": "IP-телефония"
+  },
+  {
+   "value": "VPN",
+   "description": "VPN"
+  },
+  {
+   "value": "Web security",
+   "description": "Сетевая защита"
+  },
+  {
+   "value": "Web server",
+   "description": "Веб-сервер"
+  },
+  {
+   "value": "Wireless",
+   "description": "Беспроводная сеть"
+  }
+ ]
+}

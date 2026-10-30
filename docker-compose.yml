@@ -1,0 +1,133 @@
+services:
+  postgres:
+    image: pgvector/pgvector:pg18
+    restart: unless-stopped
+    environment:
+      - POSTGRES_USER=aegra
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-aegra_password}
+      - POSTGRES_DB=aegra_db
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U aegra -d aegra_db"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  phoenix:
+    image: arizephoenix/phoenix:latest
+    restart: unless-stopped
+    ports:
+      - "6006:6006"
+      - "4317:4317"
+      - "4318:4318"
+    environment:
+      - PHOENIX_SQL_DATABASE_URL=sqlite:////tmp/phoenix.db
+      - PHOENIX_ENABLE_OTLP=true
+    # Убираем command полностью - образ сам знает, как запустить сервер
+
+  aegra:
+    build:
+      context: https://github.com/aegra/aegra.git
+      dockerfile: deployments/docker/Dockerfile
+    restart: unless-stopped
+    ports:
+      - "2026:2026"
+    entrypoint: ""
+    command: ["uvicorn", "aegra_api.main:app", "--host", "0.0.0.0", "--port", "2026", "--reload"]
+    environment:
+      # Используем DATABASE_URL вместо отдельных POSTGRES_* переменных
+      - DATABASE_URL=postgresql+asyncpg://aegra:${POSTGRES_PASSWORD:-aegra_password}@postgres:5432/aegra_db
+      - PYTHONPATH=/app/src:/app/custom_agent
+      - REDIS_BROKER_ENABLED=true
+      - REDIS_URL=redis://redis:6379/0
+      - WORKER_COUNT=2
+      - N_JOBS_PER_WORKER=5
+      - OTEL_TARGETS=PHOENIX
+      - PHOENIX_COLLECTOR_ENDPOINT=http://phoenix:6006/v1/traces
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      phoenix:
+        condition: service_started
+      logicore-mcp:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:2026/health || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 15s
+    env_file:
+      - ./agent/.env
+    volumes:
+      - ./agent:/app/custom_agent:ro
+      - ./aegra.json:/app/aegra.json:ro
+
+  # MCP-сервер Логикора: streamable-http + bearer-токен (ADR-0010), доступен только в Docker-сети
+  logicore-mcp:
+    build: ./logicore-mcp
+    restart: unless-stopped
+    env_file:
+      - ./agent/.env
+    environment:
+      # Токен берётся из LOGIQ_API_TOKEN в agent/.env (env_file)
+      - LOGIQ_TRANSPORT=streamable-http
+      - LOGIQ_AUTH=token
+      - LOGIQ_HOST=0.0.0.0
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:9000/health', timeout=3).status == 200 else 1)"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 15s
+
+  # Приёмник нативного аномали-вебхука Логикора: POST /anomaly → тред в agra → run расследования
+  anomaly-relay:
+    build: ./anomaly-relay
+    restart: unless-stopped
+    ports:
+      - "2025:8080"
+    environment:
+      - AGRA_API_URL=http://aegra:2026
+      - AGRA_ASSISTANT=agent
+      - RELAY_TOKEN=${RELAY_TOKEN:-}
+      - DEFAULT_CALLBACK_URL=${DEFAULT_CALLBACK_URL:-}
+    depends_on:
+      aegra:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8080/healthz', timeout=3).status == 200 else 1)"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
+  agent-chat-ui:
+    build: ./ui
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    environment:
+      - NEXT_PUBLIC_API_URL=http://localhost:2026
+      - NEXT_PUBLIC_ASSISTANT_ID=agent
+volumes:
+  postgres_data:
+  redis_data:

@@ -1,0 +1,9 @@
+{
+  "dependencies": ["./custom_agent"],
+  "graphs": {
+    "agent": {
+      "path": "./custom_agent/graph.py:graph",
+      "description": "Мой кастомный Simple Graph из Module 1"
+    }
+  }
+}
