@@ -1,6 +1,5 @@
-# Секреты: в репо только *.example, .env не коммитится
+# Секреты: в репо только .env.example, .env не коммитится
 .env
-agent/.env
 
 # Python
 __pycache__/

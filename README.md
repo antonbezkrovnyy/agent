@@ -18,8 +18,7 @@
 ## Запуск
 
 ```bash
-cp .env.example .env                 # переменные docker compose (POSTGRES_PASSWORD, RELAY_TOKEN, …)
-cp agent/.env.example agent/.env     # LLM_TOKEN / LOGIQ_* / LOGIQ_API_TOKEN — заполнить реальными
+cp .env.example .env                 # все секреты в одном файле: LLM_*, LOGIQ_*, POSTGRES_PASSWORD, RELAY_TOKEN, …
 docker compose up --build
 ```
 
@@ -38,5 +37,6 @@ UI: http://localhost:3000 · API agra: http://localhost:2026 · relay: http://lo
 
 ## Секреты
 
-В репозиторий попадают только `.env.example`. Реальные значения — в локальных `.env`
-(корневой и `agent/`), оба в gitignore: LLM-токен, креды Логикора-стенда, bearer-токен MCP.
+Один корневой `.env` — все секреты разом: LLM-токен, креды Логикора-стенда, bearer-токен MCP,
+переменные docker compose (POSTGRES_PASSWORD, RELAY_TOKEN, DEFAULT_CALLBACK_URL).
+В репо попадает только `.env.example`; `.env` в gitignore.

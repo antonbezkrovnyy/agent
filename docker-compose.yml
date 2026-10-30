@@ -76,7 +76,7 @@ services:
       retries: 3
       start_period: 15s
     env_file:
-      - ./agent/.env
+      - ./.env
     volumes:
       - ./agent:/app/custom_agent:ro
       - ./aegra.json:/app/aegra.json:ro
@@ -86,9 +86,9 @@ services:
     build: ./logicore-mcp
     restart: unless-stopped
     env_file:
-      - ./agent/.env
+      - ./.env
     environment:
-      # Токен берётся из LOGIQ_API_TOKEN в agent/.env (env_file)
+      # Токен берётся из LOGIQ_API_TOKEN в .env (env_file)
       - LOGIQ_TRANSPORT=streamable-http
       - LOGIQ_AUTH=token
       - LOGIQ_HOST=0.0.0.0
