@@ -1,11 +1,15 @@
 """Граф агента: LLM + MCP-инструменты Earth + отчёты (файл в чате и callback-доставка).
 
-Отчёты: тул save_report складывает data-URL в state["reports"]; финальное
-AIMessage получает их в поле artifacts — UI (ArtifactsDownload в ai.tsx)
-показывает кнопку скачивания прямо в чате (паттерн pack_agent/packing-ui).
+Отчёты: тул save_report кладёт data-URL в artifact своего ToolMessage (artifact
+не уходит в модель). node_llm собирает артефакты из ToolMessage после последнего
+сообщения пользователя и лепит их в AIMessage.artifacts — UI (ArtifactsDownload
+в ai.tsx) показывает кнопку скачивания прямо в чате (паттерн pack_agent/packing-ui).
+Граница run'а — последнее сообщение пользователя: отчёты прошлых run'а к новому
+ответу не прилепляются, отдельного канала и сброса не нужно.
+
 Расследования: тул send_report доставляет отчёт на callback_url из данных
-запуска (вебхук Логикора несёт callback_url в payload) и одновременно
-прикрепляет файл к ответу для просмотра в UI.
+запуска (вебхук Логикора несёт callback_url в payload); при успехе файл
+прикрепляется к ответу, при сбое модель зовёт save_report.
 """
 
 import base64
@@ -16,7 +20,7 @@ import re
 from typing import Annotated, Any, Sequence, TypedDict
 from typing_extensions import TypedDict
 
-from langchain_core.messages import AIMessage, BaseMessage, SystemMessage, ToolMessage
+from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, SystemMessage, ToolMessage
 from langchain_core.tools import tool
 from langchain.chat_models import init_chat_model
 from langgraph.graph import StateGraph, START, END
@@ -64,21 +68,7 @@ save_report(title, markdown, filename?). Файл прикрепится к сл
 # 2. Инструменты Логикора (MCP, streamable-http — ADR-0010), инициализация один раз
 mcp_tools = get_mcp_tools()
 
-# 2b. Тул отчётов: data-URL в state["reports"], к финальному сообщению пришьёт node_llm
-REPORTS_CLEAR = {"__clear__": True}
-
-
-def _merge_reports(existing: Any, new: Any) -> list:
-    """Конкатенация data-URL отчётов; маркер REPORTS_CLEAR очищает список (ревизия 2026-10-29)."""
-    result = list(existing or [])
-    for item in new or []:
-        if isinstance(item, dict) and item.get("__clear__"):
-            result = []
-        else:
-            result.append(str(item))
-    return result
-
-
+# 2b. Тул отчётов: data-URL в artifact ToolMessage, к финальному сообщению пришьёт node_llm
 _SAFE_SEGMENT = re.compile(r"[^A-Za-z0-9._-]+")
 
 
@@ -109,10 +99,32 @@ def _build_report(title: str, markdown: str, filename: str | None = None) -> tup
     return fname, url, len(data)
 
 
-def _tool_msg(name: str, content: str, runtime: ToolRuntime = None) -> ToolMessage:
+def _tool_msg(
+    name: str, content: str, runtime: ToolRuntime = None, artifact: str | None = None
+) -> ToolMessage:
     return ToolMessage(
-        content=content, tool_call_id=runtime.tool_call_id if runtime is not None else "", name=name
+        content=content,
+        tool_call_id=runtime.tool_call_id if runtime is not None else "",
+        name=name,
+        artifact=artifact,
     )
+
+
+def _pending_report_artifacts(messages: Sequence[BaseMessage]) -> list[str]:
+    """data-URL отчётов текущего run'а: артефакты ToolMessage после последнего сообщения пользователя."""
+    last_human = -1
+    for i, m in enumerate(messages):
+        if isinstance(m, HumanMessage):
+            last_human = i
+    if last_human < 0:
+        return []
+    urls: list[str] = []
+    for m in messages[last_human + 1:]:
+        if isinstance(m, ToolMessage) and m.artifact:
+            url = str(m.artifact)
+            if url not in urls:
+                urls.append(url)
+    return urls
 
 
 @tool
@@ -136,10 +148,7 @@ def save_report(
     fname, url, nbytes = _build_report(title, markdown, filename)
     payload = json.dumps({"ok": True, "filename": fname, "bytes": nbytes}, ensure_ascii=False)
     return Command(
-        update={
-            "reports": [url],
-            "messages": [_tool_msg("save_report", payload, runtime)],
-        }
+        update={"messages": [_tool_msg("save_report", payload, runtime, artifact=url)]}
     )
 
 
@@ -160,9 +169,10 @@ def send_report(
     - markdown: тело отчёта (вердикты, числа с окнами, uuid-якоря).
     - callback_url: принимающий URL; обычно НЕ нужен — эндпоинт уже в данных запуска,
       явное значение переопределяет его.
-    Отчёт также прикрепится файлом к следующему за вызовом ответу.
+    При успешной доставке отчёт прикрепляется файлом к следующему за вызовом ответу;
+    при сбое доставку не выполняли — вместо этого вызови save_report.
     Ответ: {"ok": true, "status": N, "filename": ...} — доставлено;
-    {"ok": false, "error": "..."} — доставка не выполнена (файл всё равно прикреплён).
+    {"ok": false, "error": "..."} — доставка не выполнена.
     """
     fname, url, nbytes = _build_report(title, markdown)
     target = (callback_url or "").strip()
@@ -196,13 +206,11 @@ def send_report(
         except Exception as exc:
             result["ok"] = False
             result["error"] = f"POST не удался: {type(exc).__name__}: {exc}"
-    # Доставленный отчёт — единственный файл запуска: сбрасываем накопленные раньше
-    # (например, ошибочным save_report), чтобы к ответу не прилепилось два файла.
+    # Artifact только при успешной доставке: при сбое модель зовёт save_report
+    # (см. system prompt) — к ответу прикрепится один файл.
+    artifact = url if result["ok"] else None
     return Command(
-        update={
-            "reports": [REPORTS_CLEAR, url],
-            "messages": [_tool_msg("send_report", json.dumps(result, ensure_ascii=False), runtime)],
-        }
+        update={"messages": [_tool_msg("send_report", json.dumps(result, ensure_ascii=False), runtime, artifact=artifact)]}
     )
 
 
@@ -212,43 +220,34 @@ llm_with_tools = llm.bind_tools(tools) if tools else llm
 # 3. Схема состояния (Строгий контракт для agent-chat-ui и PostgreSQL чекпоинтов)
 class State(TypedDict):
     messages: Annotated[Sequence[BaseMessage], add_messages]
-    reports: Annotated[list, _merge_reports]  # data-URL отчётов текущего запуска
     callback_url: str  # эндпоинт доставки отчёта, задаётся input запуска (вебхук)
 
 
-# 4. Узел предобработки: сброс отчётов, не прикреплённых предыдущим (упавшим) запуском
-def node_preprocess(state: State) -> dict:
-    return {"reports": [REPORTS_CLEAR]}
-
-
-# 5. Узел с реальным вызовом LLM
+# 4. Узел с реальным вызовом LLM
 def node_llm(state: State) -> dict:
     messages: list[BaseMessage] = [SystemMessage(content=SYSTEM_PROMPT), *state["messages"]]
     response = llm_with_tools.invoke(messages)
 
     update: dict = {"messages": [response]}
-    # Финальный ответ (без tool_calls) забирает накопленные отчёты в message.artifacts
+    # Финальный ответ (без tool_calls) забирает отчёты, сохранённые этим run'ом
     if not getattr(response, "tool_calls", None):
-        pending = state.get("reports") or []
+        pending = _pending_report_artifacts(state["messages"])
         if pending:
             response.artifacts = list(pending)
-            update["reports"] = [REPORTS_CLEAR]
     return update
 
 
-# 6. Сборка графа (Декларативное описание конечного автомата)
+# 5. Сборка графа (Декларативное описание конечного автомата)
 def build_graph():
     builder = StateGraph(State)
 
     # Регистрация узлов
-    builder.add_node("preprocess", node_preprocess)
     builder.add_node("llm", node_llm)
     if tools:
         builder.add_node("tools", ToolNode(tools))
 
     # Определение потока выполнения (Edges)
-    builder.add_edge(START, "preprocess")
-    builder.add_edge("preprocess", "llm")
+    builder.add_edge(START, "llm")
     if tools:
         builder.add_conditional_edges("llm", tools_condition, ["tools", END])
         builder.add_edge("tools", "llm")  # результат инструмента — обратно к LLM
