@@ -99,7 +99,7 @@ async def fetch_timeline(
             if response.status_code >= 400:
                 text = (await response.aread()).decode("utf-8", "replace")
                 raise TimelineTransportError(f"Таймлайн: HTTP {response.status_code}: {text[:200]}")
-            stream = response.aiter_text()
+            stream = response.aiter_lines()
             event_name = ""
             data_lines: list[str] = []
             while True:
@@ -112,16 +112,15 @@ async def fetch_timeline(
                     break
                 except TimeoutError:
                     raise TimelineTransportError(f"Таймлайн не посчитался за {settings.ws_wait:.0f} с") from None
-                for line in raw.splitlines():
-                    if line == "":
-                        if event_name or data_lines:
-                            _on_event(event_name, "\n".join(data_lines))
-                            event_name, data_lines = "", []
-                        continue
-                    if line.startswith("event:"):
-                        event_name = line.removeprefix("event:").strip()
-                    elif line.startswith("data:"):
-                        data_lines.append(line.removeprefix("data:").strip())
+                if raw == "":
+                    if event_name or data_lines:
+                        _on_event(event_name, "\n".join(data_lines))
+                        event_name, data_lines = "", []
+                    continue
+                if raw.startswith("event:"):
+                    event_name = raw.removeprefix("event:").strip()
+                elif raw.startswith("data:"):
+                    data_lines.append(raw.removeprefix("data:").strip())
             if event_name or data_lines:
                 _on_event(event_name, "\n".join(data_lines))
     except httpx.TimeoutException as exc:
