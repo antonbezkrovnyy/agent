@@ -1,10 +1,6 @@
-"""LLM и связанные с ней схемы.
+"""LLM и схемы структурированных результатов агентов."""
 
-Одна базовая модель для всех агентов. Интент и критик — структурированный
-вывод через function_calling: эндпоинт OpenAI-совместимый, а tool-calls
-уже проверены в проде на MCP-тулзах.
-"""
-
+from datetime import datetime
 from typing import Literal
 
 from pydantic import BaseModel, Field
@@ -25,17 +21,55 @@ llm = init_chat_model(
 )
 
 
+class WindowSpec(BaseModel):
+    """Запрошенный период до детерминированной фиксации границ."""
+
+    time_from: datetime | None = Field(default=None, description="Начало ISO-8601, если задано явно")
+    time_to: datetime | None = Field(default=None, description="Конец ISO-8601, если задан явно")
+    last_minutes: int = Field(default=60, gt=0, description="Относительный период; 60 для последнего часа")
+
+
 class IntentDecision(BaseModel):
-    """Результат классификации интента."""
+    """Маршрутизация и временной контекст запроса."""
 
     intent: Literal["simple", "complex", "continuation"] = Field(
-        description=(
-            "Категория: simple — простой вопрос без данных из журнала; "
-            "complex — нужен анализ данных; continuation — продолжение "
-            "уже сделанного (правки отчёта, углубление)"
-        ),
+        description="simple — беседа; complex — новый анализ; continuation — фолло-ап"
     )
     rationale: str = Field(description="Обоснование одним предложением")
+    needs_new_data: bool = Field(
+        default=False,
+        description="true, если нужны новые запросы к журналу; false для беседы и работы с готовыми данными",
+    )
+    edit_existing_report: bool = Field(
+        default=False,
+        description="true только для правки существующего отчёта без нового расследования",
+    )
+    window: WindowSpec = Field(default_factory=WindowSpec)
+
+
+class Claim(BaseModel):
+    """Утверждение с обязательными ссылками на фактические вызовы инструментов."""
+
+    text: str
+    evidence_ids: list[str] = Field(default_factory=list)
+
+
+class ScoutResult(BaseModel):
+    note: str = Field(description="Короткий ориентир для инвестигейтора")
+    signals: list[str] = Field(default_factory=list)
+    evidence_ids: list[str] = Field(default_factory=list)
+
+
+class InvestigationResult(BaseModel):
+    summary: str
+    claims: list[Claim] = Field(default_factory=list)
+    limitations: list[str] = Field(default_factory=list)
+
+
+class ReporterResult(BaseModel):
+    answer: str = Field(description="Финальный ответ пользователю на русском")
+    claims: list[Claim] = Field(default_factory=list)
+    limitations: list[str] = Field(default_factory=list)
 
 
 class CriticEvidence(BaseModel):
@@ -59,6 +93,16 @@ class CriticReport(BaseModel):
     feedback: str = Field(description="Что исправить или доискать; пусто при ok")
 
 
-intent_llm = llm.with_structured_output(IntentDecision, method="function_calling")
+def build_intent_llm(model):
+    """Function calling с автоматическим переходом на JSON mode."""
+    return model.with_structured_output(
+        IntentDecision,
+        method="function_calling",
+    ).with_fallbacks([
+        model.with_structured_output(IntentDecision, method="json_mode")
+    ])
+
+
+intent_llm = build_intent_llm(llm)
 critic_evidence_llm = llm.with_structured_output(CriticEvidence, method="function_calling")
 critic_report_llm = llm.with_structured_output(CriticReport, method="function_calling")
