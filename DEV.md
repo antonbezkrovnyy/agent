@@ -270,3 +270,27 @@ Phoenix доступен на http://localhost:6006. Aegra передаёт со
 `PHOENIX_COLLECTOR_ENDPOINT=http://phoenix:6006/v1/traces` и `OTEL_TARGETS=PHOENIX`.
 По run/thread можно проверить последовательность LLM-вызовов, tool calls,
 структурированные ответы и фактическую длительность этапов.
+
+## 13. Технический долг и план
+
+Текущий документ описывает реализацию, а не целевую архитектуру. Планируемые
+quick/deep, skills, confirm/autopilot, отдельная память случаев и multiuser auth
+отсутствуют в текущем коде. Их контракты и этапы находятся в
+[INVESTIGATION_PLAN.md](INVESTIGATION_PLAN.md).
+
+Основные известные ограничения:
+
+- `evidence_block` усекает большие результаты для критика; планируются полный
+  `EvidenceBundle` и `get_evidence(id)`.
+- `normalize_tool_result` принудительно подставляет окно из context; планируются
+  `base_window`, `focus_window` и `WindowUpdate`.
+- Ручной structured response fallback в `agents.py` требует пересмотра и
+  упрощения вокруг `create_agent`/`with_structured_output`.
+- Ошибка критика сейчас даёт `ok`; целевое поведение — `critic_unavailable`.
+- Суммаризация истории не реализована; использовать `SummarizationMiddleware`.
+- Anonymous-режим не изолирует пользователей и предназначен только для разработки.
+
+Правило доработки: сначала официальные LangChain/LangGraph primitives.
+`HumanInTheLoopMiddleware` — для write tools, `ActionRequest + interrupt` — для
+семантических действий, `BaseStore`/`PostgresStore` — для долговременной памяти.
+Собственный код оставлять только для предметной логики LogiCore.
