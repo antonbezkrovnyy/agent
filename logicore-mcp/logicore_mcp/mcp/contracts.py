@@ -65,6 +65,12 @@ def _duplicates_limit(value: int) -> int:
     return value
 
 
+def _extract_max_rows(value: int | None) -> int | None:
+    if value is not None and not 1 <= value <= 5000:
+        raise ValueError("max_rows должен быть 1..5000, дефолт из конфига.")
+    return value
+
+
 def _bounded_items(max_items: int, error: str) -> Callable[[list[str] | None], list[str] | None]:
     def check(value: list[str] | None) -> list[str] | None:
         if value is not None and len(value) > max_items:
@@ -182,6 +188,15 @@ DUPLICATES_LIMIT = Annotated[
     Field(
         description="Групп в ответе, 1..50, дефолт 10.",
         json_schema_extra={"minimum": 1, "maximum": 50},
+    ),
+]
+
+EXTRACT_MAX_ROWS = Annotated[
+    int | None,
+    AfterValidator(_extract_max_rows),
+    Field(
+        description="Максимум строк выгрузки, 1..5000. Если не задан — LOGIQ_EXTRACT_MAX_ROWS из конфига.",
+        json_schema_extra={"minimum": 1, "maximum": 5000},
     ),
 ]
 

@@ -19,6 +19,7 @@ from langgraph.prebuilt import ToolRuntime
 from langgraph.types import Command
 
 from mcp_client import get_mcp_tools
+from progress import TOOL_LIMITS
 from reporting import build_report, post_report
 
 mcp_tools = get_mcp_tools()
@@ -31,6 +32,7 @@ _WINDOWED_TOOLS = {
     "top_values_batch",
     "field_fill_rates",
     "duplicates",
+    "extract_data",
 }
 
 
@@ -43,12 +45,31 @@ def _result_status(data: dict) -> str:
     return "ok"
 
 
+def _with_progress(request, result):
+    current = request.state.get("progress") or {}
+    agent = current.get("agent")
+    if agent not in TOOL_LIMITS:
+        return result
+    counts = request.state.get("run_tool_call_count") or {}
+    calls = counts.get("__all__", current.get("tool_calls", 0))
+    progress = {
+        **current,
+        "tool_calls": min(calls, TOOL_LIMITS[agent]),
+        "tool_limit": TOOL_LIMITS[agent],
+    }
+    if isinstance(result, Command):
+        return Command(update={**result.update, "progress": progress})
+    if isinstance(result, ToolMessage):
+        return Command(update={"messages": [result], "progress": progress})
+    return result
+
+
 @wrap_tool_call
 async def normalize_tool_result(request, handler):
     """Зафиксировать окно, нормализовать content и сохранить Evidence."""
     name = request.tool_call["name"]
     if name not in _MCP_TOOL_NAMES:
-        return await handler(request)
+        return _with_progress(request, await handler(request))
 
     args = dict(request.tool_call.get("args") or {})
     context = request.state.get("context") or {}
@@ -94,7 +115,7 @@ async def normalize_tool_result(request, handler):
     message = message.model_copy(update={
         "content": json.dumps({"evidence_id": evidence_id, **data}, ensure_ascii=False)
     })
-    return Command(update={"messages": [message], "evidence": [evidence]})
+    return _with_progress(request, Command(update={"messages": [message], "evidence": [evidence]}))
 
 
 @tool
@@ -261,7 +282,10 @@ investigator_tools = list(mcp_tools or []) + [
     list_findings,
     get_finding,
 ]
-# Репортёр — отчёты и чтение журнала
+# Репортёр — отчёты, чтение журнала и детерминированная выгрузка
+extract_data_tool = next((item for item in mcp_tools if item.name == "extract_data"), None)
 reporter_tools = [save_report, send_report, list_findings, get_finding]
+if extract_data_tool is not None:
+    reporter_tools.append(extract_data_tool)
 # Чат-агент — без тулз
 chat_tools: list = []

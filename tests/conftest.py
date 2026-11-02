@@ -16,6 +16,7 @@ from langchain_core.messages import AIMessage, HumanMessage
 from langchain_core.outputs import ChatGeneration, ChatResult
 from langchain_core.tools import tool
 from langgraph.checkpoint.memory import InMemorySaver
+from langgraph.types import Command
 
 
 def json_blocks(payload):
@@ -49,13 +50,26 @@ def count_events(window: str = "", **kwargs) -> list[dict]:
 
 
 @tool
+def extract_data(time_from: str, time_to: str | None = None, **kwargs) -> list[dict]:
+    """Детерминированная выгрузка событий."""
+    return json_blocks({
+        "ok": True,
+        "window": {"from": time_from, "to": time_to, "source": "explicit"},
+        "events": [{"uuid": "event-42", "message": "скачок CPU"}],
+        "returned_rows": 1,
+        "complete": True,
+        "next_page": None,
+    })
+
+
+@tool
 def broken_tool(time_from: str, time_to: str | None = None) -> str:
     """Ошибка для проверки recovery."""
     raise ValueError("invalid test arguments")
 
 
 _mcp_stub = types.ModuleType("mcp_client")
-_mcp_stub.get_mcp_tools = lambda: [server_time, search_events, count_events, broken_tool]
+_mcp_stub.get_mcp_tools = lambda: [server_time, search_events, count_events, extract_data, broken_tool]
 sys.modules["mcp_client"] = _mcp_stub
 
 import agents as agents_mod
@@ -142,12 +156,15 @@ class FakeStructured:
         return self.results.pop(0) if self.results else self.result
 
 
-def intent(label="complex", new=True, edit=False):
+def intent(label="complex", new=True, edit=False, transition=None):
+    if transition is None:
+        transition = "new" if label == "complex" and new else "continue"
     return IntentDecision(
         intent=label,
         rationale="тест",
         needs_new_data=new,
         edit_existing_report=edit,
+        new_investigation=transition,
     )
 
 
@@ -171,8 +188,23 @@ def patch_llm(monkeypatch):
 
 
 def invoke(graph, text, thread_id="test", **extra):
+    async def run():
+        config = {"configurable": {"thread_id": thread_id}}
+        result = await graph.ainvoke(
+            {"messages": [HumanMessage(content=text)], **extra},
+            config,
+        )
+        while result.get("__interrupt__"):
+            question = result["__interrupt__"][0].value.get("question", "")
+            answer = "standard" if "времени" in question else "continue"
+            result = await graph.ainvoke(Command(resume=answer), config)
+        return result
+    return asyncio.run(run())
+
+
+def resume(graph, value, thread_id="test"):
     return asyncio.run(graph.ainvoke(
-        {"messages": [HumanMessage(content=text)], **extra},
+        Command(resume=value),
         {"configurable": {"thread_id": thread_id}},
     ))
 

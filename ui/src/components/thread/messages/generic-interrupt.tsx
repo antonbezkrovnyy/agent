@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { ChevronDown, ChevronUp } from "lucide-react";
+import { useStreamContext } from "@/providers/Stream";
 
 function isComplexValue(value: any): boolean {
   return Array.isArray(value) || (typeof value === "object" && value !== null);
@@ -39,12 +40,56 @@ function renderInterruptStateItem(value: any): React.ReactNode {
   }
 }
 
+function ChoiceInterruptView({ interrupt }: { interrupt: Record<string, any> }) {
+  const thread = useStreamContext();
+  const [submitted, setSubmitted] = useState(false);
+  const options = Array.isArray(interrupt.options) ? interrupt.options : [];
+
+  const resume = (value: string) => {
+    setSubmitted(true);
+    thread.submit(
+      {},
+      {
+        command: { resume: value },
+        streamMode: ["values"],
+        streamSubgraphs: true,
+        streamResumable: true,
+      },
+    );
+  };
+
+  return (
+    <div className="rounded-lg border border-gray-200 bg-gray-50 p-4">
+      <p className="mb-3 text-sm font-medium text-gray-900">
+        {interrupt.question}
+      </p>
+      <div className="flex flex-wrap gap-2">
+        {options.map((option: { label: string; value: string }) => (
+          <button
+            key={option.value}
+            type="button"
+            disabled={submitted || thread.isLoading}
+            className="cursor-pointer rounded-md bg-teal-700 px-3 py-2 text-sm text-white transition-colors hover:bg-teal-800 disabled:cursor-not-allowed disabled:opacity-50"
+            onClick={() => resume(option.value)}
+          >
+            {option.label}
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 export function GenericInterruptView({
   interrupt,
 }: {
   interrupt: Record<string, any> | Record<string, any>[];
 }) {
   const [isExpanded, setIsExpanded] = useState(false);
+
+  if (!Array.isArray(interrupt) && interrupt.type === "choice") {
+    return <ChoiceInterruptView interrupt={interrupt} />;
+  }
 
   const contentStr = JSON.stringify(interrupt, null, 2);
   const contentLines = contentStr.split("\n");

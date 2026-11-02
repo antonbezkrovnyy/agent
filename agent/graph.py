@@ -17,16 +17,16 @@ from langgraph.graph import StateGraph, START, END
 from langgraph.types import Overwrite
 
 from agents import (
-    _intent_heuristic,
     build_agents,
     node_chat,
-    node_critic_evidence,
-    node_critic_report,
     node_investigator,
-    node_intent,
     node_reporter,
     node_scout,
 )
+from critics import node_critic_evidence, node_critic_report
+from export import node_export
+from investigation import node_archive, node_confirm_investigation, node_intent
+from progress import simple_progress
 from config import Settings
 from state import State
 
@@ -54,6 +54,10 @@ def entry(state: State) -> dict:
             "report_result": {},
             "critic": {},
             "rework": 0,
+            "tool_usage": {},
+            "progress": simple_progress("intent", "Определяю задачу"),
+            "suggestions": [],
+            "archive_done": 0,
         }
     return {}
 
@@ -73,10 +77,37 @@ def pick_agent(state: State) -> str:
     return "chat"
 
 
+def route_to_work(state: State) -> str:
+    intent = state.get("intent") or {}
+    if intent.get("export_data"):
+        return "export"
+    if not intent.get("needs_new_data"):
+        return pick_agent(state)
+    if intent.get("label") == "continuation" and state.get("context"):
+        return "investigator"
+    return "scout"
+
+
 def route_after_intent(state: State) -> str:
-    if (state.get("intent") or {}).get("needs_new_data"):
-        return "scout"
-    return pick_agent(state)
+    intent = state.get("intent") or {}
+    if not intent.get("needs_new_data") and not intent.get("export_data"):
+        return pick_agent(state)
+    has_history = bool(state.get("evidence") or state.get("findings") or state.get("last_report"))
+    if has_history and state.get("transition") in ("new", "uncertain"):
+        return "confirm_investigation"
+    return route_to_work(state)
+
+
+def route_after_confirm(state: State) -> str:
+    if state.get("transition") in ("new", "new_thread"):
+        return "archive"
+    return route_to_work(state)
+
+
+def route_after_archive(state: State) -> str:
+    if state.get("transition") == "new_thread":
+        return END
+    return route_to_work(state)
 
 
 def route_after_investigator(state: State) -> str:
@@ -122,10 +153,13 @@ def build_graph(checkpointer=None):
 
     builder.add_node("entry", entry)
     builder.add_node("intent", node_intent)
+    builder.add_node("archive", node_archive)
+    builder.add_node("confirm_investigation", node_confirm_investigation)
     builder.add_node("scout", node_scout)
     builder.add_node("chat", node_chat)
     builder.add_node("investigator", node_investigator)
     builder.add_node("reporter", node_reporter)
+    builder.add_node("export", node_export)
     builder.add_node("critic_evidence", node_critic_evidence)
     builder.add_node("critic_report", node_critic_report)
 
@@ -134,7 +168,17 @@ def build_graph(checkpointer=None):
     builder.add_conditional_edges(
         "intent",
         route_after_intent,
-        ["scout", "chat", "investigator", "reporter"],
+        ["confirm_investigation", "export", "scout", "chat", "investigator", "reporter"],
+    )
+    builder.add_conditional_edges(
+        "confirm_investigation",
+        route_after_confirm,
+        ["archive", "export", "scout", "chat", "investigator", "reporter"],
+    )
+    builder.add_conditional_edges(
+        "archive",
+        route_after_archive,
+        ["export", "scout", "chat", "investigator", "reporter", END],
     )
     builder.add_conditional_edges(
         "scout",
@@ -142,6 +186,7 @@ def build_graph(checkpointer=None):
         ["chat", "investigator", "reporter"],
     )
     builder.add_edge("chat", END)
+    builder.add_edge("export", END)
 
     builder.add_conditional_edges(
         "investigator",

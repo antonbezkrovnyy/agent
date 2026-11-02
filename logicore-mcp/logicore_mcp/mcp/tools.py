@@ -16,6 +16,7 @@ from logicore_mcp.domain.window import server_time_payload
 from logicore_mcp.mcp.contracts import (
     COLUMNS_PARAM,
     DUPLICATES_LIMIT,
+    EXTRACT_MAX_ROWS,
     FIELD_PARAM,
     FIELDS_PARAM,
     FILTER_PARAM,
@@ -40,6 +41,7 @@ from logicore_mcp.mcp.flows import (
     top_values_batch_flow,
     top_values_flow,
 )
+from logicore_mcp.mcp.extract import extract_data_flow
 from logicore_mcp.mcp.registry import mcp
 from logicore_mcp.mcp.runtime import rate_limiter, schema_fields_catalog, settings, use_client
 
@@ -174,6 +176,41 @@ async def search_events(
             default_columns=settings().default_columns,
             include_activity=include_activity,
             order=order,
+        )
+
+
+@mcp.tool(annotations=READ_ONLY, title="Выгрузка событий", structured_output=False)
+@_envelope_unexpected
+async def extract_data(
+    time_from: TIME_FROM_PARAM,
+    time_to: TIME_TO_PARAM = None,
+    filter: Annotated[FILTER_PARAM, Field(description=FILTER_SHORT)] = None,
+    columns: COLUMNS_PARAM = None,
+    max_rows: EXTRACT_MAX_ROWS = None,
+    page: Annotated[int, Field(description="Начальная страница, от 1; для продолжения — next_page из прошлого ответа.", ge=1)] = 1,
+    order: ORDER_PARAM = "asc",
+) -> dict[str, Any]:
+    """Выгружает события постранично, без ручной пагинации через LLM.
+
+    Когда брать: нужна полная таблица или файл по событием, а не агрегат.
+    Возвращает events, returned_rows, complete и next_page. complete=false —
+    результат неполный: достигнут max_rows, частичное покрытие или повтор страницы.
+    После max_rows продолжите с page=next_page и теми же окном, фильтром и order.
+    Для агрегатов используйте count_events/top_values/timeline.
+    """
+    schema = await schema_fields_catalog()
+    async with use_client() as client:
+        return await extract_data_flow(
+            client,
+            time_from=time_from,
+            time_to=time_to,
+            filter=filter,
+            columns=columns,
+            max_rows=max_rows or settings().extract_max_rows,
+            page=page,
+            order=order,
+            default_columns=settings().default_columns,
+            schema=schema,
         )
 
 

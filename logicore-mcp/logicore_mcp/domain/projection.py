@@ -104,24 +104,23 @@ def build_search_response(
     filter_applied: Mapping[str, Any] | None,
     activity: dict[str, Any] | None = None,
     order: str = "desc",
+    page: int = 1,
+    per_page: int | None = None,
 ) -> dict[str, Any]:
-    """Конверт search_events по TD-0001 + total по TD-0004 + activity по TD-0005 + order по TD-0025.
-
-    При truncated=true ключ total опускается (недостоверное число не покидает сервер),
-    total_note указывает на count_events; при полной странице total = len(rows) — точен
-    (TD-0004 п. 4, ревизия 2026-08-24: ses_fcbb — текстовое примечание проигнорировано,
-    класс R-0011/R-0017 «структура над текстом»). Внутренний total (правило п. 1 +
-    сумма меток частей TD-0029) служебный — только для вычисления флага truncated.
-    """
+    """Конверт search_events с пагинацией по фактическому размеру страницы."""
     check_response_schema(meta_schema, requested_columns)
     total = resolve_total(len(rows), meta_total)
-    truncated = len(rows) < total
+    has_more = per_page is not None and len(rows) >= per_page
+    truncated = len(rows) < total or has_more
     response: dict[str, Any] = {
         "ok": True,
         "filter_applied": filter_applied,
         "order": order,
         "window": window,
         "truncated": truncated,
+        "page": page,
+        "has_more": has_more,
+        "next_page": page + 1 if has_more else None,
         "events": rows,
     }
     if truncated:

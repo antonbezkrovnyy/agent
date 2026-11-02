@@ -28,7 +28,23 @@ import { resolveApiUrl } from "@/lib/resolve-api-url";
 import { useThreads } from "./Thread";
 import { toast } from "sonner";
 
-export type StateType = { messages: Message[]; ui?: UIMessage[] };
+export type ProgressState = {
+  stage: string;
+  state: "running" | "waiting" | "limited" | "done";
+  text: string;
+  agent?: string;
+  tool_calls?: number;
+  tool_limit?: number;
+};
+
+export type Suggestion = { label: string; value: string };
+
+export type StateType = {
+  messages: Message[];
+  ui?: UIMessage[];
+  progress?: ProgressState;
+  suggestions?: Suggestion[];
+};
 
 const useTypedStream = useStream<
   StateType,
@@ -37,6 +53,8 @@ const useTypedStream = useStream<
       messages?: Message[] | Message | string;
       ui?: (UIMessage | RemoveUIMessage)[] | UIMessage | RemoveUIMessage;
       context?: Record<string, unknown>;
+      progress?: ProgressState;
+      suggestions?: Suggestion[];
     };
     CustomEventType: UIMessage | RemoveUIMessage;
   }

@@ -47,6 +47,7 @@ class Settings(BaseSettings):
     issuer_url: str | None = None
     rate_limit_calls: int = 300
     rate_limit_window_s: int = 600
+    extract_max_rows: int = 1000
     tenant_ids: Annotated[tuple[int, ...], NoDecode] = ()
     default_columns: Annotated[tuple[str, ...], NoDecode] = _DEFAULT_COLUMNS
 

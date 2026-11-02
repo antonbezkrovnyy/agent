@@ -44,6 +44,14 @@ class IntentDecision(BaseModel):
         default=False,
         description="true только для правки существующего отчёта без нового расследования",
     )
+    export_data: bool = Field(
+        default=False,
+        description="true для полной таблицы или файла с событиями без нового анализа",
+    )
+    new_investigation: Literal["continue", "new", "uncertain"] = Field(
+        default="continue",
+        description="continue — та же задача; new — другая задача; uncertain — спросить пользователя",
+    )
     window: WindowSpec = Field(default_factory=WindowSpec)
 
 

@@ -246,6 +246,8 @@ async def search_events_flow(
         filter_applied=filter,
         activity=activity,
         order=order,
+        page=page,
+        per_page=limit,
     )
     if coverage is not None:
         envelope["coverage"] = coverage

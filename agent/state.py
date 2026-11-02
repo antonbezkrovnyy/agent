@@ -20,6 +20,20 @@ INV_MSGS = "inv_msgs"
 REP_MSGS = "rep_msgs"
 
 
+def merge_progress(left: dict, right: dict) -> dict:
+    if not left:
+        return right
+    if not right:
+        return left
+    if left.get("stage") == right.get("stage") and left.get("agent") == right.get("agent"):
+        return {
+            **left,
+            **right,
+            "tool_calls": max(left.get("tool_calls", 0), right.get("tool_calls", 0)),
+        }
+    return right
+
+
 class AgentWorkState(AgentState):
     """Внутреннее состояние create_agent: messages + поля для tools/промптов."""
 
@@ -35,6 +49,8 @@ class AgentWorkState(AgentState):
     scout_result: NotRequired[dict]
     critic: NotRequired[dict]
     rework: NotRequired[int]
+    run_tool_call_count: NotRequired[dict]
+    progress: NotRequired[Annotated[dict, merge_progress]]
 
 
 class State(MessagesState):
@@ -52,8 +68,13 @@ class State(MessagesState):
     scout_result: dict
     report_result: dict
     intent: dict
+    transition: str
+    archive_done: int
     critic: dict
     rework: int
+    tool_usage: dict
+    progress: Annotated[dict, merge_progress]
+    suggestions: list[dict]
     scout_msgs: Annotated[Sequence[BaseMessage], add_messages]
     inv_msgs: Annotated[Sequence[BaseMessage], add_messages]
     rep_msgs: Annotated[Sequence[BaseMessage], add_messages]

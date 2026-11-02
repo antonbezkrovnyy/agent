@@ -1,13 +1,11 @@
-"""Ноды внешнего workflow и вложенные create_agent-агенты.
+"""Runtime вложенных create_agent-агентов и их узлы для внешнего workflow.
 
 Tool-цикл каждого агента выполняется внутри create_agent. Наружу узлы
 переносят только новые сообщения в приватный канал и дельты состояния;
 в общий диалог попадают исключительно финальные ответы.
 """
 
-from datetime import UTC, datetime, timedelta
-from typing import Any
-from uuid import uuid4
+import asyncio
 
 from langchain.agents import create_agent
 from langchain.agents.middleware import ModelRequest, ToolCallLimitMiddleware, dynamic_prompt
@@ -19,7 +17,6 @@ from langchain_core.messages import (
     SystemMessage,
     filter_messages,
 )
-from langgraph.types import Overwrite
 
 import llm as llm_mod
 from config import Settings
@@ -28,20 +25,17 @@ from prompts import (
     context_block,
     critic_feedback_block,
     evidence_block,
-    intent_hint_block,
     inv_summary_block,
     last_report_block,
     scout_block,
     structured_block,
     system_prompt,
 )
+from progress import TOOL_LIMITS, agent_progress, done_progress, report_suggestions
 from state import INV_MSGS, REP_MSGS, SCOUT_MSGS, AgentWorkState, State
 from tools import investigator_tools, normalize_tool_result, reporter_tools, scout_tools
 
 settings = Settings()
-
-CRITIC_MSG_LIMIT = 2000
-CRITIC_DIALOG_LIMIT = 8000
 
 
 @dynamic_prompt
@@ -83,7 +77,7 @@ def build_agents() -> None:
             middleware=[
                 _scout_prompt,
                 normalize_tool_result,
-                ToolCallLimitMiddleware(run_limit=4, exit_behavior="end"),
+                ToolCallLimitMiddleware(run_limit=TOOL_LIMITS["scout"], exit_behavior="end"),
             ],
             response_format=llm_mod.ScoutResult,
             state_schema=AgentWorkState,
@@ -95,7 +89,7 @@ def build_agents() -> None:
             middleware=[
                 _investigator_prompt,
                 normalize_tool_result,
-                ToolCallLimitMiddleware(run_limit=12, exit_behavior="end"),
+                ToolCallLimitMiddleware(run_limit=TOOL_LIMITS["investigator"], exit_behavior="end"),
             ],
             response_format=llm_mod.InvestigationResult,
             state_schema=AgentWorkState,
@@ -107,7 +101,7 @@ def build_agents() -> None:
             middleware=[
                 _reporter_prompt,
                 normalize_tool_result,
-                ToolCallLimitMiddleware(run_limit=6, exit_behavior="end"),
+                ToolCallLimitMiddleware(run_limit=TOOL_LIMITS["reporter"], exit_behavior="end"),
             ],
             response_format=llm_mod.ReporterResult,
             state_schema=AgentWorkState,
@@ -124,8 +118,7 @@ def _last_human_index(messages: list) -> int:
 
 
 def _find_prev_final(state: State, agent: str) -> AIMessage | None:
-    """Финальный ответ агента в текущем run'е (после последнего сообщения
-    пользователя): доработка переписывает его, а не добавляет второй ответ."""
+    """Найти финальный ответ агента в текущем run для замены при доработке."""
     msgs = list(state["messages"])
     start = _last_human_index(msgs) + 1
     for msg in reversed(msgs[start:]):
@@ -140,11 +133,7 @@ def _agent_final(
     agent: str,
     artifacts: list[str] | None = None,
 ) -> dict:
-    """Финальный ответ (без tool_calls) — в общий диалог.
-
-    Репортёр при доработке удаляет свой предыдущий ответ и дописывает
-    новый в хвост. Артефакты прикрепляются к этому сообщению для UI.
-    """
+    """Финальный ответ без tool_calls и необязательные артефакты для UI."""
     out: list[BaseMessage] = []
     update: dict = {}
     final = AIMessage(content=response.content, name=agent)
@@ -187,6 +176,7 @@ def _agent_input(state: State, work_key: str) -> dict:
         "scout_result": state.get("scout_result") or {},
         "critic": state.get("critic") or {},
         "rework": state.get("rework") or 0,
+        "progress": state.get("progress") or {},
     }
 
 
@@ -234,12 +224,43 @@ def _structured_response(result: dict, schema=None) -> dict:
     raise RuntimeError("create_agent не вернул structured_response")
 
 
+def _timeout_result(schema, messages: list[BaseMessage]) -> dict:
+    note = "Технический таймаут: этап остановлен из-за слишком долгого ответа."
+    if schema is llm_mod.ScoutResult:
+        structured = llm_mod.ScoutResult(note=note)
+    elif schema is llm_mod.InvestigationResult:
+        structured = llm_mod.InvestigationResult(summary=note, limitations=[note])
+    else:
+        structured = llm_mod.ReporterResult(answer=note, limitations=[note])
+    return {
+        "messages": [*messages, AIMessage(content=note)],
+        "structured_response": structured,
+    }
+
+
 async def _run_agent(agent: str, state: State, work_key: str) -> tuple[dict, list[BaseMessage], dict]:
     """Запустить create_agent и подготовить только дельты для внешнего State."""
     agent_input = _agent_input(state, work_key)
+    stage_text = {
+        "scout": "Осматриваю журнал",
+        "investigator": "Анализирую события",
+        "reporter": "Формирую ответ",
+    }[agent]
+    agent_input["progress"] = agent_progress(
+        {**state, "tool_usage": {}},
+        agent,
+        stage_text,
+        agent,
+    )
     schema = _agent_schema(agent)
     for attempt in range(2):
-        result = await _agents[agent].ainvoke(agent_input)
+        try:
+            result = await asyncio.wait_for(
+                _agents[agent].ainvoke(agent_input),
+                timeout=settings.agent_timeout_seconds,
+            )
+        except TimeoutError:
+            result = _timeout_result(schema, agent_input["messages"])
         input_count = len(agent_input["messages"])
         new_messages = list(result["messages"][input_count:])
         try:
@@ -257,10 +278,12 @@ async def _run_agent(agent: str, state: State, work_key: str) -> tuple[dict, lis
             update[key] = values[before:]
     if result.get("last_report") != agent_input["last_report"]:
         update["last_report"] = result.get("last_report") or {}
+    counts = result.get("run_tool_call_count") or {}
+    usage = dict(state.get("tool_usage") or {})
+    usage[agent] = counts.get("__all__", usage.get(agent, 0))
+    update["tool_usage"] = usage
     return result, new_messages, update
 
-
-# ── Агенты ───────────────────────────────────────────────────────
 
 async def node_scout(state: State) -> dict:
     """Скаут: tool-цикл внутри create_agent, наружу — короткий ориентир."""
@@ -269,6 +292,8 @@ async def node_scout(state: State) -> dict:
     update[SCOUT_MSGS] = new_messages[:-1]
     update["scout_result"] = structured
     update["scout_note"] = structured["note"]
+    progress_state = {**state, "tool_usage": update["tool_usage"]}
+    update["progress"] = agent_progress(progress_state, "investigator", "Анализирую события", "investigator")
     return update
 
 
@@ -277,7 +302,9 @@ def node_chat(state: State) -> dict:
     system = system_prompt(compose("base", "chat"), scout_block(state))
     convo = [SystemMessage(content=system), *_agent_convo_messages(state)]
     response = llm_mod.llm.invoke(convo)
-    return _agent_final(state, response, "chat")
+    update = _agent_final(state, response, "chat")
+    update["progress"] = done_progress()
+    return update
 
 
 async def node_investigator(state: State) -> dict:
@@ -288,6 +315,11 @@ async def node_investigator(state: State) -> dict:
     update[INV_MSGS] = [*new_messages[:-1], final]
     update["inv_result"] = structured
     update["inv_summary"] = structured["summary"]
+    progress_state = {**state, "tool_usage": update["tool_usage"]}
+    if settings.critic_enabled:
+        update["progress"] = agent_progress(progress_state, "critic_evidence", "Проверяю доказательства", "investigator")
+    else:
+        update["progress"] = agent_progress(progress_state, "reporter", "Формирую ответ", "reporter")
     return update
 
 
@@ -297,6 +329,21 @@ async def node_reporter(state: State) -> dict:
     structured = _structured_response(result, llm_mod.ReporterResult)
     update[REP_MSGS] = new_messages[:-1]
     update["report_result"] = structured
+    progress_state = {
+        **state,
+        "tool_usage": update["tool_usage"],
+        "evidence": result.get("evidence") or state.get("evidence"),
+    }
+    update["suggestions"] = report_suggestions(
+        progress_state,
+        has_report=bool(result.get("last_report")),
+    )
+    if settings.critic_enabled:
+        update["progress"] = agent_progress(progress_state, "critic_report", "Проверяю ответ", "reporter")
+    else:
+        update["progress"] = done_progress(
+            "Готово с ограничениями" if structured.get("limitations") else "Готово"
+        )
     update.update(_agent_final(
         state,
         AIMessage(content=structured["answer"]),
@@ -304,203 +351,3 @@ async def node_reporter(state: State) -> dict:
         artifacts=list(result.get("artifacts") or []),
     ))
     return update
-
-
-# ── Интент ───────────────────────────────────────────────────────
-
-def _intent_messages(state: State) -> list[BaseMessage]:
-    system = system_prompt(compose("base", "intent"), intent_hint_block(state))
-    return [SystemMessage(content=system), *_agent_convo_messages(state)]
-
-
-def _last_human_text(state: State) -> str:
-    for msg in reversed(state.get("messages") or []):
-        if isinstance(msg, HumanMessage) and isinstance(msg.content, str):
-            return msg.content
-    return ""
-
-
-def _intent_structured(state: State) -> dict | None:
-    """Structured output с настроенным fallback на JSON mode."""
-    try:
-        decision = llm_mod.intent_llm.invoke(_intent_messages(state))
-    except Exception:
-        return None
-    if decision is None or not getattr(decision, "intent", None):
-        return None
-    window = getattr(decision, "window", None)
-    return {
-        "label": decision.intent,
-        "rationale": getattr(decision, "rationale", ""),
-        "needs_new_data": getattr(decision, "needs_new_data", False),
-        "edit_existing_report": getattr(decision, "edit_existing_report", False),
-        "window": window.model_dump() if window else {"last_minutes": 60},
-    }
-
-
-_COMPLEX_WORDS = (
-    "аномали", "расслед", "инцидент", "событи", "сколько", "почему",
-    "разбери", "проанализируй", "сравни", "цифр",
-)
-
-
-def _intent_heuristic(state: State) -> dict:
-    """Последний резерв: ключевые слова + состояние стейта."""
-    base = {"window": {"last_minutes": 60}}
-    if state.get("last_report"):
-        return {
-            **base,
-            "label": "continuation",
-            "rationale": "в стейте есть отчёт — продолжаем",
-            "needs_new_data": False,
-            "edit_existing_report": True,
-        }
-    if state.get("findings"):
-        return {
-            **base,
-            "label": "continuation",
-            "rationale": "в стейте есть записи — продолжаем",
-            "needs_new_data": True,
-            "edit_existing_report": False,
-        }
-    last = _last_human_text(state).lower()
-    if any(word in last for word in _COMPLEX_WORDS):
-        return {
-            **base,
-            "label": "complex",
-            "rationale": "похоже на запрос данных из журнала",
-            "needs_new_data": True,
-            "edit_existing_report": False,
-        }
-    return {
-        **base,
-        "label": "simple",
-        "rationale": "нет признаков анализа данных",
-        "needs_new_data": False,
-        "edit_existing_report": False,
-    }
-
-
-def _parse_time(value) -> datetime | None:
-    if not value:
-        return None
-    if isinstance(value, datetime):
-        moment = value
-    else:
-        moment = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
-    return moment.astimezone(UTC)
-
-
-def _new_context(decision: dict) -> dict:
-    spec = decision.get("window") or {}
-    end = _parse_time(spec.get("time_to")) or datetime.now(UTC)
-    start = _parse_time(spec.get("time_from")) or end - timedelta(
-        minutes=spec.get("last_minutes") or 60
-    )
-    return {
-        "id": uuid4().hex,
-        "time_from": start.isoformat(),
-        "time_to": end.isoformat(),
-        "timezone": "UTC",
-    }
-
-
-def node_intent(state: State) -> dict:
-    """Выбрать маршрут и зафиксировать окно нового расследования."""
-    decision = _intent_structured(state) or _intent_heuristic(state)
-    update: dict = {"intent": decision}
-    if decision.get("needs_new_data"):
-        update["context"] = _new_context(decision)
-        update["evidence"] = Overwrite([])
-        update["findings"] = Overwrite([])
-        update["last_report"] = {}
-    return update
-
-
-# ── Критик ───────────────────────────────────────────────────────
-
-def _findings_block(state: State) -> str:
-    findings = state.get("findings") or []
-    if not findings:
-        return "Записи расследования: отсутствуют."
-    return structured_block("Записи расследования", {"items": findings})
-
-
-def _intent_block(state: State) -> str:
-    """Сохранинный интент — чтобы критик понимал, чего хочет пользователь."""
-    intent = state.get("intent") or {}
-    if not intent.get("label"):
-        return "Интент: не определён."
-    line = f"Интент текущего запроса: {intent['label']}"
-    if intent.get("rationale"):
-        line += f" — {intent['rationale']}"
-    return line
-
-
-def _user_requests_block(state: State) -> str:
-    """Все сообщения пользователя в хронологии — не только последнее."""
-    users = [m for m in state.get("messages") or [] if isinstance(m, HumanMessage)]
-    if not users:
-        return "Сообщений пользователя нет."
-    lines = []
-    for i, msg in enumerate(users, start=1):
-        text = msg.content if isinstance(msg.content, str) else str(msg.content)
-        lines.append(f"{i}. {text[:CRITIC_MSG_LIMIT]}")
-    return "Сообщения пользователя (в хронологии):\n" + "\n".join(lines)[:CRITIC_DIALOG_LIMIT]
-
-
-def _critic_messages(state: State, prompt: str, extra_block: str) -> list[BaseMessage]:
-    parts = [
-        compose("base", prompt),
-        _intent_block(state),
-        _user_requests_block(state),
-        context_block(state),
-        evidence_block(state),
-        _findings_block(state),
-        extra_block,
-    ]
-    return [
-        SystemMessage(content=system_prompt(*parts)),
-        HumanMessage(content="Проверь работу по критериям из системного промпта."),
-    ]
-
-
-def _critic_run(state: State, prompt: str, model: Any, allowed_verdicts: tuple, extra_block: str) -> dict:
-    """Один ход критика. Сбой критика не роняет run: дефолт — ok."""
-    verdict, feedback = "ok", ""
-    try:
-        result = model.invoke(_critic_messages(state, prompt, extra_block))
-        if result is not None:
-            verdict = result.verdict if result.verdict in allowed_verdicts else "ok"
-            feedback = getattr(result, "feedback", "") or ""
-    except Exception:
-        pass
-    rework = state.get("rework", 0) + (0 if verdict == "ok" else 1)
-    return {"critic": {"verdict": verdict, "feedback": feedback}, "rework": rework}
-
-
-def node_critic_evidence(state: State) -> dict:
-    """Критик после инвестигейтора: достаточно ли улик для отчёта."""
-    extra = structured_block("Результат инвестигейтора", state.get("inv_result"))
-    return _critic_run(
-        state,
-        "critic_evidence",
-        llm_mod.critic_evidence_llm,
-        ("ok", "rework_data"),
-        extra or inv_summary_block(state.get("inv_summary") or "(резюме пока нет)"),
-    )
-
-
-def node_critic_report(state: State) -> dict:
-    """Критик после репортёра: проверяет отчёт и выбирает доработку."""
-    if state.get("last_report"):
-        extra = last_report_block(state["last_report"])
-    else:
-        extra = structured_block("Финальный ответ репортёра", state.get("report_result"))
-    return _critic_run(
-        state,
-        "critic_report",
-        llm_mod.critic_report_llm,
-        ("ok", "rework_report", "rework_data"),
-        extra or "(ответа пока нет)",
-    )

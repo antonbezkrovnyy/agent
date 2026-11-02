@@ -26,3 +26,7 @@ class Settings(BaseSettings):
     critic_enabled: bool = True
     # Сколько раз за run критик может отправить на доработку (улики + отчёт, суммарно)
     max_rework: int = 1
+
+    # Технические таймауты от зависаний; пользователь не управляет ими
+    agent_timeout_seconds: int = 600
+    export_timeout_seconds: int = 120

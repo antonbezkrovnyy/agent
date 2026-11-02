@@ -86,3 +86,37 @@ def test_log_finding_rejects_unknown_evidence_id(patch_llm):
     errors = [m for m in result["inv_msgs"] if isinstance(m, ToolMessage) and m.status == "error"]
     assert len(errors) == 1
     assert "missing" in errors[0].content
+
+
+def test_tool_result_updates_nested_progress(patch_llm):
+    import asyncio
+
+    from conftest import agents_mod
+
+    agent = FakeAgent({
+        "Ты — скаут": [ai(calls=[tc("server_time", {}), tc("server_time", {})]), ai("Готово")],
+    })
+    patch_llm(agent, FakeStructured(intent()))
+    state = {
+        "messages": [],
+        "callback_url": "",
+        "artifacts": [],
+        "findings": [],
+        "evidence": [],
+        "context": {},
+        "last_report": {},
+        "inv_summary": "",
+        "inv_result": {},
+        "scout_note": "",
+        "scout_result": {},
+        "critic": {},
+        "rework": 0,
+        "tool_usage": {},
+        "progress": {},
+    }
+
+    result, _, _ = asyncio.run(agents_mod._run_agent("scout", state, "scout_msgs"))
+
+    assert result["progress"]["agent"] == "scout"
+    assert result["progress"]["tool_calls"] == 2
+    assert result["progress"]["tool_limit"] == 10

@@ -8,6 +8,8 @@ import { Button } from "../ui/button";
 import { Checkpoint, Message } from "@langchain/langgraph-sdk";
 import { AssistantMessage, AssistantMessageLoading } from "./messages/ai";
 import { HumanMessage } from "./messages/human";
+import { ProgressView, SuggestionButtons } from "./progress";
+import { isRenderableInterrupt } from "@/lib/renderable-interrupt";
 import {
   DO_NOT_RENDER_ID_PREFIX,
   ensureToolCallsHaveResponses,
@@ -442,16 +444,20 @@ export function Thread() {
                         />
                       ),
                     )}
-                  {/* Special rendering case where there are no AI/tool messages, but there is an interrupt.
-                    We need to render it outside of the messages list, since there are no messages to render */}
-                  {hasNoAIOrToolMessages && !!stream.interrupt && (
-                    <AssistantMessage
-                      key="interrupt-msg"
-                      message={undefined}
-                      isLoading={isLoading}
-                      handleRegenerate={handleRegenerate}
-                    />
+                  <ProgressView progress={stream.values.progress} />
+                  {!isLoading && !isRenderableInterrupt(stream.interrupt) && (
+                    <SuggestionButtons suggestions={stream.values.suggestions} />
                   )}
+                  {isRenderableInterrupt(stream.interrupt) &&
+                    (hasNoAIOrToolMessages ||
+                      messages[messages.length - 1]?.type === "human") && (
+                      <AssistantMessage
+                        key="interrupt-msg"
+                        message={undefined}
+                        isLoading={isLoading}
+                        handleRegenerate={handleRegenerate}
+                      />
+                    )}
                   {isLoading && !firstTokenReceived && (
                     <AssistantMessageLoading />
                   )}
