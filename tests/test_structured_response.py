@@ -1,7 +1,7 @@
 from conftest import agents_mod, ai, llm_mod, tc
 
 
-def test_recovers_structured_call_followed_by_plain_text():
+def test_plain_text_after_tool_call_uses_schema_fallback_not_manual_parser():
     result = {
         "messages": [
             ai(calls=[tc("InvestigationResult", {
@@ -11,10 +11,11 @@ def test_recovers_structured_call_followed_by_plain_text():
         ]
     }
 
-    structured = agents_mod._structured_response(result)
+    structured = agents_mod._structured_response(result, llm_mod.InvestigationResult)
 
-    assert structured["summary"] == "17 событий"
+    assert structured["summary"] == "Обычный текст после structured output"
     assert structured["claims"] == []
+    assert structured["limitations"]
 
 
 def test_plain_text_becomes_schema_with_limitation():

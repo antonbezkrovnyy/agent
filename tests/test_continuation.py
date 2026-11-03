@@ -44,3 +44,25 @@ def test_report_edit_keeps_evidence_and_context(patch_llm):
     assert len(second["artifacts"]) == 1
     assert texts(second) == ["подготовь отчёт", "Отчёт готов", "сократи отчёт", "Отчёт сокращён"]
     assert_clean(second)
+
+
+def test_report_request_without_existing_file_goes_to_reporter(patch_llm):
+    agent = FakeAgent({
+        "Ты — репортёр": [
+            ai(calls=[tc("save_report", {
+                "title": "Отчёт расследования",
+                "markdown": "# Выводы и цепочка",
+            })]),
+            ai("Отчёт готов"),
+        ],
+    })
+    decision = intent("continuation", new=False, edit=True)
+    decision.export_data = False
+    patch_llm(agent, FakeStructured(decision))
+
+    result = invoke(build_graph(), "пришли мне отчет о расследовании")
+
+    assert result["report_result"]["answer"] == "Отчёт готов"
+    assert result["last_report"]["title"] == "Отчёт расследования"
+    assert len(result["artifacts"]) == 1
+    assert all(item["tool"] != "extract_data" for item in result["evidence"])

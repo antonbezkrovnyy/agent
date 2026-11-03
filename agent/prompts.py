@@ -7,10 +7,13 @@
 import json
 from pathlib import Path
 
+from config import Settings
+from evidence import evidence_overview_block, full_evidence_block
+
 PROMPTS_DIR = Path(__file__).with_name("prompts")
 
-REPORT_INJECT_LIMIT = 8000
-EVIDENCE_INJECT_LIMIT = 20000
+settings = Settings()
+REPORT_INJECT_LIMIT = settings.report_inject_limit
 
 
 def load(name: str) -> str:
@@ -41,33 +44,31 @@ def context_block(state: dict) -> str:
     if not context.get("time_from") or not context.get("time_to"):
         return ""
     return (
-        "Зафиксированный контекст расследования:\n"
+        "Контекст расследования:\n"
         f"id: {context.get('id')}\n"
-        f"time_from: {context['time_from']}\n"
-        f"time_to: {context['time_to']}\n"
-        "Все запросы выполняются только в этих границах. Не пересчитывай now и не меняй окно."
+        f"активное окно: {context['time_from']} — {context['time_to']}\n"
+        f"base_window: {context.get('base_window') or {}}\n"
+        f"focus_window: {context.get('focus_window')}\n"
+        "По умолчанию используй активное окно. Для deep-анализа меняй его через "
+        "update_window; явные границы обычного запроса не перезаписываются."
     )
 
 
-def evidence_block(state: dict) -> str:
-    records = state.get("evidence") or []
-    if not records:
-        return "Доказательства: пока отсутствуют."
-    compact = []
-    for record in records:
-        item = {key: value for key, value in record.items() if key != "result"}
-        result = dict(record.get("result") or {})
-        events = result.get("events")
-        if isinstance(events, list) and len(events) > 3:
-            result["events"] = events[:3]
-            result["events_in_prompt"] = 3
-            result["events_total_in_result"] = len(events)
-        item["result"] = result
-        compact.append(item)
-    text = json.dumps(compact, ensure_ascii=False)
-    if len(text) > EVIDENCE_INJECT_LIMIT:
-        text = text[:EVIDENCE_INJECT_LIMIT] + "\n[Доказательства обрезаны]"
-    return "Фактические результаты инструментов (Evidence):\n" + text
+def skill_block(state: dict) -> str:
+    skill = state.get("active_skill") or {}
+    if not skill.get("id"):
+        return ""
+    return (
+        "Активный версионируемый skill. Следуй strategy и stop_rules, используй "
+        "только allowed_tools и верни structured skill_run с теми же id/version:\n"
+        + json.dumps(skill, ensure_ascii=False)
+    )
+
+
+def evidence_block(state: dict, *, full: bool = False, evidence_ids=None) -> str:
+    if full:
+        return full_evidence_block(state, evidence_ids)
+    return evidence_overview_block(state)
 
 
 def structured_block(title: str, value: dict | None) -> str:
@@ -97,11 +98,48 @@ def intent_hint_block(state: dict) -> str:
     """Подсказка классификатору: что уже есть в стейте."""
     has_report = bool(state.get("last_report"))
     findings = state.get("findings") or []
-    return (
+    text = (
         "Состояние диалога: "
         f"последний отчёт — {'есть' if has_report else 'нет'}, "
         f"записей расследования — {len(findings)}."
     )
+    candidates = state.get("memory_candidates") or []
+    if candidates:
+        text += "\nПрошлые случаи из долговременной памяти (memory_candidates):\n" + json.dumps(
+            candidates, ensure_ascii=False
+        )
+    if state.get("memory_error"):
+        text += "\n" + state["memory_error"]
+    return text
+
+
+def memory_block(state: dict) -> str:
+    parts = []
+    if state.get("memory_loaded"):
+        parts.append(
+            f"Из Case Store загружено дело {state['memory_loaded']}. "
+            "Прежде чем использовать старый ответ, выполни контрольный запрос к LogiCore "
+            "и проверь ключевой вывод на фактических данных."
+        )
+    facts = state.get("context_memories") or []
+    if facts:
+        parts.append(
+            "Релевантная Context Memory. Это организационный контекст и гипотезы для проверки, "
+            "а не свежие Evidence текущего расследования. При влиянии на вывод перепроверь через LogiCore. "
+            "Для поиска по новым сущностям используй search_context_memory:\n"
+            + json.dumps(facts, ensure_ascii=False)
+        )
+    cases = state.get("similar_cases") or []
+    if cases:
+        parts.append(
+            "Похожие прошлые дела. Это компактные карточки для построения гипотез, "
+            "а не continuation и не Evidence текущего дела. Не загружай их state; "
+            "проверяй выводы свежими запросами. При новых сущностях используй search_similar_cases:\n"
+            + json.dumps(cases, ensure_ascii=False)
+        )
+    if state.get("memory_error"):
+        parts.append(state["memory_error"] + " Текущая работа продолжается в state треда.")
+    return "\n\n".join(parts)
 
 
 def critic_feedback_block(state: dict) -> str:

@@ -9,8 +9,17 @@ class Settings(BaseSettings):
     )
 
     llm_model: str = "qwen3.7-flash"
+    llm_model_intent: str = ""
+    llm_model_scout: str = ""
+    llm_model_investigator: str = ""
+    llm_model_reporter: str = ""
+    llm_model_critic: str = ""
+    llm_model_memory: str = ""
     llm_base_url: str
     llm_token: str
+
+    summarization_trigger_tokens: int = 6000
+    summarization_keep_messages: int = 20
 
     # Logicore MCP (streamable-http в отдельном контейнере logicore-mcp, ADR-0010)
     logicore_mcp_url: str = Field(
@@ -26,6 +35,30 @@ class Settings(BaseSettings):
     critic_enabled: bool = True
     # Сколько раз за run критик может отправить на доработку (улики + отчёт, суммарно)
     max_rework: int = 1
+    critic_message_limit: int = 2000
+    critic_dialog_limit: int = 8000
+    report_inject_limit: int = 8000
+
+    # Лимиты одного create_agent.ainvoke, а не всего чата
+    agent_tool_limit_scout: int = 10
+    agent_tool_limit_investigator: int = 30
+    agent_tool_limit_reporter: int = 60
+
+    # Отдельные Case Store и Context Memory, не БД Aegra checkpoints
+    agent_memory_database_url: str = ""
+    agent_memory_recent_limit: int = 3
+    agent_memory_scope: str = "default"
+    agent_memory_retrieval_limit: int = 5
+    agent_memory_case_retrieval_limit: int = 3
+    agent_memory_consolidation_candidates: int = 10
+    agent_memory_max_operations: int = 8
+    agent_memory_similarity_threshold: float = 0.10
+    agent_memory_dedup_threshold: float = 0.90
+    agent_memory_observed_ttl_hours: int = 24
+    agent_memory_embedding_model: str = "bge-m3"
+    agent_memory_embedding_dimensions: int = 1024
+    agent_memory_embedding_base_url: str = ""
+    agent_memory_embedding_token: str = ""
 
     # Технические таймауты от зависаний; пользователь не управляет ими
     agent_timeout_seconds: int = 600

@@ -41,6 +41,21 @@ services:
       - PHOENIX_ENABLE_OTLP=true
     # Убираем command полностью - образ сам знает, как запустить сервер
 
+  agent-memory-db:
+    image: pgvector/pgvector:pg18
+    restart: unless-stopped
+    environment:
+      - POSTGRES_USER=agent_memory
+      - POSTGRES_PASSWORD=${AGENT_MEMORY_POSTGRES_PASSWORD:-agent_memory_password}
+      - POSTGRES_DB=agent_memory_db
+    volumes:
+      - agent_memory_data:/var/lib/postgresql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U agent_memory -d agent_memory_db"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
   aegra:
     build:
       context: https://github.com/aegra/aegra.git
@@ -53,6 +68,7 @@ services:
     environment:
       # Используем DATABASE_URL вместо отдельных POSTGRES_* переменных
       - DATABASE_URL=postgresql+asyncpg://aegra:${POSTGRES_PASSWORD:-aegra_password}@postgres:5432/aegra_db
+      - AGENT_MEMORY_DATABASE_URL=postgresql://agent_memory:${AGENT_MEMORY_POSTGRES_PASSWORD:-agent_memory_password}@agent-memory-db:5432/agent_memory_db
       - PYTHONPATH=/app/src:/app/custom_agent
       - REDIS_BROKER_ENABLED=true
       - REDIS_URL=redis://redis:6379/0
@@ -62,6 +78,8 @@ services:
       - PHOENIX_COLLECTOR_ENDPOINT=http://phoenix:6006/v1/traces
     depends_on:
       postgres:
+        condition: service_healthy
+      agent-memory-db:
         condition: service_healthy
       redis:
         condition: service_healthy
@@ -130,4 +148,5 @@ services:
       - NEXT_PUBLIC_ASSISTANT_ID=agent
 volumes:
   postgres_data:
+  agent_memory_data:
   redis_data:

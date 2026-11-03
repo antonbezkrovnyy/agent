@@ -6,9 +6,10 @@ Tool-цикл каждого агента выполняется внутри cr
 """
 
 import asyncio
+from datetime import UTC, datetime
 
 from langchain.agents import create_agent
-from langchain.agents.middleware import ModelRequest, ToolCallLimitMiddleware, dynamic_prompt
+from langchain.agents.middleware import ModelRequest, SummarizationMiddleware, ToolCallLimitMiddleware, dynamic_prompt
 from langchain_core.messages import (
     AIMessage,
     BaseMessage,
@@ -20,6 +21,7 @@ from langchain_core.messages import (
 
 import llm as llm_mod
 from config import Settings
+from evidence import chain_block
 from prompts import (
     compose,
     context_block,
@@ -27,15 +29,31 @@ from prompts import (
     evidence_block,
     inv_summary_block,
     last_report_block,
+    memory_block,
     scout_block,
+    skill_block,
     structured_block,
     system_prompt,
 )
 from progress import TOOL_LIMITS, agent_progress, done_progress, report_suggestions
+from skills import get_skill
 from state import INV_MSGS, REP_MSGS, SCOUT_MSGS, AgentWorkState, State
 from tools import investigator_tools, normalize_tool_result, reporter_tools, scout_tools
 
 settings = Settings()
+
+
+def _middleware(role: str, prompt):
+    return [
+        SummarizationMiddleware(
+            model=llm_mod.model_for_role(role),
+            trigger=("tokens", settings.summarization_trigger_tokens),
+            keep=("messages", settings.summarization_keep_messages),
+        ),
+        prompt,
+        normalize_tool_result,
+        ToolCallLimitMiddleware(run_limit=TOOL_LIMITS[role], exit_behavior="end"),
+    ]
 
 
 @dynamic_prompt
@@ -46,20 +64,29 @@ def _scout_prompt(request: ModelRequest) -> str:
 @dynamic_prompt
 def _investigator_prompt(request: ModelRequest) -> str:
     state = request.state
-    blocks = [context_block(state), scout_block(state), evidence_block(state), critic_feedback_block(state)]
+    blocks = [
+        context_block(state),
+        scout_block(state),
+        skill_block(state),
+        evidence_block(state),
+        structured_block("Журнал гипотез", {"items": state.get("hypotheses") or []}),
+        memory_block(state),
+        critic_feedback_block(state),
+    ]
     return system_prompt(compose("base", "investigator"), *blocks)
 
 
 @dynamic_prompt
 def _reporter_prompt(request: ModelRequest) -> str:
     state = request.state
-    blocks: list[str] = [context_block(state), evidence_block(state)]
+    blocks: list[str] = [context_block(state), scout_block(state), evidence_block(state), chain_block(state)]
     if state.get("inv_result"):
         blocks.append(structured_block("Структурированный результат инвестигейтора", state["inv_result"]))
     elif state.get("inv_summary"):
         blocks.append(inv_summary_block(state["inv_summary"]))
     if state.get("last_report"):
         blocks.append(last_report_block(state["last_report"]))
+    blocks.append(memory_block(state))
     blocks.append(critic_feedback_block(state))
     return system_prompt(compose("base", "reporter"), *blocks)
 
@@ -72,37 +99,25 @@ def build_agents() -> None:
     global _agents
     _agents = {
         "scout": create_agent(
-            model=llm_mod.llm,
+            model=llm_mod.model_for_role("scout"),
             tools=scout_tools,
-            middleware=[
-                _scout_prompt,
-                normalize_tool_result,
-                ToolCallLimitMiddleware(run_limit=TOOL_LIMITS["scout"], exit_behavior="end"),
-            ],
+            middleware=_middleware("scout", _scout_prompt),
             response_format=llm_mod.ScoutResult,
             state_schema=AgentWorkState,
             name="scout",
         ),
         "investigator": create_agent(
-            model=llm_mod.llm,
+            model=llm_mod.model_for_role("investigator"),
             tools=investigator_tools,
-            middleware=[
-                _investigator_prompt,
-                normalize_tool_result,
-                ToolCallLimitMiddleware(run_limit=TOOL_LIMITS["investigator"], exit_behavior="end"),
-            ],
+            middleware=_middleware("investigator", _investigator_prompt),
             response_format=llm_mod.InvestigationResult,
             state_schema=AgentWorkState,
             name="investigator",
         ),
         "reporter": create_agent(
-            model=llm_mod.llm,
+            model=llm_mod.model_for_role("reporter"),
             tools=reporter_tools,
-            middleware=[
-                _reporter_prompt,
-                normalize_tool_result,
-                ToolCallLimitMiddleware(run_limit=TOOL_LIMITS["reporter"], exit_behavior="end"),
-            ],
+            middleware=_middleware("reporter", _reporter_prompt),
             response_format=llm_mod.ReporterResult,
             state_schema=AgentWorkState,
             name="reporter",
@@ -168,12 +183,21 @@ def _agent_input(state: State, work_key: str) -> dict:
         "artifacts": list(state.get("artifacts") or []),
         "findings": list(state.get("findings") or []),
         "evidence": list(state.get("evidence") or []),
+        "hypotheses": list(state.get("hypotheses") or []),
         "context": state.get("context") or {},
         "last_report": state.get("last_report") or {},
         "inv_summary": state.get("inv_summary") or "",
         "inv_result": state.get("inv_result") or {},
         "scout_note": state.get("scout_note") or "",
         "scout_result": state.get("scout_result") or {},
+        "active_skill": state.get("active_skill") or {},
+        "skill_runs": list(state.get("skill_runs") or []),
+        "anchors": list(state.get("anchors") or []),
+        "visited_anchors": list(state.get("visited_anchors") or []),
+        "memory_loaded": state.get("memory_loaded") or "",
+        "memory_error": state.get("memory_error") or "",
+        "context_memories": list(state.get("context_memories") or []),
+        "similar_cases": list(state.get("similar_cases") or []),
         "critic": state.get("critic") or {},
         "rework": state.get("rework") or 0,
         "progress": state.get("progress") or {},
@@ -192,17 +216,6 @@ def _structured_response(result: dict, schema=None) -> dict:
     value = result.get("structured_response")
     if value is not None:
         return value.model_dump() if hasattr(value, "model_dump") else dict(value)
-
-    schemas = {
-        llm_mod.ScoutResult.__name__: llm_mod.ScoutResult,
-        llm_mod.InvestigationResult.__name__: llm_mod.InvestigationResult,
-        llm_mod.ReporterResult.__name__: llm_mod.ReporterResult,
-    }
-    for message in reversed(result.get("messages") or []):
-        for call in reversed(getattr(message, "tool_calls", None) or []):
-            found = schemas.get(call.get("name"))
-            if found is not None and (schema is None or found is schema):
-                return found.model_validate(call["args"]).model_dump()
 
     content = next(
         (message.content for message in reversed(result.get("messages") or [])
@@ -276,8 +289,12 @@ async def _run_agent(agent: str, state: State, work_key: str) -> tuple[dict, lis
         values = list(result.get(key) or [])
         if len(values) > before:
             update[key] = values[before:]
+    if result.get("hypotheses") != agent_input["hypotheses"]:
+        update["hypotheses"] = list(result.get("hypotheses") or [])
     if result.get("last_report") != agent_input["last_report"]:
         update["last_report"] = result.get("last_report") or {}
+    if result.get("context") != agent_input["context"]:
+        update["context"] = result.get("context") or agent_input["context"]
     counts = result.get("run_tool_call_count") or {}
     usage = dict(state.get("tool_usage") or {})
     usage[agent] = counts.get("__all__", usage.get(agent, 0))
@@ -285,15 +302,45 @@ async def _run_agent(agent: str, state: State, work_key: str) -> tuple[dict, lis
     return result, new_messages, update
 
 
+def _work_mode_update(state: State, mode: str, reason: str) -> dict:
+    update: dict = {"work_mode": mode}
+    if state.get("work_mode") != mode:
+        history = list(state.get("depth_history") or [])
+        history.append({
+            "from": state.get("work_mode"),
+            "to": mode,
+            "reason": reason,
+            "at": datetime.now(UTC).isoformat(timespec="seconds"),
+        })
+        update["depth_history"] = history
+    return update
+
+
 async def node_scout(state: State) -> dict:
-    """Скаут: tool-цикл внутри create_agent, наружу — короткий ориентир."""
+    """Quick-проверка; при необходимости автоматически передаёт работу в deep."""
     result, new_messages, update = await _run_agent("scout", state, SCOUT_MSGS)
     structured = _structured_response(result, llm_mod.ScoutResult)
     update[SCOUT_MSGS] = new_messages[:-1]
     update["scout_result"] = structured
     update["scout_note"] = structured["note"]
+    escalation = structured.get("escalation") or {}
+    needs_deep = bool(escalation.get("needed"))
+    update.update(_work_mode_update(state, "deep" if needs_deep else "quick", escalation.get("reason") or "quick_complete"))
+    skill = get_skill(escalation.get("suggested_skill")) if needs_deep else None
+    update["active_skill"] = {
+        **skill.model_dump(),
+        "selected_at": datetime.now(UTC).isoformat(timespec="milliseconds"),
+    } if skill else {}
     progress_state = {**state, "tool_usage": update["tool_usage"]}
-    update["progress"] = agent_progress(progress_state, "investigator", "Анализирую события", "investigator")
+    if needs_deep:
+        text = {
+            "incident_dating": "Ищу первое появление",
+            "event_drilldown": "Разбираю событие",
+            "entity_pivot": "Проверяю связанные сущности",
+        }.get(skill.id if skill else None, "Углубляю анализ")
+        update["progress"] = agent_progress(progress_state, "investigator", text, "investigator")
+    else:
+        update["progress"] = agent_progress(progress_state, "reporter", "Данных достаточно — формирую ответ", "reporter")
     return update
 
 
@@ -307,14 +354,106 @@ def node_chat(state: State) -> dict:
     return update
 
 
+def _anchor_key(anchor: dict) -> str:
+    return f"{anchor.get('type', 'custom')}:{str(anchor.get('value') or '').strip().lower()}"
+
+
+def _skill_run_update(state: State, result: dict, structured: dict) -> dict:
+    active = state.get("active_skill") or {}
+    if not active.get("id"):
+        return {}
+    run = structured.get("skill_run")
+    if not run or run.get("skill_id") != active["id"] or run.get("version") != active["version"]:
+        note = "Skill не вернул корректный structured skill_run."
+        structured.setdefault("limitations", []).append(note)
+        run = {
+            "skill_id": active["id"],
+            "version": active["version"],
+            "status": "failed",
+            "summary": structured.get("summary") or note,
+            "window_updates": 0,
+            "evidence_ids": [],
+            "not_checked": [note],
+        }
+    available = {item.get("id") for item in result.get("evidence") or state.get("evidence") or []}
+    unknown = [item for item in run.get("evidence_ids") or [] if item not in available]
+    if unknown:
+        run["evidence_ids"] = [item for item in run.get("evidence_ids") or [] if item in available]
+        run.setdefault("not_checked", []).append("Из skill_run удалены неизвестные evidence_id.")
+        run["status"] = "partial"
+    before = len((state.get("context") or {}).get("window_history") or [])
+    after = len((result.get("context") or {}).get("window_history") or [])
+    run["window_updates"] = max(0, after - before)
+    if run["window_updates"] > active.get("max_window_updates", 0):
+        run.setdefault("not_checked", []).append("Превышен лимит изменений окна skill.")
+        run["status"] = "partial"
+
+    existing_anchors = list(state.get("anchors") or [])
+    merged = {_anchor_key(item): dict(item) for item in existing_anchors}
+    valid_anchors = []
+    for anchor in run.get("anchors") or []:
+        evidence_ids = [item for item in anchor.get("evidence_ids") or [] if item in available]
+        if not evidence_ids:
+            run.setdefault("not_checked", []).append(f"Anchor без Evidence пропущен: {_anchor_key(anchor)}.")
+            run["status"] = "partial"
+            continue
+        anchor = {**anchor, "evidence_ids": evidence_ids}
+        key = _anchor_key(anchor)
+        valid_anchors.append(anchor)
+        previous = merged.get(key)
+        if previous:
+            anchor["evidence_ids"] = list(dict.fromkeys([
+                *(previous.get("evidence_ids") or []),
+                *evidence_ids,
+            ]))
+        merged[key] = anchor
+    run["anchors"] = valid_anchors
+    if len(valid_anchors) > active.get("max_branches", 1):
+        run.setdefault("not_checked", []).append("Превышен лимит новых anchors skill.")
+        run["status"] = "partial"
+    if run.get("depth", 0) > active.get("max_depth", 0):
+        run.setdefault("not_checked", []).append("Превышена глубина pivot skill.")
+        run["status"] = "partial"
+
+    previous_visited = {item.strip().lower() for item in state.get("visited_anchors") or []}
+    run_visited = list(dict.fromkeys(
+        item.strip().lower() for item in run.get("visited_anchors") or [] if item.strip()
+    ))
+    if previous_visited.intersection(run_visited):
+        run.setdefault("not_checked", []).append("Обнаружено повторное посещение anchors.")
+        run["status"] = "partial"
+    run["visited_anchors"] = run_visited
+    if active["id"] == "entity_pivot":
+        visited = previous_visited.union(run_visited)
+        for key in sorted(set(merged).difference(visited)):
+            note = f"Ветка не исследована в этом skill_run: {key}."
+            if note not in run.setdefault("not_checked", []):
+                run["not_checked"].append(note)
+    recorded_at = datetime.now(UTC)
+    run["model"] = llm_mod.model_name_for_role("investigator")
+    if active.get("selected_at"):
+        selected_at = datetime.fromisoformat(active["selected_at"].replace("Z", "+00:00"))
+        run["duration_ms"] = max(0, int((recorded_at - selected_at).total_seconds() * 1000))
+    run["recorded_at"] = recorded_at.isoformat(timespec="seconds")
+    return {
+        "skill_runs": [run],
+        "anchors": list(merged.values()),
+        "visited_anchors": sorted(previous_visited.union(run_visited)),
+    }
+
+
 async def node_investigator(state: State) -> dict:
     """Инвестигейтор: завершает работу резюмем для критика и репортёра."""
     result, new_messages, update = await _run_agent("investigator", state, INV_MSGS)
     structured = _structured_response(result, llm_mod.InvestigationResult)
+    if structured.get("limitations") and structured.get("status") == "done":
+        structured["status"] = "partial"
     final = AIMessage(content=structured["summary"], name="investigator")
     update[INV_MSGS] = [*new_messages[:-1], final]
+    update.update(_skill_run_update(state, result, structured))
     update["inv_result"] = structured
     update["inv_summary"] = structured["summary"]
+    update.update(_work_mode_update(state, "deep", "deep_investigation"))
     progress_state = {**state, "tool_usage": update["tool_usage"]}
     if settings.critic_enabled:
         update["progress"] = agent_progress(progress_state, "critic_evidence", "Проверяю доказательства", "investigator")
@@ -327,6 +466,10 @@ async def node_reporter(state: State) -> dict:
     """Репортёр: создаёт или редактирует отчёт внутри create_agent."""
     result, new_messages, update = await _run_agent("reporter", state, REP_MSGS)
     structured = _structured_response(result, llm_mod.ReporterResult)
+    if state.get("memory_error"):
+        note = state["memory_error"] + " Текущий результат сохранён только в state треда."
+        if note not in structured.setdefault("limitations", []):
+            structured["limitations"].append(note)
     update[REP_MSGS] = new_messages[:-1]
     update["report_result"] = structured
     progress_state = {

@@ -49,7 +49,7 @@ def test_rework_and_new_message_reset_limit(patch_llm):
         ],
         "Ты — репортёр": [ai("Новый ответ")],
     })
-    patch_llm(agent2, FakeStructured(intent("continuation", new=True)))
+    patch_llm(agent2, FakeStructured(intent("continuation", new=True, mode="deep")))
     second = invoke(graph, "второй запрос", thread_id="turn-limit")
 
     assert second["tool_usage"]["investigator"] == 31

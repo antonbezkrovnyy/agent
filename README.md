@@ -7,32 +7,56 @@ Mars API, Aegra предоставляет API и checkpoints, Phoenix соби�
 Документы разделены по назначению:
 
 - **этот README** — что работает сейчас и как запустить;
-- [DEV.md](DEV.md) — текущая архитектура для разработчика;
-- [INVESTIGATION_PLAN.md](INVESTIGATION_PLAN.md) — планируемые доработки;
+- [DEV.md](docs/DEV.md) — полное руководство по работе и устройству агента;
 - [AGENTS.md](AGENTS.md) — правила внесения изменений.
 
 ## Что работает сейчас
 
 - Обычный чат без обращения к LogiCore.
-- Структурированный intent: simple, complex, continuation, export и смена
-  расследования.
+- Структурированный intent: simple, complex, continuation, export и выбор
+  `work_mode=quick/deep`.
+- Quick отвечает через scout → reporter без глубокого расследования; при нехватке
+  данных или найденной зацепке автоматически переходит в deep.
+- Deep идёт через investigator и может сам менять окно через `update_window`.
+- Skills `incident_dating`, `event_drilldown` и `entity_pivot` v1 автоматически
+  выбираются по задаче. Есть адаптивные окна, разбор `uuid + timestamp`, typed
+  anchors, дедупликация `type:value`, ограничения глубины/ширины и `NOT_CHECKED`.
 - Поиск, подсчёт и агрегаты через 12 read-only MCP-инструментов.
-- Приватные tool-циклы scout, investigator и reporter через `create_agent`.
+- Отдельные Quick, Deep Investigation и Reporting-субграфы с delta-границей,
+  которая не дублирует additive state в supervisor.
+- Приватные tool-циклы scout, investigator и reporter через `create_agent` и
+  `SummarizationMiddleware` для длинной истории.
+- Собственная `agent-memory-db`: Case Store в предметной таблице дел и Context Memory
+  атомарных фактов с provenance, pgvector-поиском и консолидацией после расследования.
+  Восстановление дела в новом треде требует контрольного запроса к LogiCore.
+- Отдельный `search_similar_cases` находит компактные карточки похожих дел без
+  continuation и подмены текущих Evidence.
+- Журнал гипотез `open/supported/rejected` с историей, Evidence ID и отображением
+  в детерминированной цепочке отчёта.
+- Pydantic-контракты Evidence/Finding, расширенные Scout/Intent/Reporting и
+  структурированные `issues` критиков с `suggested_action`.
+- Модели по ролям через env; `model` и фактическая `duration_ms` в `skill_runs`.
 - `Evidence` с фактическими аргументами, окном, статусом и результатом вызова.
-- Структурированные ответы агентов и критиков с текстовым fallback.
-- Continuation с сохранением `context.id`, окна, Evidence и findings.
-- Подтверждение смены расследования через interrupt. Архив создаётся только
-  после выбора `new/new_thread`.
+  Явные `time_from/time_to` запроса не перезаписываются контекстом.
+- Компактный обзор Evidence для агентов, полный `Evidence Bundle` по claims для
+  критика и локальный `get_evidence(id)` без повторного MCP-запроса.
+- Детерминированная цепочка «задача → вызовы → окна → режимы → находки →
+  ограничения → NOT_CHECKED» автоматически добавляется в файлы отчётов.
+- Структурированные ответы агентов и критиков с текстовым fallback. Сбой критика
+  обозначается как `critic_unavailable`, а не маскируется под `ok`.
+- Continuation с сохранением `context.id`, `base_window`, `focus_window`,
+  `window_history`, `depth_history`, Evidence и findings.
+- Полный автопилот без подтверждений, resume и slash-команд. Явная новая тема
+  автоматически архивирует прежний отчёт; неоднозначная — продолжает текущий случай.
 - Детерминированный `extract_data`: серверная пагинация, таблица и Markdown-файл
   без генерации сотен строк через LLM.
-- Одна карточка `progress`: этап и счётчик вызовов, обновление после каждого tool
-  call, включая параллельные вызовы.
-- Suggestion-кнопки после ответа и resume-кнопки для interrupt.
+- Короткие уведомления в чате через одну карточку `progress`: quick/deep, смена
+  этапа или окна и счётчик вызовов. Служебные сообщения не попадают в `messages`.
+- Suggestion-кнопки после ответа.
 - Трассировка в Phoenix и regression-тесты графа/MCP.
 
-Важно: quick/deep, skills, confirm/autopilot, долговременная память случаев и
-аутентификация нескольких пользователей пока находятся **в плане**, а не в
-текущей реализации.
+Multiuser/OIDC намеренно не реализуется. Текущий anonymous-режим предназначен
+только для локальной разработки.
 
 ## Сервисы
 
@@ -43,6 +67,7 @@ Mars API, Aegra предоставляет API и checkpoints, Phoenix соби�
 | `logicore-mcp` | 9000, только Docker-сеть | 12 read-only MCP-инструментов |
 | `anomaly-relay` | 2025 | Webhook LogiCore → тред и run |
 | `postgres` | 5432 | Состояние Aegra, не отдельная память случаев |
+| `agent-memory-db` | только Docker-сеть | Case Store и Context Memory в схеме `agent_memory`, pgvector |
 | `redis` | 6379 | Очередь задач и SSE-брокер |
 | `phoenix` | 6006 | OpenInference/OpenTelemetry-трассировка |
 
@@ -59,10 +84,23 @@ docker compose up -d --build
 Основные переменные:
 
 - `LLM_BASE_URL`, `LLM_TOKEN`, `LLM_MODEL` — OpenAI-совместимый провайдер;
+- `LLM_MODEL_INTENT/SCOUT/INVESTIGATOR/REPORTER/CRITIC/MEMORY` — необязательные модели по ролям;
+- `SUMMARIZATION_TRIGGER_TOKENS`, `SUMMARIZATION_KEEP_MESSAGES` — суммаризация истории;
+- `AGENT_TOOL_LIMIT_SCOUT/INVESTIGATOR/REPORTER`, `AGENT_TIMEOUT_SECONDS`,
+  `EXPORT_TIMEOUT_SECONDS`, `MAX_REWORK` — лимиты и таймауты;
+- `CRITIC_MESSAGE_LIMIT`, `CRITIC_DIALOG_LIMIT`, `REPORT_INJECT_LIMIT` — размеры контекста;
 - `LOGIQ_URL`, `LOGIQ_USER`, `LOGIQ_PASSWORD`, `LOGIQ_TLS_VERIFY` — LogiCore;
 - `LOGIQ_API_TOKEN` — авторизация MCP streamable-http;
 - `POSTGRES_PASSWORD` — пароль Postgres Aegra;
-- `RELAY_TOKEN`, `DEFAULT_CALLBACK_URL` — опциональные webhook/отчёты.
+- `AGENT_MEMORY_POSTGRES_PASSWORD`, `AGENT_MEMORY_RECENT_LIMIT` — отдельная память;
+- `AGENT_MEMORY_SCOPE`, `AGENT_MEMORY_RETRIEVAL_LIMIT`, `AGENT_MEMORY_CASE_RETRIEVAL_LIMIT`,
+  `AGENT_MEMORY_SIMILARITY_THRESHOLD` — область и параметры поиска Context Memory и похожих дел;
+  `AGENT_MEMORY_OBSERVED_TTL_HOURS=24` — TTL наблюдений;
+- `AGENT_MEMORY_EMBEDDING_MODEL=bge-m3`, `AGENT_MEMORY_EMBEDDING_DIMENSIONS=1024` —
+  embeddings; отдельные `AGENT_MEMORY_EMBEDDING_BASE_URL/TOKEN` необязательны;
+- `RELAY_TOKEN`, `DEFAULT_CALLBACK_URL` — опциональные webhook/отчёты;
+- `DEPLOY_HOST/USER/PASSWORD/GIT_URL/REMOTE_PATH` — опциональный `scripts/deploy_ma.py`.
+  Все значения по умолчанию и дополнительные лимиты перечислены в `.env.example`.
 
 После запуска:
 
@@ -84,24 +122,38 @@ Anonymous-режим подходит только для локальной р�
 
 ```mermaid
 flowchart TD
-    START([START]) --> entry --> intent
+    START([START]) --> entry --> memory_context --> intent
     intent -->|simple| chat --> END([END])
-    intent -->|export_data| export --> END
-    intent -->|новые данные| scout
-    intent -->|continuation| investigator
-    intent -->|ответ или правка отчёта| reporter
-    intent -->|new/uncertain + история| confirm
-    confirm -->|продолжить| scout
-    confirm -->|новое здесь/новый чат| archive
-    archive -->|новое здесь| scout
-    archive -->|новый чат| END
-    scout --> investigator --> critic_evidence
-    critic_evidence -->|ok или лимит rework| reporter
-    critic_evidence -->|rework_data| investigator
-    reporter --> critic_report
-    critic_report -->|rework_report| reporter
-    critic_report -->|rework_data| investigator
-    critic_report -->|ok или лимит rework| END
+    intent -->|related case| memory_load --> memory_retrieve
+    intent -->|export_data| export --> memory_save
+    intent -->|new + история| archive
+    intent -->|quick или deep| memory_retrieve
+    intent -->|ответ или правка отчёта| reporting
+    archive -->|quick или deep| memory_retrieve
+    archive -->|export| export
+    memory_retrieve -->|quick| quick
+    memory_retrieve -->|deep| deep
+
+    subgraph quick[Quick Investigation]
+      scout
+    end
+    scout -->|достаточно данных| reporting
+    scout -->|нужно углубление| deep
+
+    subgraph deep[Deep Investigation]
+      investigator --> critic_evidence
+      critic_evidence -->|rework_data| investigator
+    end
+    deep --> reporting
+
+    subgraph reporting[Reporting]
+      reporter --> critic_report
+      critic_report -->|rework_report| reporter
+    end
+    critic_report -->|rework_data| deep
+    reporting -->|готово| memory_save --> END
+    memory_retrieve -. чтение фактов и похожих дел .-> DB[(agent_memory)]
+    memory_save --> DB
 ```
 
 При `CRITIC_ENABLED=false` критики пропускаются. `export` не вызывает LLM и не
@@ -110,11 +162,20 @@ flowchart TD
 Публичный `messages` содержит только сообщения пользователя и финальные ответы.
 Tool-циклы остаются в `scout_msgs`, `inv_msgs`, `rep_msgs`.
 
-Подробности состояния и маршрутов — в [DEV.md](DEV.md).
+`memory_retrieve` ищет до пяти релевантных фактов и до трёх похожих дел при старте
+quick/deep. Scout и investigator могут повторить поиск через `search_context_memory`
+и `search_similar_cases` при появлении новых сущностей. Похожие дела возвращаются
+компактными карточками и не становятся continuation. После ответа `memory_save`
+записывает дело в `agent_memory.investigations`,
+а structured LLM-шаг предлагает операции `insert/update/supersede/ignore` для атомарных
+фактов в `agent_memory.context_facts`. Подтверждённые investigation-факты без валидных
+Evidence отклоняются; найденный контекст не подменяет свежие запросы к LogiCore.
 
-## Целевой граф (план)
+Подробности состояния и маршрутов — в [DEV.md](docs/DEV.md).
 
-Эта схема показывает направление доработок, а не текущую реализацию:
+## Субграфы и память (реализовано)
+
+Логическая схема подсистем и внешних хранилищ:
 
 ```mermaid
 flowchart TD
@@ -126,31 +187,25 @@ flowchart TD
     A -->|deep| I[Deep Investigation subgraph]
 
     Q -->|достаточно данных| R[Reporting subgraph]
-    Q -->|anchor / insufficient data / window change| X{Углубление}
-    X -->|approve или autopilot| I
-    X -->|не требуется| R
-
-    I --> P[Confirm / Autopilot]
-    P --> S[Skill registry]
-    S --> W[Окна, Evidence, anchors, pivot]
-    W --> CE[Critic Evidence]
+    Q -->|нужны причина, pivot или другое окно| I
+    I --> H[Окна, Evidence, findings, гипотезы и skills]
+    H --> CE[Critic Evidence]
     CE --> IR[InvestigationResult]
     IR --> A
 
-    A --> R[Reporting subgraph]
+    A --> R
     R --> CR[Critic Report]
     CR --> DONE[Ответ, цепочка, файл и suggestions]
 
-    I <--> DB[(agent-memory-db)]
-    R <--> DB
+    A <--> M[memory_context / memory_retrieve / memory_save]
+    M <--> DB[(agent_memory.investigations + context_facts)]
     Q --> MCP[logicore-mcp]
-    W --> MCP
+    H --> MCP
     E --> MCP
 ```
 
 Quick и deep используют общие Evidence и handoff, но имеют разные бюджеты,
-модели и жизненный цикл. Полный контракт находится в
-[INVESTIGATION_PLAN.md](INVESTIGATION_PLAN.md).
+модели и жизненный цикл. Полные контракты находятся в [DEV.md](docs/DEV.md).
 
 ## Лимиты и таймауты
 
@@ -171,7 +226,7 @@ Quick и deep используют общие Evidence и handoff, но имею
 
 `run_limit` сбрасывается при каждом новом запуске соответствующего агента:
 новое сообщение, rework или retry structured response. Это не общий лимит чата.
-Autopilot в будущем не будет отменять эти ограничения.
+Autopilot не отменяет эти ограничения.
 
 При исчерпании tool limit middleware завершает текущий tool-цикл, внешний граф
 продолжает работу. Таймаут одного агента не ограничивает длительность всего run:
@@ -185,46 +240,56 @@ Autopilot в будущем не будет отменять эти ограни
 
 | Место | Проблема сейчас | Как исправлять |
 |---|---|---|
-| Structured response fallback | Ручной разбор function calls и текстовый fallback в `agents.py` частично дублирует runtime | Пересмотреть и упростить вокруг `create_agent`/`with_structured_output`, сохранив необходимую совместимость провайдера |
-| Evidence для критика | Полные записи есть в state, но `evidence_block` усекает события и общий размер | Полный `EvidenceBundle` и `get_evidence(id)`, без скрытой потери данных |
-| Работа с окном | `normalize_tool_result` жёстко подставляет окно из context | `base/focus/window_update`: явные окна агента уважаются, смена окна не означает новый случай |
-| Будущие permissions | Нужны разрешения разных уровней | `HumanInTheLoopMiddleware` для write tools; `ActionRequest + interrupt` для окон, skills и quick → deep |
-| Будущая память | Свой memory framework был бы лишним | `BaseStore`/`PostgresStore` в отдельной `agent-memory-db`; доменные таблицы только для метрик и связей |
-| Будущие skills | Нельзя строить ещё один пакетный runtime | Небольшой registry + Pydantic-контракты + версии и stop rules |
-| Суммаризация | Пока не реализована | Использовать `SummarizationMiddleware`, не писать собственную |
-| Критик | Ошибка критика сейчас превращается в `ok` | Явный `critic_unavailable` и ограничение результата |
+| Structured response fallback | Ручной function-call parser удалён; остаётся только явный текстовый fallback в схему | Проверять необходимость fallback на живом провайдере, не восстанавливать собственный parser |
+| Метрики skills | `model`, `duration_ms`, Evidence и окна сохраняются в `skill_runs` и памяти | Использовать для наблюдаемости; сравнение версий skills не требуется |
 
-## План доработок по ценности
+## Реализованные этапы
 
-1. **Quick/deep и автономные окна** — правильная ежедневная работа.
-2. **Полные Evidence и цепочка расследования** — проверяемость выводов.
-3. **Confirm/autopilot и настройки из чата** — управляемая автономия.
-4. **`incident_dating`** — первый самостоятельный deep-skill.
-5. **Pivot и drilldown** — расширение расследования.
-6. **Память между тредами** — использование прошлых случаев без устаревших ответов.
-7. **Модели и метрики** — оптимизация стоимости и качества.
+1. **Quick/deep и автономные окна** — отдельные субграфы.
+2. **Полные Evidence и цепочка расследования** — state, отчёты и память.
+3. **Понятный автопилот** — короткие уведомления без подтверждений и slash-команд.
+4. **Skills** — `incident_dating`, `event_drilldown`, `entity_pivot` с метриками.
+5. **Расширенные контракты и гипотезы** — Evidence/Finding, Scout, Intent, Critic issues,
+   `open/supported/rejected` с историей.
+6. **Case Store + Context Memory + похожие дела** — собственные таблицы, pgvector,
+   консолидация, continuation и `search_similar_cases`.
+7. **Модели и метрики** — модели по ролям, `model`/`duration_ms`; сравнение версий
+   skills по решению не выполняется.
 
-Этапы 1–4 образуют MVP. Полный план, контракты и приёмочные сценарии —
-[INVESTIGATION_PLAN.md](INVESTIGATION_PLAN.md).
+Этапы 1–4 образуют MVP. Архитектура, контракты и приёмочные сценарии —
+[DEV.md](docs/DEV.md).
 
 ## Структура проекта
 
 ```text
 ├── agent/
-│   ├── graph.py           # внешний StateGraph и маршруты
+│   ├── graph.py           # supervisor и маршруты
+│   ├── quick_graph.py     # Quick Investigation subgraph
+│   ├── investigation_graph.py # Deep Investigation subgraph
+│   ├── reporting_graph.py # Reporting subgraph
+│   ├── subgraph.py        # delta-граница субграфов
 │   ├── agents.py          # runtime scout/investigator/reporter
-│   ├── investigation.py   # текущие intent, окно, архив и подтверждение
+│   ├── investigation.py   # intent, quick/deep, окна и автоархивация
+│   ├── memory.py          # Case Store и консолидация Context Memory
+│   ├── memory_models.py   # схемы дел, фактов и операций
+│   ├── memory_store.py    # предметные таблицы и pgvector-поиск
+│   ├── contracts.py       # Evidence, Finding, Coverage, CriticIssue, Hypothesis
 │   ├── export.py          # детерминированная таблица и файл
 │   ├── critics.py         # критики доказательств и отчёта
+│   ├── evidence.py        # Evidence Bundle и цепочка расследования
 │   ├── progress.py        # статус, лимиты и suggestion-действия
 │   ├── llm.py             # LLM и Pydantic-схемы ответов
 │   ├── state.py           # внешнее и внутреннее состояние
 │   ├── tools.py           # MCP tools, Evidence, отчёты
+│   ├── skills/            # registry, контракты и playbooks
 │   └── prompts/           # системные промпты
 ├── logicore-mcp/          # MCP-сервер и пагинация Mars API
 ├── anomaly-relay/         # webhook LogiCore
 ├── ui/                    # agent-chat-ui
+├── docs/DEV.md            # архитектура, контракты и приёмка
+├── scripts/deploy_ma.py   # опциональный удалённый deploy через env
 ├── tests/                 # regression-тесты графа и MCP
+├── aegra.json             # регистрация графа
 └── docker-compose.yml
 ```
 

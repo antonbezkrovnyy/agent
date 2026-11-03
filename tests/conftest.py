@@ -30,22 +30,22 @@ def server_time() -> list[dict]:
 
 
 @tool
-def search_events(query: str = "", **kwargs) -> list[dict]:
+def search_events(query: str = "", time_from: str | None = None, time_to: str | None = None, **kwargs) -> list[dict]:
     """Поиск событий в журнале."""
     return json_blocks({
         "ok": True,
-        "window": {"from": kwargs.get("time_from"), "to": kwargs.get("time_to"), "source": "explicit"},
+        "window": {"from": time_from, "to": time_to, "source": "explicit"},
         "events": [{"uuid": "event-42", "message": "скачок CPU"}],
     })
 
 
 @tool
-def count_events(window: str = "", **kwargs) -> list[dict]:
+def count_events(window: str = "", time_from: str | None = None, time_to: str | None = None, **kwargs) -> list[dict]:
     """Количество событий за окно."""
     return json_blocks({
         "ok": True,
         "count": 17,
-        "window": {"from": kwargs.get("time_from"), "to": kwargs.get("time_to"), "source": "explicit"},
+        "window": {"from": time_from, "to": time_to, "source": "explicit"},
     })
 
 
@@ -117,7 +117,10 @@ class FakeAgent(FakeMessagesListChatModel):
                 return message
             if role == "Ты — скаут":
                 return ai(calls=[tc("ScoutResult", {
-                    "note": message.content, "signals": [], "evidence_ids": [],
+                    "note": message.content,
+                    "signals": [],
+                    "evidence_ids": [],
+                    "escalation": {"needed": True, "reason": "test_deep", "suggested_skill": None},
                 })])
             if role == "Ты — инвестигейтор":
                 return ai(calls=[tc("InvestigationResult", {
@@ -156,11 +159,12 @@ class FakeStructured:
         return self.results.pop(0) if self.results else self.result
 
 
-def intent(label="complex", new=True, edit=False, transition=None):
+def intent(label="complex", new=True, edit=False, transition=None, mode="quick"):
     if transition is None:
         transition = "new" if label == "complex" and new else "continue"
     return IntentDecision(
         intent=label,
+        work_mode=mode,
         rationale="тест",
         needs_new_data=new,
         edit_existing_report=edit,
@@ -177,12 +181,19 @@ def critics():
 
 @pytest.fixture
 def patch_llm(monkeypatch):
-    def apply(agent, intent_llm, critic_evidence=None, critic_report=None):
+    def apply(agent, intent_llm, critic_evidence=None, critic_report=None, memory=None):
+        from memory_models import ContextMemoryConsolidation
+
         default_evidence, default_report = critics()
         monkeypatch.setattr(llm_mod, "llm", agent)
         monkeypatch.setattr(llm_mod, "intent_llm", intent_llm)
         monkeypatch.setattr(llm_mod, "critic_evidence_llm", critic_evidence or default_evidence)
         monkeypatch.setattr(llm_mod, "critic_report_llm", critic_report or default_report)
+        monkeypatch.setattr(
+            llm_mod,
+            "context_memory_llm",
+            memory or FakeStructured(ContextMemoryConsolidation()),
+        )
         agents_mod.build_agents()
     return apply
 

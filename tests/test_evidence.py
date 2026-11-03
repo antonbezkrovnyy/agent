@@ -62,7 +62,7 @@ def test_tool_exception_becomes_error_evidence(patch_llm):
 
     assert len(errors) == 1
     assert errors[0]["tool"] == "broken_tool"
-    assert errors[0]["arguments"]["time_from"] == result["context"]["time_from"]
+    assert errors[0]["arguments"]["time_from"] == "bad"
     assert errors[0]["arguments"]["time_to"] == result["context"]["time_to"]
     assert "ValueError" in errors[0]["error"]
 

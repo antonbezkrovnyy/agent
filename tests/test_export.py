@@ -23,8 +23,8 @@ def test_reporter_uses_extract_data_once(patch_llm):
     assert len(exports) == 1
     assert result["report_result"]["answer"] == "Вот полная таблица"
     evidence = next(e for e in result["evidence"] if e["tool"] == "extract_data")
-    assert evidence["arguments"]["time_from"] == result["context"]["time_from"]
-    assert evidence["arguments"]["time_to"] == result["context"]["time_to"]
+    assert evidence["arguments"]["time_from"] == "2026-01-01T00:00:00Z"
+    assert evidence["arguments"]["time_to"] == "2026-01-01T01:00:00Z"
     assert isinstance(exports[0].content, str)
 
 

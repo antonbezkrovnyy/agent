@@ -2,6 +2,7 @@
 
 import asyncio
 import json
+from datetime import UTC, datetime
 from typing import Any
 from uuid import uuid4
 
@@ -10,6 +11,7 @@ from langchain_core.messages import AIMessage
 import llm as llm_mod
 from agents import _agent_final
 from config import Settings
+from contracts import EvidenceRecord, RecommendedExportQuery
 from progress import done_progress, report_suggestions
 from reporting import build_report
 from state import State
@@ -19,6 +21,12 @@ settings = Settings()
 
 
 def _export_source(state: State) -> dict:
+    recommended = (
+        (state.get("report_result") or {}).get("recommended_export_query")
+        or (state.get("inv_result") or {}).get("recommended_export_query")
+    )
+    if recommended:
+        return RecommendedExportQuery.model_validate(recommended).model_dump()
     records = state.get("evidence") or []
     source = next((item for item in reversed(records) if item.get("tool") == "extract_data"), None)
     if source is None:
@@ -91,19 +99,25 @@ async def node_export(state: State) -> dict:
     except Exception as exc:
         data = {"ok": False, "error": f"{type(exc).__name__}: {exc}"}
 
-    evidence = {
-        "id": evidence_id,
-        "tool": "extract_data",
-        "arguments": args,
-        "window": data.get("window") or {
+    status = _result_status(data)
+    evidence = EvidenceRecord(
+        id=evidence_id,
+        investigation_id=context.get("id"),
+        step_id=evidence_id,
+        tool="extract_data",
+        arguments=args,
+        window=data.get("window") or {
             "from": args["time_from"],
             "to": args["time_to"],
             "source": "investigation-context",
         },
-        "status": _result_status(data),
-        "result": data,
-        "error": data.get("error"),
-    }
+        status=status,
+        complete=status == "ok",
+        result_ref=f"evidence://{context.get('id')}/{evidence_id}",
+        created_at=datetime.now(UTC).isoformat(timespec="seconds"),
+        result=data,
+        error=data.get("error"),
+    ).model_dump()
     limitations: list[str] = []
     if data.get("ok") is False:
         answer = f"Не удалось выгрузить события: {data.get('error')}"

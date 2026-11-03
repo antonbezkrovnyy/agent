@@ -8,7 +8,6 @@ from conftest import (
     build_graph,
     intent,
     invoke,
-    resume,
     tc,
 )
 
@@ -18,10 +17,6 @@ def start(graph, text, thread_id):
         {"messages": [{"role": "human", "content": text}]},
         {"configurable": {"thread_id": thread_id}},
     ))
-
-
-def choice(result):
-    return result["__interrupt__"][0].value
 
 
 def test_investigation_runs_without_budget_interrupt(patch_llm):
@@ -56,7 +51,7 @@ def investigation_agent():
     })
 
 
-def test_new_investigation_archives_after_confirmation(patch_llm):
+def test_new_investigation_archives_without_confirmation(patch_llm):
     patch_llm(investigation_agent(), FakeStructured(intent()))
     graph = build_graph()
     first = invoke(graph, "подготовь отчёт", thread_id="new-investigation")
@@ -67,14 +62,9 @@ def test_new_investigation_archives_after_confirmation(patch_llm):
         "Ты — репортёр": [ai("Новый ответ")],
     })
     patch_llm(agent2, FakeStructured(intent(transition="new")))
-    paused = start(graph, "новая задача", "new-investigation")
+    result = start(graph, "новая задача", "new-investigation")
 
-    assert choice(paused)["type"] == "choice"
-    assert "Начать новое" in choice(paused)["question"]
-    assert not any("Прежний отчёт сохранён" in m.content for m in paused["messages"])
-
-    result = resume(graph, "new", "new-investigation")
-
+    assert "__interrupt__" not in result
     assert any("Прежний отчёт сохранён" in m.content for m in result["messages"])
     assert result["context"]["id"] != first["context"]["id"]
     assert result["evidence"] == []
@@ -93,10 +83,10 @@ def test_uncertain_investigation_continues_without_archive(patch_llm):
         "Ты — инвестигейтор": [ai("Дополнительные данные")],
         "Ты — репортёр": [ai("Тот же контекст")],
     })
-    patch_llm(agent2, FakeStructured(intent("continuation", new=True, transition="uncertain")))
-    paused = start(graph, "возможно другая задача", "uncertain-continuation")
-    result = resume(graph, "continue", "uncertain-continuation")
+    patch_llm(agent2, FakeStructured(intent("continuation", new=True, transition="uncertain", mode="deep")))
+    result = start(graph, "возможно другая задача", "uncertain-continuation")
 
+    assert "__interrupt__" not in result
     assert result["context"]["id"] == first["context"]["id"]
     assert result["evidence"] == first["evidence"]
     assert not any("Прежний отчёт сохранён" in m.content for m in result["messages"])
@@ -111,8 +101,8 @@ def test_continuation_reuses_context_without_interrupt(patch_llm):
         "Ты — инвестигейтор": [ai("Дополнительные данные")],
         "Ты — репортёр": [ai("Уточнённый ответ")],
     })
-    patch_llm(agent2, FakeStructured(intent("continuation", new=True, transition="continue")))
-    result = invoke(graph, "пришли все события таблицей", thread_id="continue-investigation")
+    patch_llm(agent2, FakeStructured(intent("continuation", new=True, transition="continue", mode="deep")))
+    result = invoke(graph, "продолжи анализ", thread_id="continue-investigation")
 
     assert result["context"]["id"] == first["context"]["id"]
     assert result["evidence"] == first["evidence"]

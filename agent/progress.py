@@ -1,6 +1,13 @@
 """Публичный статус текущего run и быстрые follow-up действия."""
 
-TOOL_LIMITS = {"scout": 10, "investigator": 30, "reporter": 60}
+from config import Settings
+
+settings = Settings()
+TOOL_LIMITS = {
+    "scout": settings.agent_tool_limit_scout,
+    "investigator": settings.agent_tool_limit_investigator,
+    "reporter": settings.agent_tool_limit_reporter,
+}
 
 
 def simple_progress(stage: str, text: str, state: str = "running") -> dict:

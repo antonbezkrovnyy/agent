@@ -3,27 +3,21 @@
 from datetime import UTC, datetime, timedelta
 from uuid import uuid4
 
-from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, SystemMessage
-from langgraph.types import Overwrite, interrupt
+from langchain_core.messages import AIMessage, BaseMessage, SystemMessage
+from langgraph.types import Overwrite
 
 import llm as llm_mod
 from agents import _agent_convo_messages
-from progress import agent_progress, done_progress, simple_progress
+from progress import agent_progress, simple_progress
 from prompts import compose, intent_hint_block, system_prompt
 from reporting import build_report
+from skills import get_skill
 from state import State
 
 
 def _intent_messages(state: State) -> list[BaseMessage]:
     system = system_prompt(compose("base", "intent"), intent_hint_block(state))
     return [SystemMessage(content=system), *_agent_convo_messages(state)]
-
-
-def _last_human_text(state: State) -> str:
-    for msg in reversed(state.get("messages") or []):
-        if isinstance(msg, HumanMessage) and isinstance(msg.content, str):
-            return msg.content
-    return ""
 
 
 def _intent_structured(state: State) -> dict | None:
@@ -37,56 +31,38 @@ def _intent_structured(state: State) -> dict | None:
     window = getattr(decision, "window", None)
     return {
         "label": decision.intent,
+        "work_mode": getattr(decision, "work_mode", "quick"),
         "rationale": getattr(decision, "rationale", ""),
         "needs_new_data": getattr(decision, "needs_new_data", False),
         "edit_existing_report": getattr(decision, "edit_existing_report", False),
         "export_data": getattr(decision, "export_data", False),
         "new_investigation": getattr(decision, "new_investigation", "continue"),
+        "window_requested": getattr(decision, "window_requested", False),
+        "skill_id": getattr(decision, "skill_id", None),
+        "related_investigation_id": getattr(decision, "related_investigation_id", None),
+        "confidence": getattr(decision, "confidence", 0.0),
+        "escalation_reason": getattr(decision, "escalation_reason", ""),
         "window": window.model_dump() if window else {"last_minutes": 60},
     }
 
 
-_COMPLEX_WORDS = (
-    "аномали", "расслед", "инцидент", "событи", "сколько", "почему",
-    "разбери", "проанализируй", "сравни", "цифр",
-)
-
-
-def _intent_heuristic(state: State) -> dict:
-    """Последний резерв: ключевые слова + состояние стейта."""
-    base = {"window": {"last_minutes": 60}, "new_investigation": "continue"}
-    if state.get("last_report"):
-        return {
-            **base,
-            "label": "continuation",
-            "rationale": "в стейте есть отчёт — продолжаем",
-            "needs_new_data": False,
-            "edit_existing_report": True,
-        }
-    if state.get("findings"):
-        return {
-            **base,
-            "label": "continuation",
-            "rationale": "в стейте есть записи — продолжаем",
-            "needs_new_data": True,
-            "edit_existing_report": False,
-        }
-    last = _last_human_text(state).lower()
-    if any(word in last for word in _COMPLEX_WORDS):
-        return {
-            **base,
-            "label": "complex",
-            "rationale": "похоже на запрос данных из журнала",
-            "needs_new_data": True,
-            "edit_existing_report": False,
-            "new_investigation": "new",
-        }
+def _intent_fallback(state: State) -> dict:
+    """Консервативный fallback без семантических правил по словам."""
+    has_context = bool(state.get("context"))
     return {
-        **base,
-        "label": "simple",
-        "rationale": "нет признаков анализа данных",
-        "needs_new_data": False,
+        "label": "continuation" if has_context else "complex",
+        "work_mode": "deep",
+        "rationale": "LLM-классификатор недоступен; выполняется безопасная проверка данных без выбора skill",
+        "needs_new_data": True,
         "edit_existing_report": False,
+        "export_data": False,
+        "new_investigation": "continue" if has_context else "new",
+        "window_requested": False,
+        "skill_id": None,
+        "related_investigation_id": None,
+        "confidence": 0.0,
+        "escalation_reason": "LLM-классификатор недоступен",
+        "window": {"last_minutes": 60},
     }
 
 
@@ -106,11 +82,34 @@ def _new_context(decision: dict) -> dict:
     start = _parse_time(spec.get("time_from")) or end - timedelta(
         minutes=spec.get("last_minutes") or 60
     )
+    window = {"time_from": start.isoformat(), "time_to": end.isoformat()}
     return {
         "id": uuid4().hex,
-        "time_from": start.isoformat(),
-        "time_to": end.isoformat(),
+        **window,
         "timezone": "UTC",
+        "base_window": dict(window),
+        "focus_window": None,
+        "window_history": [],
+    }
+
+
+def _focus_context(context: dict, decision: dict) -> dict:
+    requested = _new_context(decision)
+    active = {"time_from": requested["time_from"], "time_to": requested["time_to"]}
+    previous = {"time_from": context["time_from"], "time_to": context["time_to"]}
+    history = list(context.get("window_history") or [])
+    history.append({
+        "action": "focus",
+        "from": previous,
+        "to": active,
+        "reason": "Пользователь указал новый период",
+        "at": datetime.now(UTC).isoformat(timespec="seconds"),
+    })
+    return {
+        **context,
+        **active,
+        "focus_window": dict(active),
+        "window_history": history,
     }
 
 
@@ -118,26 +117,56 @@ def _work_progress(state: State, decision: dict) -> dict:
     if decision.get("export_data"):
         return simple_progress("export", "Готовлю полную выгрузку")
     if decision.get("needs_new_data"):
-        if decision.get("label") == "continuation" and state.get("context"):
-            return agent_progress(state, "investigator", "Продолжаю расследование", "investigator")
-        return agent_progress(state, "scout", "Осматриваю журнал", "scout")
+        if decision.get("work_mode") == "deep":
+            text = {
+                "incident_dating": "Ищу первое появление",
+                "event_drilldown": "Разбираю событие",
+                "entity_pivot": "Проверяю связанные сущности",
+            }.get(decision.get("skill_id"), "Веду глубокий анализ")
+            return agent_progress(state, "investigator", text, "investigator")
+        return agent_progress(state, "scout", "Быстро проверяю журнал", "scout")
     if decision.get("label") == "simple":
         return simple_progress("chat", "Формирую ответ")
     return agent_progress(state, "reporter", "Формирую ответ", "reporter")
 
 
 def node_intent(state: State) -> dict:
-    """Зафиксировать маршрут и окно; смену расследования подтверждает пользователь."""
-    decision = _intent_structured(state) or _intent_heuristic(state)
+    """Выбрать quick/deep и автоматически обновить контекст расследования."""
+    decision = _intent_structured(state) or _intent_fallback(state)
+    transition = decision.get("new_investigation") or "continue"
+    if transition == "uncertain":
+        transition = "continue"
+    decision["new_investigation"] = transition
+    mode = decision.get("work_mode") or "quick"
+    previous_mode = state.get("work_mode")
+    history = [] if transition == "new" else list(state.get("depth_history") or [])
+    if mode != previous_mode or not history:
+        history.append({
+            "from": previous_mode,
+            "to": mode,
+            "reason": "user_request",
+            "at": datetime.now(UTC).isoformat(timespec="seconds"),
+        })
     update = {
         "intent": decision,
-        "transition": decision.get("new_investigation") or "continue",
+        "work_mode": mode,
+        "depth_history": history,
+        "transition": transition,
     }
-    if not state.get("context") and (decision.get("needs_new_data") or decision.get("export_data")):
-        update["context"] = _new_context(decision)
+    if decision.get("needs_new_data") or transition == "new" or mode == "quick":
+        skill = get_skill(decision.get("skill_id")) if mode == "deep" else None
+        update["active_skill"] = {
+            **skill.model_dump(),
+            "selected_at": datetime.now(UTC).isoformat(timespec="milliseconds"),
+        } if skill else {}
+    if decision.get("needs_new_data") or decision.get("export_data"):
+        if not state.get("context") and not decision.get("related_investigation_id"):
+            update["context"] = _new_context(decision)
+        elif transition != "new" and decision.get("window_requested") and state.get("context"):
+            update["context"] = _focus_context(state["context"], decision)
     has_history = bool(state.get("evidence") or state.get("findings") or state.get("last_report"))
-    if has_history and update["transition"] in ("new", "uncertain"):
-        update["progress"] = simple_progress("confirm", "Нужен ваш выбор", "waiting")
+    if has_history and transition == "new":
+        update["progress"] = simple_progress("archive", "Сохраняю прежний отчёт")
     else:
         update["progress"] = _work_progress({**state, **update}, decision)
     return update
@@ -160,42 +189,17 @@ def _archive_update(state: State) -> dict:
 
 def node_archive(state: State) -> dict:
     update = _archive_update(state)
-    if state.get("transition") == "new_thread":
-        messages = list(update.get("messages") or [])
-        messages.append(AIMessage(
-            content="Прежний отчёт сохранён. Откройте новый чат для нового расследования.",
-            name="reporter",
-        ))
-        update["messages"] = messages
-        update["progress"] = done_progress("Расследование сохранено")
-        update["suggestions"] = []
-    elif state.get("transition") == "new":
+    if state.get("transition") == "new":
         update.update({
             "context": _new_context(state["intent"]),
             "evidence": Overwrite([]),
             "findings": Overwrite([]),
+            "hypotheses": Overwrite([]),
+            "skill_runs": Overwrite([]),
+            "anchors": [],
+            "visited_anchors": [],
             "last_report": {},
             "inv_summary": "",
         })
-        update["progress"] = _work_progress({**state, **update}, state["intent"])
-    return update
-
-
-def node_confirm_investigation(state: State) -> dict:
-    answer = interrupt({
-        "type": "choice",
-        "question": "Начать новое расследование или продолжить текущее?",
-        "options": [
-            {"label": "Продолжить текущее", "value": "continue"},
-            {"label": "Начать новое здесь", "value": "new"},
-            {"label": "Начать новый чат", "value": "new_thread"},
-        ],
-    })
-    update: dict = {"transition": answer if answer in ("new", "new_thread") else "continue"}
-    if answer == "continue" and not state.get("context"):
-        update["context"] = _new_context(state["intent"])
-    if update["transition"] in ("new", "new_thread"):
-        update["progress"] = simple_progress("archive", "Сохраняю прежний отчёт")
-    else:
         update["progress"] = _work_progress({**state, **update}, state["intent"])
     return update
