@@ -347,6 +347,11 @@ Case Store используется для:
 - exact duplicate и similarity ≥ 0.90 превращают insert в update;
 - гипотезы, сырые события, счётчики и временный операционный статус не сохраняются.
 
+Каждое предложение попадает в `memory_operations`: исходное и фактическое действие,
+statement, target/fact ID, статус `saved/rejected/ignored`, причина и ошибка. Журнал
+сохраняется в Case Store, добавляется в отчёт и `manifest.json`. Пустая консолидация
+и `memory_error` отображаются явно; сбой памяти не отменяет расследование.
+
 ### 9.4. Похожие дела
 
 `search_similar_cases` ищет по task, signature и entities через pgvector. Возвращаются
@@ -455,7 +460,7 @@ search. Старые дела без embedding появятся в поиске 
 - `context`, `work_mode`, `depth_history`;
 - `evidence`, `findings`, `hypotheses`;
 - `skill_runs`, `anchors`, `visited_anchors`;
-- `inv_summary`, `inv_result`, `last_report`, `chain`.
+- `inv_summary`, `inv_result`, `last_report`, `memory_operations`, `chain`.
 
 ### 10.10. `ContextFact`
 
@@ -515,6 +520,21 @@ LLM не создаёт эту хронологию и не может доба�
 `save_report` создаёт именно аналитический отчёт; `extract_data` предназначен только
 для сырых событий и не заменяет его.
 
+Для проверки результата Reporter прикрепляет Markdown и ZIP-пакет:
+
+```text
+investigation.zip
+├── report.md       # отчёт и детерминированная цепочка
+├── queries.md      # фактические IQL/JSON-запросы и номера Evidence
+├── evidence.jsonl  # полная запись каждого вызова и результата
+├── events.csv      # события со ссылками на Evidence
+└── manifest.json   # case ID, индекс Evidence, неполные данные и SHA-256 файлов
+```
+
+IQL приходит непосредственно из MCP и совпадает с выполненным запросом. Для вызовов
+без IQL показываются фактические JSON-аргументы. В «Ход работы» запрос связан с
+номером записи в `evidence.jsonl`. Пакет создаётся детерминированно из state.
+
 Export:
 
 1. Берёт `recommended_export_query` из Reporter/Investigator.
@@ -525,6 +545,35 @@ Export:
 
 Внутри MCP выгрузка идёт по 100 событий на страницу. Повтор страницы останавливает
 цикл с `complete=false`. Достигнутый `max_rows` даёт `complete=false` и `next_page`.
+
+### 12.1. ArtifactStore
+
+`agent/artifact_store.py` сохраняет файлы в SeaweedFS по S3 API. Ключ имеет вид
+`investigations/<case-id>/<run-id>/<filename>`. В `state.artifacts` находятся только
+storage, key, filename, content type и размер; base64 остаётся лишь в inline fallback
+локального режима или при сбое S3 для файлов до 256 КиБ.
+
+UI и callback получают подписанные HTTPS-ссылки. TTL по умолчанию 3600 секунд. При
+повторном открытии отчёта или вызове `investigation_result` подпись создаётся заново,
+поэтому в state не сохраняется протухающий URL. Callback дополнительно получает
+object keys и метаданные файлов.
+
+### 12.2. Внешний MCP агента
+
+`agent-mcp/app.py` — адаптер над Aegra runs API, а не второй движок расследований:
+
+| Инструмент | Результат |
+|---|---|
+| `investigation_start` | Немедленный `investigation_id` и `run_id` |
+| `investigation_status` | Фактический run status, этап, прогресс и ошибки |
+| `investigation_result` | Отчёт, аудит памяти и свежие S3-ссылки |
+| `investigation_evidence` | Все Evidence или одна полная запись |
+| `investigation_cancel` | Отмена активного run с сохранением state |
+
+Все вызовы асинхронные. Structured JSON не содержит base64. Доступ ограничен тредами
+`inv-*`, созданными через MCP; произвольные UI-треды прочитать нельзя. Сервис защищён
+статическим Bearer `AGENT_MCP_TOKEN`, OIDC не добавляется. A2A может быть позже
+реализован поверх этого же адаптера; ACP не требуется.
 
 ## 13. LLM и embeddings
 
@@ -647,6 +696,8 @@ slash-команд нет.
 | `agent/memory.py` | Memory-узлы, consolidation и continuation |
 | `agent/memory_models.py` | CaseRecord и ContextFact |
 | `agent/memory_store.py` | Предметная схема и pgvector-поиск |
+| `agent/artifact_store.py` | S3, object keys и подписанные URL |
+| `agent-mcp/app.py` | Асинхронный MCP-адаптер расследований |
 | `agent/skills/` | Версионируемые playbooks |
 
 ### Проверка
@@ -655,7 +706,7 @@ slash-команд нет.
 uv run --with "langchain==1.3.10" --with "langgraph==1.2.16" \
   --with "langchain-openai" --with "pydantic-settings" \
   --with "httpx" --with "tenacity" --with "pytest" --with "loguru" \
-  --with "psycopg" pytest -q tests
+  --with "psycopg" --with "mcp[cli]>=2,<3" pytest -q tests
 ```
 
 Тесты используют fake LLM/MCP и настоящий граф. Покрыты quick/deep, окна, Evidence,

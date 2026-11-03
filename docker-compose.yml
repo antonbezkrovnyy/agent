@@ -56,6 +56,20 @@ services:
       timeout: 5s
       retries: 5
 
+  seaweedfs:
+    image: chrislusf/seaweedfs:3.99
+    restart: unless-stopped
+    command: server -dir=/data -s3 -s3.port=8333
+    ports:
+      - "8333:8333"
+    volumes:
+      - seaweedfs_data:/data
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O /dev/null http://127.0.0.1:9333/cluster/healthz || exit 1"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
   aegra:
     build:
       context: https://github.com/aegra/aegra.git
@@ -69,6 +83,11 @@ services:
       # Используем DATABASE_URL вместо отдельных POSTGRES_* переменных
       - DATABASE_URL=postgresql+asyncpg://aegra:${POSTGRES_PASSWORD:-aegra_password}@postgres:5432/aegra_db
       - AGENT_MEMORY_DATABASE_URL=postgresql://agent_memory:${AGENT_MEMORY_POSTGRES_PASSWORD:-agent_memory_password}@agent-memory-db:5432/agent_memory_db
+      - ARTIFACT_STORE_BACKEND=s3
+      - ARTIFACT_S3_ENDPOINT=http://seaweedfs:8333
+      - ARTIFACT_S3_PUBLIC_ENDPOINT=${ARTIFACT_S3_PUBLIC_ENDPOINT:-http://localhost:8333}
+      - ARTIFACT_S3_ACCESS_KEY=${ARTIFACT_S3_ACCESS_KEY:-agent}
+      - ARTIFACT_S3_SECRET_KEY=${ARTIFACT_S3_SECRET_KEY:-agent-local-secret}
       - PYTHONPATH=/app/src:/app/custom_agent
       - REDIS_BROKER_ENABLED=true
       - REDIS_URL=redis://redis:6379/0
@@ -82,6 +101,8 @@ services:
       agent-memory-db:
         condition: service_healthy
       redis:
+        condition: service_healthy
+      seaweedfs:
         condition: service_healthy
       phoenix:
         condition: service_started
@@ -117,6 +138,33 @@ services:
       retries: 10
       start_period: 15s
 
+  agent-mcp:
+    build:
+      context: .
+      dockerfile: agent-mcp/Dockerfile
+    restart: unless-stopped
+    ports:
+      - "9100:9100"
+    env_file:
+      - ./.env
+    environment:
+      - AEGRA_API_URL=http://aegra:2026
+      - AEGRA_ASSISTANT=agent
+      - AGENT_MCP_TOKEN=${AGENT_MCP_TOKEN:-agent-mcp-local-token}
+      - ARTIFACT_STORE_BACKEND=s3
+      - ARTIFACT_S3_ENDPOINT=http://seaweedfs:8333
+      - ARTIFACT_S3_PUBLIC_ENDPOINT=${ARTIFACT_S3_PUBLIC_ENDPOINT:-http://localhost:8333}
+      - ARTIFACT_S3_ACCESS_KEY=${ARTIFACT_S3_ACCESS_KEY:-agent}
+      - ARTIFACT_S3_SECRET_KEY=${ARTIFACT_S3_SECRET_KEY:-agent-local-secret}
+    depends_on:
+      aegra:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:9100/health', timeout=3)"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
   # Приёмник нативного аномали-вебхука Логикора: POST /anomaly → тред в agra → run расследования
   anomaly-relay:
     build: ./anomaly-relay
@@ -150,3 +198,4 @@ volumes:
   postgres_data:
   agent_memory_data:
   redis_data:
+  seaweedfs_data:

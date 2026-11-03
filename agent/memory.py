@@ -3,11 +3,13 @@
 import json
 from datetime import UTC, datetime, timedelta
 
-from langchain_core.messages import HumanMessage, SystemMessage
+from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 from langchain_core.runnables import RunnableConfig
 from langchain_openai import OpenAIEmbeddings
+from langgraph.types import Overwrite
 
 import llm as llm_mod
+from artifact_store import artifact_from_data_url, artifact_url
 from config import Settings
 from evidence import claim_evidence_ids, evidence_overview_block, investigation_chain
 from memory_models import (
@@ -16,10 +18,12 @@ from memory_models import (
     ContextFactDraft,
     ContextMemoryConsolidation,
     ContextMemoryOperation,
+    MemoryOperationRecord,
 )
 from memory_store import MemoryStore
 from progress import agent_progress
 from prompts import compose, system_prompt
+from reporting import build_investigation_package, build_report, memory_audit_markdown
 from state import State
 
 
@@ -141,6 +145,7 @@ def _case_from_state(state: State, config: RunnableConfig) -> dict:
         inv_summary=state.get("inv_summary") or "",
         inv_result=state.get("inv_result") or {},
         last_report=state.get("last_report") or {},
+        memory_operations=list(state.get("memory_operations") or []),
         chain=chain,
     )
     return case.model_dump(mode="json")
@@ -252,6 +257,7 @@ def node_memory_load(state: State, config: RunnableConfig) -> dict:
         "inv_summary": case.get("inv_summary") or "",
         "inv_result": case.get("inv_result") or {},
         "last_report": case.get("last_report") or {},
+        "memory_operations": list(case.get("memory_operations") or []),
         "intent": intent,
         "transition": "continue",
         "memory_loaded": investigation_id,
@@ -356,14 +362,30 @@ def _updated_fact(target: ContextFact, draft: ContextFactDraft) -> ContextFact:
     )
 
 
+def _audit_record(
+    operation: ContextMemoryOperation,
+    status: str,
+    **extra,
+) -> dict:
+    return MemoryOperationRecord(
+        action=operation.action,
+        requested_action=operation.action,
+        statement=operation.fact.statement if operation.fact else "",
+        target_id=operation.target_id,
+        status=status,
+        reason=operation.reason,
+        **extra,
+    ).model_dump(mode="json")
+
+
 def _apply_operation(
     operation: ContextMemoryOperation,
     existing: dict[str, dict],
     case_id: str,
     evidence_ids: set[str],
-) -> bool:
+) -> dict:
     if operation.action == "ignore":
-        return False
+        return _audit_record(operation, "ignored")
     if operation.fact is None:
         raise ValueError(f"{operation.action} requires fact")
     draft = _fact_from_draft(operation.fact, case_id, evidence_ids)
@@ -371,6 +393,7 @@ def _apply_operation(
     if operation.action in ("update", "supersede") and target is None:
         raise ValueError("target_id is not present in existing_facts")
 
+    actual_action = operation.action
     if operation.action == "insert":
         duplicate = max(
             existing.values(),
@@ -383,20 +406,24 @@ def _apply_operation(
             exact = memory.find_fact_by_statement(settings.agent_memory_scope, draft.statement)
             target = exact.model_dump(mode="json") if exact is not None else None
         if target is None:
-            memory.put_fact(_new_fact(draft))
-            return True
-        operation = operation.model_copy(update={"action": "update"})
+            fact = _new_fact(draft)
+            memory.put_fact(fact)
+            return _audit_record(operation, "saved", fact_id=fact.id)
+        actual_action = "update"
 
-    if operation.action == "update":
-        memory.put_fact(_updated_fact(ContextFact.model_validate(target), draft))
-        return True
+    if actual_action == "update":
+        fact = _updated_fact(ContextFact.model_validate(target), draft)
+        memory.put_fact(fact)
+    else:
+        fact = _new_fact(draft)
+        memory.supersede_fact(ContextFact.model_validate(target), fact)
+    record = _audit_record(operation, "saved", fact_id=fact.id)
+    record["target_id"] = target.get("id")
+    record["action"] = actual_action
+    return record
 
-    replacement = _new_fact(draft)
-    memory.supersede_fact(ContextFact.model_validate(target), replacement)
-    return True
 
-
-def _consolidate(state: State) -> tuple[int, list[str]]:
+def _consolidate(state: State) -> tuple[int, list[str], list[dict]]:
     existing_facts = _existing_facts(state)
     payload = _consolidation_input(state, existing_facts)
     messages = [
@@ -409,47 +436,85 @@ def _consolidate(state: State) -> tuple[int, list[str]]:
     evidence_ids = {item.get("id") for item in state.get("evidence") or []}
     saved = 0
     errors: list[str] = []
+    operations: list[dict] = []
     for operation in result.operations:
         try:
-            saved += int(_apply_operation(
+            record = _apply_operation(
                 operation,
                 existing,
                 payload["case_id"],
                 evidence_ids,
-            ))
+            )
+            saved += int(record["status"] == "saved")
         except Exception as exc:
             errors.append(f"{operation.action}: {type(exc).__name__}")
-    return saved, errors
+            record = _audit_record(
+                operation,
+                "rejected",
+                error=f"{type(exc).__name__}: {exc}",
+            )
+        operations.append(record)
+    return saved, errors, operations
 
 
 def node_memory_save(state: State, config: RunnableConfig) -> dict:
+    empty = {"memory_operations": []}
     if not (state.get("context") or {}).get("id"):
-        return {}
+        return empty
     if not (state.get("evidence") or state.get("findings") or state.get("last_report")):
-        return {}
+        return empty
     if not getattr(memory, "enabled", True):
-        return {"memory_saved": "", "memory_facts_saved": 0}
+        return {**empty, "memory_saved": "", "memory_facts_saved": 0}
     user_id, _ = _identity(config)
     case_id = state["context"]["id"]
     try:
         memory.save_case(user_id, _case_from_state(state, config))
     except Exception as exc:
         return {
+            **empty,
             "memory_saved": "",
             "memory_facts_saved": 0,
             "memory_error": f"Память расследований недоступна: {type(exc).__name__}.",
         }
 
     if not (state.get("inv_result") or state.get("findings") or state.get("report_result")):
-        return {"memory_saved": case_id, "memory_facts_saved": 0, "memory_error": ""}
+        return {**empty, "memory_saved": case_id, "memory_facts_saved": 0, "memory_error": ""}
     try:
-        saved, rejected = _consolidate(state)
+        saved, rejected, operations = _consolidate(state)
         error = f"Часть фактов Context Memory отклонена: {', '.join(rejected)}." if rejected else ""
     except Exception as exc:
         saved = 0
+        operations = []
         error = f"Context Memory недоступна: {type(exc).__name__}."
+    audit = memory_audit_markdown(operations, error)
+    report_state = {**state, "memory_operations": operations, "memory_error": error}
+    extra: dict = {}
+    message = AIMessage(content=audit, name="reporter")
+    if state.get("last_report"):
+        report = dict(state["last_report"])
+        markdown = report.get("markdown") or ""
+        if audit not in markdown:
+            markdown = markdown.rstrip() + "\n\n" + audit
+        title = report.get("title") or "Расследование"
+        filename, url, _ = build_report(title, markdown)
+        artifacts = [artifact_from_data_url(url, state.get("context") or {})]
+        report.update({"markdown": markdown, "filename": filename})
+        if state.get("evidence"):
+            package_name, package_url, _ = build_investigation_package(title, markdown, report_state)
+            artifacts.append(artifact_from_data_url(package_url, state.get("context") or {}))
+            report["package_filename"] = package_name
+        report_state["last_report"] = report
+        extra = {"last_report": report, "artifacts": Overwrite(artifacts)}
+        message.artifacts = [artifact_url(item) for item in artifacts]
+    try:
+        memory.save_case(user_id, _case_from_state(report_state, config))
+    except Exception as exc:
+        error = " ".join(filter(None, [error, f"Журнал памяти не сохранён: {type(exc).__name__}."]))
     return {
         "memory_saved": case_id,
         "memory_facts_saved": saved,
+        "memory_operations": operations,
         "memory_error": error,
+        "messages": [message],
+        **extra,
     }

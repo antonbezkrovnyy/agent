@@ -34,7 +34,7 @@ def test_rework_report_replaces_previous_answer(patch_llm):
     result = invoke(build_graph(), "подготовь отчёт")
 
     assert texts(result) == ["подготовь отчёт", "Отчёт доработан"]
-    assert len(result["artifacts"]) == 2
+    assert len(result["artifacts"]) == 4
     assert result["rework"] == 1
     assert critic_report.calls == 2
     assert_clean(result)

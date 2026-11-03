@@ -41,6 +41,7 @@ def entry(state: State) -> dict:
             "memory_loaded": "",
             "memory_saved": "",
             "memory_facts_saved": 0,
+            "memory_operations": Overwrite([]),
             "memory_error": "",
             "context_memories": [],
             "similar_cases": [],

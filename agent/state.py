@@ -46,7 +46,7 @@ class AgentWorkState(AgentState):
     """Внутреннее состояние create_agent: messages + поля для tools/промптов."""
 
     callback_url: NotRequired[str]
-    artifacts: NotRequired[Annotated[list[str], operator.add]]
+    artifacts: NotRequired[Annotated[list[dict], operator.add]]
     findings: NotRequired[Annotated[list[dict], operator.add]]
     evidence: NotRequired[Annotated[list[dict], operator.add]]
     hypotheses: NotRequired[Annotated[list[dict], merge_hypotheses]]
@@ -61,6 +61,7 @@ class AgentWorkState(AgentState):
     anchors: NotRequired[list[dict]]
     visited_anchors: NotRequired[list[str]]
     memory_loaded: NotRequired[str]
+    memory_operations: NotRequired[Annotated[list[dict], operator.add]]
     memory_error: NotRequired[str]
     context_memories: NotRequired[list[dict]]
     similar_cases: NotRequired[list[dict]]
@@ -72,7 +73,7 @@ class AgentWorkState(AgentState):
 
 class State(MessagesState):
     callback_url: str
-    artifacts: Annotated[list[str], operator.add]
+    artifacts: Annotated[list[dict], operator.add]
     # Доказательства и записи только текущего расследования
     evidence: Annotated[list[dict], operator.add]
     findings: Annotated[list[dict], operator.add]
@@ -96,6 +97,7 @@ class State(MessagesState):
     memory_loaded: str
     memory_saved: str
     memory_facts_saved: int
+    memory_operations: Annotated[list[dict], operator.add]
     memory_error: str
     context_memories: list[dict]
     similar_cases: list[dict]

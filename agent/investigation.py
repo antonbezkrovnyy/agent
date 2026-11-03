@@ -10,6 +10,7 @@ import llm as llm_mod
 from agents import _agent_convo_messages
 from progress import agent_progress, simple_progress
 from prompts import compose, intent_hint_block, system_prompt
+from artifact_store import artifact_from_data_url, artifact_url
 from reporting import build_report
 from skills import get_skill
 from state import State
@@ -182,9 +183,10 @@ def _archive_update(state: State) -> dict:
     if not markdown:
         return {"archive_done": 1}
     _, url, _ = build_report(title, markdown)
+    artifact = artifact_from_data_url(url, state.get("context") or {})
     message = AIMessage(content="Прежний отчёт сохранён файлом.", name="archive")
-    message.artifacts = [url]
-    return {"archive_done": 1, "artifacts": [url], "messages": [message]}
+    message.artifacts = [artifact_url(artifact)]
+    return {"archive_done": 1, "artifacts": [artifact], "messages": [message]}
 
 
 def node_archive(state: State) -> dict:
@@ -200,6 +202,7 @@ def node_archive(state: State) -> dict:
             "visited_anchors": [],
             "last_report": {},
             "inv_summary": "",
+            "memory_operations": Overwrite([]),
         })
         update["progress"] = _work_progress({**state, **update}, state["intent"])
     return update

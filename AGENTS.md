@@ -13,6 +13,8 @@
 - `agent/memory.py` — Case Store, извлечение и консолидация Context Memory.
 - `agent/memory_models.py` — Pydantic-схемы дел, фактов и операций памяти.
 - `agent/memory_store.py` — предметная SQL-схема в отдельной `agent-memory-db`.
+- `agent/artifact_store.py` — S3-ключи и подписанные URL, без base64 в постоянном state.
+- `agent-mcp/app.py` — асинхронный MCP-адаптер над Aegra runs API, не второй движок.
 - `agent/contracts.py` — Evidence, Finding, Coverage, CriticIssue и Hypothesis.
 - `agent/export.py` — детерминированная полная выгрузка без LLM.
 - `agent/critics.py` — прямые структурированные вызовы критиков.
@@ -31,7 +33,14 @@
 - В публичном `messages` нет tool-сообщений и ответов с `tool_calls`; приватные
   циклы остаются в `scout_msgs`, `inv_msgs`, `rep_msgs`.
 - Каждый MCP-результат нормализуется через `EvidenceRecord` и сохраняется с
-  фактическими аргументами и окном; findings используют `FindingRecord`.
+  фактическими аргументами и окном; findings используют `FindingRecord`. IQL приходит
+  из MCP и должен совпадать с выполненным запросом, агент не генерирует его повторно.
+- Аналитический отчёт прикрепляется как Markdown плюс ZIP с `report.md`, `queries.md`,
+  `evidence.jsonl`, `events.csv` и `manifest.json`. Пакет строится детерминированно.
+- `memory_operations` фиксирует исходное/фактическое действие и исход каждой записи;
+  журнал попадает в Case Store, отчёт и manifest. Не заменять его одним счётчиком.
+- S3 state содержит только object keys и метаданные; подписанные URL создаются при
+  выдаче. Внешний agent-mcp работает только с `inv-*` тредами и не дублирует граф.
 - Claims ссылаются только на существующие Evidence ID. Критик получает полные
   записи по этим ID без скрытого усечения; агенты читают их через `get_evidence`.
 - Цепочка расследования строится детерминированно из state. LLM не добавляет в
@@ -102,7 +111,7 @@
 uv run --with "langchain==1.3.10" --with "langgraph==1.2.16" \
   --with "langchain-openai" --with "pydantic-settings" \
   --with "httpx" --with "tenacity" --with "pytest" --with "loguru" \
-  --with "psycopg" pytest -q tests
+  --with "psycopg" --with "mcp[cli]>=2,<3" pytest -q tests
 
 git diff --check
 ```

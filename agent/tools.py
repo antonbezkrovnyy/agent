@@ -24,7 +24,8 @@ from evidence import evidence_record, with_investigation_chain
 from llm import WindowUpdate
 from mcp_client import get_mcp_tools
 from progress import TOOL_LIMITS, simple_progress
-from reporting import build_report, post_report
+from artifact_store import artifact_from_data_url
+from reporting import build_investigation_package, build_report, post_report
 
 mcp_tools = get_mcp_tools()
 _MCP_TOOLS_BY_NAME = {item.name: item for item in mcp_tools}
@@ -118,6 +119,7 @@ async def normalize_tool_result(request, handler):
         step_id=evidence_id,
         tool=name,
         arguments=args,
+        iql=data.get("iql"),
         window=data.get("window") or {
             "from": args.get("time_from"),
             "to": args.get("time_to"),
@@ -369,16 +371,23 @@ def save_report(
     state = runtime.state if runtime else {}
     markdown = with_investigation_chain(markdown, state)
     fname, url, nbytes = build_report(title, markdown, filename)
-    payload = json.dumps({"ok": True, "filename": fname, "bytes": nbytes}, ensure_ascii=False)
+    artifacts = [artifact_from_data_url(url, state.get("context") or {})]
+    last_report = {"title": title, "markdown": markdown, "filename": fname}
+    result = {"ok": True, "filename": fname, "bytes": nbytes}
+    if state.get("evidence"):
+        package_name, package_url, package_bytes = build_investigation_package(title, markdown, state)
+        artifacts.append(artifact_from_data_url(package_url, state.get("context") or {}))
+        last_report["package_filename"] = package_name
+        result.update({"package_filename": package_name, "package_bytes": package_bytes})
     return Command(update={
         "messages": [ToolMessage(
-            content=payload,
+            content=json.dumps(result, ensure_ascii=False),
             tool_call_id=runtime.tool_call_id if runtime else "",
             name="save_report",
         )],
-        "artifacts": [url],
+        "artifacts": artifacts,
         # Сырой текст — для будущих правок
-        "last_report": {"title": title, "markdown": markdown, "filename": fname},
+        "last_report": last_report,
     })
 
 
@@ -399,9 +408,14 @@ async def send_report(
     markdown = with_investigation_chain(markdown, state)
     fname, url, nbytes = build_report(title, markdown)
     target = (callback_url or "").strip() or str(state.get("callback_url") or "").strip()
+    artifacts = [artifact_from_data_url(url, state.get("context") or {})]
+    last_report = {"title": title, "markdown": markdown, "filename": fname}
+    if state.get("evidence"):
+        package_name, package_url, _ = build_investigation_package(title, markdown, state)
+        artifacts.append(artifact_from_data_url(package_url, state.get("context") or {}))
+        last_report["package_filename"] = package_name
 
     result: dict[str, Any] = {"filename": fname, "bytes": nbytes}
-
     if not target:
         result["ok"] = False
         result["error"] = "callback_url не задан: эндпоинт отсутствует в данных запуска"
@@ -411,6 +425,8 @@ async def send_report(
         if isinstance(config, dict):
             thread_id = (config.get("configurable") or {}).get("thread_id")
 
+        from artifact_store import artifact_url
+
         payload = {
             "event": "investigation_report",
             "title": title,
@@ -418,6 +434,7 @@ async def send_report(
             "markdown": markdown,
             "sent_at": datetime.datetime.now(datetime.UTC).isoformat(timespec="seconds"),
             "thread_id": thread_id,
+            "artifacts": [{**item, "url": artifact_url(item)} for item in artifacts],
         }
         try:
             resp = await post_report(target, payload)
@@ -436,10 +453,9 @@ async def send_report(
             name="send_report",
         )],
     }
-    # Артефакт и текст отчёта — только при успешной доставке
     if result["ok"]:
-        update["artifacts"] = [url]
-        update["last_report"] = {"title": title, "markdown": markdown, "filename": fname}
+        update["artifacts"] = artifacts
+        update["last_report"] = last_report
 
     return Command(update=update)
 

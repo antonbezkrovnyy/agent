@@ -94,6 +94,7 @@ def case_events(state: dict) -> list[dict]:
             "status": item.get("status"),
             "window": item.get("window"),
             "arguments": item.get("arguments") or {},
+            "iql": item.get("iql"),
         })
     for item in state.get("skill_runs") or []:
         events.append({"at": item.get("recorded_at"), "type": "skill", **item})
@@ -156,6 +157,32 @@ def chain_block(state: dict) -> str:
     )
 
 
+def evidence_query_block(record: dict) -> str:
+    iql = record.get("iql")
+    if iql:
+        return f"\n\n```iql\n{iql}\n```"
+    arguments = json.dumps(record.get("arguments") or {}, ensure_ascii=False)
+    return f"\n\n```json\n{arguments}\n```"
+
+
+def queries_markdown(state: dict) -> str:
+    lines = ["# Запросы расследования", ""]
+    for index, record in enumerate(state.get("evidence") or [], start=1):
+        lines.extend([
+            f"## {index}. {record.get('tool')}",
+            "",
+            f"- Evidence: `{record.get('id')}`",
+            f"- Статус: `{record.get('status')}`",
+            f"- Окно: `{record.get('window')}`",
+            f"- Результат: `evidence.jsonl`, запись {index}.",
+            evidence_query_block(record),
+            "",
+        ])
+    if not (state.get("evidence") or []):
+        lines.append("Запросов не было.")
+    return "\n".join(lines)
+
+
 def chain_markdown(state: dict) -> str:
     chain = investigation_chain(state)
     lines = [
@@ -171,13 +198,19 @@ def chain_markdown(state: dict) -> str:
     ]
     if not chain["events"]:
         lines.append("Значимых действий пока нет.")
+    evidence_positions = {
+        item.get("id"): index for index, item in enumerate(state.get("evidence") or [], start=1)
+    }
     for index, event in enumerate(chain["events"], start=1):
         kind = event.get("type")
         if kind == "evidence":
+            evidence_id = event.get("evidence_id")
             lines.append(
                 f"{index}. **{event.get('tool')}** — `{event.get('status')}`, "
-                f"Evidence `{event.get('evidence_id')}`, окно `{event.get('window')}`."
+                f"Evidence `{evidence_id}`, окно `{event.get('window')}`."
             )
+            if evidence_id in evidence_positions:
+                lines.append(f"   Результат: `evidence.jsonl`, запись {evidence_positions[evidence_id]}." + evidence_query_block(event))
         elif kind == "window":
             lines.append(
                 f"{index}. **Окно: {event.get('action')}** — {event.get('reason')}. "

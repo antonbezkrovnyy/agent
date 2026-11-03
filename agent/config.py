@@ -63,3 +63,15 @@ class Settings(BaseSettings):
     # Технические таймауты от зависаний; пользователь не управляет ими
     agent_timeout_seconds: int = 600
     export_timeout_seconds: int = 120
+
+    # Файлы расследований: S3 в работе, data-URL только для локального fallback
+    artifact_store_backend: str = "auto"
+    artifact_s3_endpoint: str = ""
+    artifact_s3_public_endpoint: str = ""
+    artifact_s3_region: str = "us-east-1"
+    artifact_s3_bucket: str = "logicore-investigations"
+    artifact_s3_access_key: str = ""
+    artifact_s3_secret_key: str = ""
+    artifact_s3_prefix: str = "investigations"
+    artifact_signed_url_ttl_seconds: int = 3600
+    artifact_inline_fallback_bytes: int = 262144

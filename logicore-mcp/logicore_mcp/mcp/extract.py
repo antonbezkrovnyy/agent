@@ -104,6 +104,7 @@ async def extract_data_flow(
         "ok": True,
         "window": _window_payload(start, end, source),
         "filter_applied": filter,
+        "iql": iql,
         "columns": list(columns_tuple),
         "events": events,
         "returned_rows": len(events),

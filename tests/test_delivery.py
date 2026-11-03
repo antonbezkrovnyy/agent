@@ -46,5 +46,5 @@ def test_send_report_delivers_callback(patch_llm):
     assert len(Handler.posts) == 1
     assert Handler.posts[0]["event"] == "investigation_report"
     assert Handler.posts[0]["thread_id"] == "delivery"
-    assert len(result["artifacts"]) == 1
+    assert len(result["artifacts"]) == 2
     assert result["messages"][-1].content == "Отчёт доставлен"

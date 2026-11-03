@@ -34,6 +34,7 @@ class CaseRecord(BaseModel):
     inv_summary: str = ""
     inv_result: dict = Field(default_factory=dict)
     last_report: dict = Field(default_factory=dict)
+    memory_operations: list["MemoryOperationRecord"] = Field(default_factory=list)
     chain: dict = Field(default_factory=dict)
 
 
@@ -93,3 +94,16 @@ class ContextMemoryConsolidation(BaseModel):
         default_factory=list,
         max_length=settings.agent_memory_max_operations,
     )
+
+
+class MemoryOperationRecord(BaseModel):
+    """Фактический результат применения одного предложения консолидации."""
+
+    action: Literal["insert", "update", "supersede", "ignore"]
+    requested_action: Literal["insert", "update", "supersede", "ignore"]
+    statement: str = ""
+    target_id: str | None = None
+    fact_id: str | None = None
+    status: Literal["saved", "rejected", "ignored"]
+    reason: str = ""
+    error: str = ""

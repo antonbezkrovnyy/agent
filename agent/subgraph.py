@@ -3,7 +3,7 @@
 from langchain_core.messages import RemoveMessage
 
 
-_APPEND_KEYS = ("artifacts", "evidence", "findings", "skill_runs")
+_APPEND_KEYS = ("artifacts", "evidence", "findings", "skill_runs", "memory_operations")
 _MESSAGE_KEYS = ("messages", "scout_msgs", "inv_msgs", "rep_msgs")
 
 

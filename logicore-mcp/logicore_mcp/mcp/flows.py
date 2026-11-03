@@ -251,6 +251,7 @@ async def search_events_flow(
     )
     if coverage is not None:
         envelope["coverage"] = coverage
+    envelope["iql"] = iql
     return envelope
 
 
@@ -306,6 +307,7 @@ async def count_events_flow(
         "events_per_minute": round(count / span_minutes, 1) if span_minutes > 0 else None,
         "window": _window_payload(start, end, wsource),
         "filter_applied": filter,
+        "iql": iql,
     }
     if coverage is not None:
         envelope["coverage"] = coverage
@@ -380,6 +382,7 @@ async def timeline_flow(
         "ok": True,
         "window": _window_payload(start, end, wsource),
         "filter_applied": filter,
+        "iql": iql,
         "timeline": {
             "buckets": buckets,
             "bucket_count": len(buckets),
@@ -449,6 +452,7 @@ async def top_values_flow(
 
     response = build_top_values(field=field, items=items, limit=limit)
     response["window"] = _window_payload(start, end, wsource)
+    response["iql"] = iql
     if coverage is not None:
         response["coverage"] = coverage
     return response
@@ -558,6 +562,7 @@ async def top_values_batch_flow(
         "ok": True,
         "window": _window_payload(start, end, wsource),
         "filter_applied": filter,
+        "iql": iql,
         "fields": entries,
     }
     return envelope
@@ -754,6 +759,7 @@ async def field_fill_rates_flow(
         "ok": True,
         "window": _window_payload(start, end, wsource),
         "filter_applied": filter,
+        "iql": iql,
         "fields_total": len(schema),
         "fields_scanned": scanned,
         "offset": next_offset,
@@ -870,6 +876,7 @@ async def duplicates_flow(
         "ok": True,
         "window": _window_payload(start, end, wsource),
         "filter_applied": filter,
+        "iql": iql,
         "key": list(key),
         "groups_scanned": len(items),
         "duplicate_groups": shown,

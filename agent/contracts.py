@@ -13,6 +13,7 @@ class EvidenceRecord(BaseModel):
     step_id: str
     tool: str
     arguments: dict = Field(default_factory=dict)
+    iql: str | None = None
     window: dict = Field(default_factory=dict)
     status: Literal["ok", "partial", "error"]
     complete: bool

@@ -41,7 +41,7 @@ def test_report_edit_keeps_evidence_and_context(patch_llm):
     assert second["context"]["id"] == first["context"]["id"]
     assert second["evidence"] == first["evidence"]
     assert second["findings"] == first["findings"]
-    assert len(second["artifacts"]) == 1
+    assert len(second["artifacts"]) == 2
     assert texts(second) == ["подготовь отчёт", "Отчёт готов", "сократи отчёт", "Отчёт сокращён"]
     assert_clean(second)
 

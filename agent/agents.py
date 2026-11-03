@@ -20,6 +20,7 @@ from langchain_core.messages import (
 )
 
 import llm as llm_mod
+from artifact_store import artifact_url
 from config import Settings
 from evidence import chain_block
 from prompts import (
@@ -146,7 +147,7 @@ def _agent_final(
     state: State,
     response: AIMessage,
     agent: str,
-    artifacts: list[str] | None = None,
+    artifacts: list[dict] | None = None,
 ) -> dict:
     """Финальный ответ без tool_calls и необязательные артефакты для UI."""
     out: list[BaseMessage] = []
@@ -158,7 +159,7 @@ def _agent_final(
             out.append(RemoveMessage(id=prev.id))
     final_artifacts = state.get("artifacts") if artifacts is None else artifacts
     if final_artifacts:
-        final.artifacts = list(final_artifacts)
+        final.artifacts = [artifact_url(item) for item in final_artifacts]
     out.append(final)
     update["messages"] = out
     return update

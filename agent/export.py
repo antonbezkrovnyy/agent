@@ -106,6 +106,7 @@ async def node_export(state: State) -> dict:
         step_id=evidence_id,
         tool="extract_data",
         arguments=args,
+        iql=data.get("iql"),
         window=data.get("window") or {
             "from": args["time_from"],
             "to": args["time_to"],
@@ -143,10 +144,12 @@ async def node_export(state: State) -> dict:
         "evidence": [evidence],
         "report_result": structured.model_dump(),
     }
-    artifacts: list[str] = []
+    artifacts: list[dict] = []
     if data.get("ok") is not False and data.get("events"):
         filename, url, _ = build_report("Выгрузка событий", answer)
-        artifacts.append(url)
+        from artifact_store import artifact_from_data_url
+
+        artifacts.append(artifact_from_data_url(url, state.get("context") or {}))
         update["last_report"] = {"title": "Выгрузка событий", "markdown": answer, "filename": filename}
     update["artifacts"] = artifacts
     update["progress"] = done_progress("Готово с ограничениями" if limitations else "Готово")

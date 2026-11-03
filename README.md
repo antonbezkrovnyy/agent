@@ -42,6 +42,13 @@ Mars API, Aegra предоставляет API и checkpoints, Phoenix соби�
   критика и локальный `get_evidence(id)` без повторного MCP-запроса.
 - Детерминированная цепочка «задача → вызовы → окна → режимы → находки →
   ограничения → NOT_CHECKED» автоматически добавляется в файлы отчётов.
+- Проверяемый ZIP-пакет расследования: `report.md`, фактические IQL/JSON-запросы,
+  `evidence.jsonl`, `events.csv` и `manifest.json` с индексом Evidence, журналом
+  памяти и SHA-256. В отчёте видно, какие факты LLM предложила, сохранила или отклонила.
+- SeaweedFS/S3-хранение файлов по ключам `investigations/<case>/<run>/<file>`;
+  в state остаются метаданные, в чат и callback выдаются подписанные URL с TTL.
+- Асинхронный MCP-интерфейс самого агента: старт, статус, результат, отмена и
+  получение Evidence без ожидания долгого run и без base64 в structured JSON.
 - Структурированные ответы агентов и критиков с текстовым fallback. Сбой критика
   обозначается как `critic_unavailable`, а не маскируется под `ok`.
 - Continuation с сохранением `context.id`, `base_window`, `focus_window`,
@@ -65,6 +72,8 @@ Multiuser/OIDC намеренно не реализуется. Текущий an
 | `aegra` | 2026 | LangGraph/Aegra API, workers и checkpoints |
 | `agent-chat-ui` | 3000 | Веб-чат на Next.js |
 | `logicore-mcp` | 9000, только Docker-сеть | 12 read-only MCP-инструментов |
+| `agent-mcp` | 9100 | Асинхронный MCP-интерфейс расследований |
+| `seaweedfs` | 8333 | S3-файлы отчётов и пакетов Evidence |
 | `anomaly-relay` | 2025 | Webhook LogiCore → тред и run |
 | `postgres` | 5432 | Состояние Aegra, не отдельная память случаев |
 | `agent-memory-db` | только Docker-сеть | Case Store и Context Memory в схеме `agent_memory`, pgvector |
@@ -98,6 +107,8 @@ docker compose up -d --build
   `AGENT_MEMORY_OBSERVED_TTL_HOURS=24` — TTL наблюдений;
 - `AGENT_MEMORY_EMBEDDING_MODEL=bge-m3`, `AGENT_MEMORY_EMBEDDING_DIMENSIONS=1024` —
   embeddings; отдельные `AGENT_MEMORY_EMBEDDING_BASE_URL/TOKEN` необязательны;
+- `ARTIFACT_S3_*`, `ARTIFACT_SIGNED_URL_TTL_SECONDS` — S3 и срок действия ссылок;
+- `AGENT_MCP_TOKEN` — Bearer-авторизация внешнего MCP агента;
 - `RELAY_TOKEN`, `DEFAULT_CALLBACK_URL` — опциональные webhook/отчёты;
 - `DEPLOY_HOST/USER/PASSWORD/GIT_URL/REMOTE_PATH` — опциональный `scripts/deploy_ma.py`.
   Все значения по умолчанию и дополнительные лимиты перечислены в `.env.example`.
@@ -117,6 +128,20 @@ curl http://localhost:2026/health
 ```
 
 Anonymous-режим подходит только для локальной разработки.
+
+## MCP агента
+
+Endpoint: `http://localhost:9100/mcp`, заголовок `Authorization: Bearer $AGENT_MCP_TOKEN`.
+Вызовы возвращаются сразу; долгий run продолжается в Aegra:
+
+- `investigation_start(task, window?, mode?)` → `investigation_id`;
+- `investigation_status(investigation_id)` → этап, прогресс и ошибки;
+- `investigation_result(investigation_id)` → отчёт, аудит памяти и свежие S3-ссылки;
+- `investigation_evidence(investigation_id, evidence_id?)` → полные Evidence;
+- `investigation_cancel(investigation_id)` → отмена активного run.
+
+Адаптер использует существующий граф и runs API. Доступ разрешён только к созданным
+через него тредам `inv-*`; второго investigation engine или task manager нет.
 
 ## Текущий граф
 
@@ -255,6 +280,9 @@ Autopilot не отменяет эти ограничения.
    консолидация, continuation и `search_similar_cases`.
 7. **Модели и метрики** — модели по ролям, `model`/`duration_ms`; сравнение версий
    skills по решению не выполняется.
+8. **Проверяемые отчёты** — фактический IQL, ZIP с Evidence и аудит памяти.
+9. **S3-артефакты** — SeaweedFS, object keys и обновляемые signed URL.
+10. **MCP агента** — асинхронные runs, отчёты, Evidence и отмена для других агентов.
 
 Этапы 1–4 образуют MVP. Архитектура, контракты и приёмочные сценарии —
 [DEV.md](docs/DEV.md).
@@ -273,6 +301,7 @@ Autopilot не отменяет эти ограничения.
 │   ├── memory.py          # Case Store и консолидация Context Memory
 │   ├── memory_models.py   # схемы дел, фактов и операций
 │   ├── memory_store.py    # предметные таблицы и pgvector-поиск
+│   ├── artifact_store.py  # S3-ключи и подписанные ссылки
 │   ├── contracts.py       # Evidence, Finding, Coverage, CriticIssue, Hypothesis
 │   ├── export.py          # детерминированная таблица и файл
 │   ├── critics.py         # критики доказательств и отчёта
@@ -284,6 +313,7 @@ Autopilot не отменяет эти ограничения.
 │   ├── skills/            # registry, контракты и playbooks
 │   └── prompts/           # системные промпты
 ├── logicore-mcp/          # MCP-сервер и пагинация Mars API
+├── agent-mcp/             # Асинхронный MCP-интерфейс расследований
 ├── anomaly-relay/         # webhook LogiCore
 ├── ui/                    # agent-chat-ui
 ├── docs/DEV.md            # архитектура, контракты и приёмка

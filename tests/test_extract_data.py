@@ -13,6 +13,7 @@ COLUMNS = ("uuid", "timestamp", "message")
 SCHEMA = {
     "uuid": FieldSchema(name="uuid", type="String"),
     "message": FieldSchema(name="message", type="String"),
+    "action": FieldSchema(name="action", type="String"),
 }
 
 
@@ -58,12 +59,12 @@ class FakeClient:
         )
 
 
-def extract(client, max_rows=1000, page=1):
+def extract(client, max_rows=1000, page=1, filter=None):
     return asyncio.run(extract_data_flow(
         client,
         time_from="2026-10-31T07:00:00Z",
         time_to="2026-10-31T08:00:00Z",
-        filter=None,
+        filter=filter,
         columns=COLUMNS,
         max_rows=max_rows,
         page=page,
@@ -132,3 +133,12 @@ def test_search_response_exposes_next_page():
     assert result["has_more"] is True
     assert result["next_page"] == 3
     assert result["truncated"] is True
+
+
+def test_extract_data_returns_executed_iql():
+    result = extract(
+        FakeClient(rows(1)),
+        filter={"==": [{"var": "action"}, "allow"]},
+    )
+
+    assert result["iql"] == "action = 'allow'"
