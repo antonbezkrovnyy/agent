@@ -75,6 +75,8 @@
 - Для ответов агентов используются схемы из `llm.py`, а не самодельный parser,
   если доступен structured output. Intent классифицируется LLM; keyword-списки
   для выбора режима/skill запрещены, fallback — консервативный state.
+  `needs_new_data/export` имеют приоритет над `inspect_memory`; смена окна в
+  continuation требует новых данных. Обзор памяти — только самостоятельный simple-запрос.
 - Windowed tools определяются по JSON Schema (`time_from/time_to`), а не по
   hardcoded списку имён.
 - Continuation сохраняет `context.id`, base/focus/history окон, `depth_history`,

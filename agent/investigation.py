@@ -53,6 +53,25 @@ def _intent_structured(state: State) -> dict | None:
     }
 
 
+def _normalize_intent(decision: dict, state: State) -> dict:
+    """Разрешить противоречивые флаги structured output без keyword-классификации."""
+    decision = dict(decision)
+    if (
+        state.get("context")
+        and decision.get("label") in ("complex", "continuation")
+        and decision.get("window_requested")
+    ):
+        decision["needs_new_data"] = True
+    if decision.get("needs_new_data") or decision.get("export_data"):
+        decision["inspect_memory"] = False
+        decision["memory_query"] = ""
+    if decision.get("inspect_memory"):
+        decision["needs_new_data"] = False
+        decision["edit_existing_report"] = False
+        decision["export_data"] = False
+    return decision
+
+
 def _intent_fallback(state: State) -> dict:
     """Консервативный fallback без семантических правил по словам."""
     has_context = bool(state.get("context"))
@@ -143,7 +162,7 @@ def _work_progress(state: State, decision: dict) -> dict:
 
 def node_intent(state: State) -> dict:
     """Выбрать quick/deep и автоматически обновить контекст расследования."""
-    decision = _intent_structured(state) or _intent_fallback(state)
+    decision = _normalize_intent(_intent_structured(state) or _intent_fallback(state), state)
     transition = decision.get("new_investigation") or "continue"
     if transition == "uncertain":
         transition = "continue"

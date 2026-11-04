@@ -433,7 +433,9 @@ search. Старые дела без embedding появятся в поиске 
 ### 9.6. Read-only обзор памяти
 
 Вопрос «что у тебя в памяти?» маршрутизируется через `inspect_memory=true` в отдельный
-`memory_inspect`, минуя chat-LLM, Scout и Investigator. Ответ собирается детерминированно:
+`memory_inspect`, минуя chat-LLM, Scout и Investigator. Это самостоятельный simple-запрос:
+`needs_new_data` и `export_data` имеют приоритет, а уточнение периода в continuation
+не может заменить анализ обзором памяти. Ответ собирается детерминированно:
 
 - текущее дело в state треда, количество Evidence, findings и гипотез;
 - последние активные Context Facts со статусом, категорией, ID и TTL;
