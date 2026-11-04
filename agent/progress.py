@@ -33,6 +33,11 @@ def done_progress(text: str = "Готово") -> dict:
 
 def report_suggestions(state: dict, *, exported: bool = False, has_report: bool = False) -> list[dict]:
     suggestions = []
+    scope = state.get("investigation_scope") or {}
+    for direction in (scope.get("optional") or [])[:3]:
+        objective = str(direction.get("objective") or "").strip()
+        if objective:
+            suggestions.append({"label": objective[:80], "value": f"Продолжи текущее расследование: {objective}"})
     if state.get("evidence") and not exported:
         suggestions.append({
             "label": "Показать всё таблицей",
@@ -43,9 +48,9 @@ def report_suggestions(state: dict, *, exported: bool = False, has_report: bool 
             "label": "Сохранить отчёт",
             "value": "Сохранить отчёт расследования файлом",
         })
-    if state.get("evidence"):
+    if state.get("evidence") and not scope.get("optional"):
         suggestions.append({
             "label": "Продолжить расследование",
-            "value": "Продолжи расследование и углуби анализ",
+            "value": "Продолжи расследование коротким следующим шагом",
         })
     return suggestions

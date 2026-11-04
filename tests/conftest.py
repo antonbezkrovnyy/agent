@@ -151,7 +151,7 @@ class FakeStructured:
         self.calls = 0
         self.systems = []
 
-    def invoke(self, messages):
+    def invoke(self, messages, config=None):
         self.calls += 1
         self.systems.append(messages[0].content)
         if self.error:
@@ -181,14 +181,33 @@ def critics():
 
 @pytest.fixture
 def patch_llm(monkeypatch):
-    def apply(agent, intent_llm, critic_evidence=None, critic_report=None, memory=None):
+    def apply(agent, intent_llm, critic_evidence=None, critic_report=None, memory=None, planner=None, scope=None):
         from memory_models import ContextMemoryConsolidation
+        from contracts import InvestigationPlan, InvestigationScope, WorkItem
 
         default_evidence, default_report = critics()
         monkeypatch.setattr(llm_mod, "llm", agent)
         monkeypatch.setattr(llm_mod, "intent_llm", intent_llm)
         monkeypatch.setattr(llm_mod, "critic_evidence_llm", critic_evidence or default_evidence)
         monkeypatch.setattr(llm_mod, "critic_report_llm", critic_report or default_report)
+        monkeypatch.setattr(
+            llm_mod,
+            "scope_llm",
+            scope or FakeStructured(InvestigationScope(
+                mode="targeted",
+                objective="Текущее расследование",
+                included=["Текущее расследование"],
+                max_items=5,
+            )),
+        )
+        monkeypatch.setattr(
+            llm_mod,
+            "planner_llm",
+            planner or FakeStructured(InvestigationPlan(
+                goal="Текущее расследование",
+                items=[WorkItem(id="main", goal="Текущее расследование")],
+            )),
+        )
         monkeypatch.setattr(
             llm_mod,
             "context_memory_llm",

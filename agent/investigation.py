@@ -8,6 +8,7 @@ from langgraph.types import Overwrite
 
 import llm as llm_mod
 from agents import _agent_convo_messages
+from observability import trace_config
 from progress import agent_progress, simple_progress
 from prompts import compose, intent_hint_block, system_prompt
 from artifact_store import artifact_from_data_url, artifact_url
@@ -24,7 +25,10 @@ def _intent_messages(state: State) -> list[BaseMessage]:
 def _intent_structured(state: State) -> dict | None:
     """Structured output с настроенным fallback на JSON mode."""
     try:
-        decision = llm_mod.intent_llm.invoke(_intent_messages(state))
+        decision = llm_mod.intent_llm.invoke(
+            _intent_messages(state),
+            config=trace_config("intent", state),
+        )
     except Exception:
         return None
     if decision is None or not getattr(decision, "intent", None):
@@ -37,6 +41,8 @@ def _intent_structured(state: State) -> dict | None:
         "needs_new_data": getattr(decision, "needs_new_data", False),
         "edit_existing_report": getattr(decision, "edit_existing_report", False),
         "export_data": getattr(decision, "export_data", False),
+        "inspect_memory": getattr(decision, "inspect_memory", False),
+        "memory_query": getattr(decision, "memory_query", ""),
         "new_investigation": getattr(decision, "new_investigation", "continue"),
         "window_requested": getattr(decision, "window_requested", False),
         "skill_id": getattr(decision, "skill_id", None),
@@ -57,6 +63,8 @@ def _intent_fallback(state: State) -> dict:
         "needs_new_data": True,
         "edit_existing_report": False,
         "export_data": False,
+        "inspect_memory": False,
+        "memory_query": "",
         "new_investigation": "continue" if has_context else "new",
         "window_requested": False,
         "skill_id": None,
@@ -115,6 +123,8 @@ def _focus_context(context: dict, decision: dict) -> dict:
 
 
 def _work_progress(state: State, decision: dict) -> dict:
+    if decision.get("inspect_memory"):
+        return simple_progress("memory_inspect", "Читаю содержимое памяти")
     if decision.get("export_data"):
         return simple_progress("export", "Готовлю полную выгрузку")
     if decision.get("needs_new_data"):
@@ -203,6 +213,11 @@ def node_archive(state: State) -> dict:
             "last_report": {},
             "inv_summary": "",
             "memory_operations": Overwrite([]),
+            "investigation_scope": {},
+            "investigation_plan": {},
+            "work_items": Overwrite([]),
+            "active_work_item": {},
+            "replan_requested": False,
         })
         update["progress"] = _work_progress({**state, **update}, state["intent"])
     return update

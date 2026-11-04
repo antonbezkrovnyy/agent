@@ -8,17 +8,27 @@ Mars API, Aegra предоставляет API и checkpoints, Phoenix соби�
 
 - **этот README** — что работает сейчас и как запустить;
 - [DEV.md](docs/DEV.md) — полное руководство по работе и устройству агента;
-- [NEXT_STEPS.md](docs/NEXT_STEPS.md) — рекомендации по качеству и дальнейшему развитию;
+- [ROADMAP.md](docs/ROADMAP.md) — только планируемые доработки и их приёмочные сценарии;
+- [EVALUATION.md](docs/EVALUATION.md) — фоновая оценка runs по Phoenix;
+- [OBSERVABILITY.md](docs/OBSERVABILITY.md) — текущая интеграция Phoenix, metadata и retention;
 - [AGENTS.md](AGENTS.md) — правила внесения изменений.
 
 ## Что работает сейчас
 
-- Обычный чат без обращения к LogiCore.
+- Персона LogiCore Investigator: объясняет, как и почему устроена его работа,
+  и вежливо отказывается отвечать на темы вне расследований LogiCore.
+- Обычный чат в пределах специализации без обращения к LogiCore.
 - Структурированный intent: simple, complex, continuation, export и выбор
   `work_mode=quick/deep`.
 - Quick отвечает через scout → reporter без глубокого расследования; при нехватке
   данных или найденной зацепке автоматически переходит в deep.
-- Deep идёт через investigator и может сам менять окно через `update_window`.
+- Deep начинается со structured `InvestigationScope`: Discovery (обзор до 2 проверок),
+  Targeted (конкретная ветка) или Alert (SIEM-алерт). Required и optional разделены:
+  следующие направления не раздувают текущий план.
+- Planner разбивает только включённую работу на 1–5 work items с `acceptance`,
+  приоритетом и стоимостью. Supervisor выполняет зависимые волны через item-subgraphs
+  и `asyncio.gather` (до 2 веток), с Item Critic и retry. Replan допустим только при
+  невыполненном acceptance, ошибочном выводе или отсутствии критического Evidence.
 - Skills `incident_dating`, `event_drilldown` и `entity_pivot` v1 автоматически
   выбираются по задаче. Есть адаптивные окна, разбор `uuid + timestamp`, typed
   anchors, дедупликация `type:value`, ограничения глубины/ширины и `NOT_CHECKED`.
@@ -32,11 +42,17 @@ Mars API, Aegra предоставляет API и checkpoints, Phoenix соби�
   Восстановление дела в новом треде требует контрольного запроса к LogiCore.
 - Отдельный `search_similar_cases` находит компактные карточки похожих дел без
   continuation и подмены текущих Evidence.
+- Read-only обзор памяти по запросу «что ты помнишь?»: текущее дело, активные
+  факты с TTL и последние случаи; инструмент `inspect_memory` доступен и другим ролям.
 - Журнал гипотез `open/supported/rejected` с историей, Evidence ID и отображением
   в детерминированной цепочке отчёта.
 - Pydantic-контракты Evidence/Finding, расширенные Scout/Intent/Reporting и
   структурированные `issues` критиков с `suggested_action`.
 - Модели по ролям через env; `model` и фактическая `duration_ms` в `skill_runs`.
+- Метрики `run_metrics` по ролям и items: длительность, токены, tool calls по типам,
+  повторные запросы и continuations. Они попадают в Case Store, manifest и MCP.
+- Phoenix annotations, 24 golden-сценария и штатные Datasets/Experiments для сравнения
+  моделей и версий промптов; локальная validation не запускает живые runs.
 - `Evidence` с фактическими аргументами, окном, статусом и результатом вызова.
   Явные `time_from/time_to` запроса не перезаписываются контекстом.
 - Компактный обзор Evidence для агентов, полный `Evidence Bundle` по claims для
@@ -61,7 +77,10 @@ Mars API, Aegra предоставляет API и checkpoints, Phoenix соби�
 - Короткие уведомления в чате через одну карточку `progress`: quick/deep, смена
   этапа или окна и счётчик вызовов. Служебные сообщения не попадают в `messages`.
 - Suggestion-кнопки после ответа.
-- Трассировка в Phoenix и regression-тесты графа/MCP.
+- Трассировка в project `logicore-agent` Phoenix с role/mode/work-item metadata,
+  постоянным хранилищем и retention 30 дней; read-only MCP без code execution.
+- Фоновый `agent-evaluator`: независимая оценка завершённого run по state и trace,
+  хранение в `agent_memory.run_evaluations` и отложенное уведомление «Автодиагностика» в треде.
 
 Multiuser/OIDC намеренно не реализуется. Текущий anonymous-режим предназначен
 только для локальной разработки.
@@ -72,14 +91,56 @@ Multiuser/OIDC намеренно не реализуется. Текущий an
 |---|---:|---|
 | `aegra` | 2026 | LangGraph/Aegra API, workers и checkpoints |
 | `agent-chat-ui` | 3000 | Веб-чат на Next.js |
+| `agui-agent` | 2027 | AG-UI sandbox: in-process обёртка пакета `agent/` по протоколу AG-UI |
+| `copilotkit-demo` | 3001 | CopilotKit-чат поверх AG-UI sandbox (песочница, не прод) |
 | `logicore-mcp` | 9000, только Docker-сеть | 12 read-only MCP-инструментов |
 | `agent-mcp` | 9100 | Асинхронный MCP-интерфейс расследований |
+| `agent-evaluator` | 9200, только Docker-сеть | Фоновая оценка завершённых runs |
 | `seaweedfs` | 8333 | S3-файлы отчётов и пакетов Evidence |
 | `anomaly-relay` | 2025 | Webhook LogiCore → тред и run |
 | `postgres` | 5432 | Состояние Aegra, не отдельная память случаев |
 | `agent-memory-db` | только Docker-сеть | Case Store и Context Memory в схеме `agent_memory`, pgvector |
 | `redis` | 6379 | Очередь задач и SSE-брокер |
 | `phoenix` | 6006 | OpenInference/OpenTelemetry-трассировка |
+
+### AG-UI sandbox
+
+`agui-agent` (порт 2027) поднимает тот же пакет `agent/` in-process и отдаёт
+ход расследования событиями протокола [AG-UI](https://github.com/ag-ui-protocol/ag-ui)
+через `POST /agent` (SSE): `RUN_*`, `STEP_*`, `TEXT_MESSAGE_*`, `TOOL_CALL_*`,
+`STATE_SNAPSHOT/DELTA`. `copilotkit-demo` (порт 3001) — рабочий стол аналитика
+поверх этого эндпоинта; чат открывается отдельной панелью и не сжимает dashboard.
+
+На вкладке «Расследование» доступны текущая задача, KPI, гипотезы, находки,
+метрики ролей и компактное дерево «этап плана → вызовы инструментов». Ветки
+сворачиваются, активный этап раскрывается автоматически, длинные списки вызовов
+показываются порциями. Поиск ищет по этапу, инструменту, Evidence ID и запросу;
+фильтр «Только проблемы» оставляет failed-этапы и вызовы `partial/error`. Вызовы
+без work item группируются по инструментам, а неоднозначно привязанные к плану —
+в «Общие вызовы». Клик по вызову открывает полную запись на вкладке Evidence.
+
+Вкладка «Запросы и доказательства» показывает таблицы результатов и фактический
+запрос LogiCore с окном для повторной проверки. LogiCore возвращает IQL, не SQL;
+интерфейс не подменяет один язык запросов другим. Вкладка «Итоговый отчёт»
+рендерит Markdown, claims, ограничения и файлы отчёта.
+
+Панель «Скорректировать ход» принимает уточнения без interrupt. Во время активного
+run сообщение ставится в локальную очередь и отправляется новым run в том же треде
+только после завершения текущего; уже выполняющийся граф оно не изменяет. Очередь
+можно просмотреть и удалить из неё сообщения до отправки. Вне run уточнение
+отправляется сразу. Кнопка «Остановить run» вызывает AG-UI `abortRun()` и не
+добавляет в граф approval-интеррапт.
+
+Песочница изолирована: треды и runs живут отдельно от Aegra, сбой sandbox не влияет
+на основной стек. `STATE_SNAPSHOT` содержит полное состояние графа (intent, scope,
+гипотезы, Evidence, `tool_usage`), поток событий большой — это нормально для
+локального просмотра. До первого run вместо нулевых KPI показывается короткий
+сценарий работы и пример запроса.
+
+Для правок демо без пересборки образа: `docker compose stop copilotkit-demo`, затем
+`cd copilotkit-demo && npm install && COPILOTKIT_TELEMETRY_DISABLED=true npm run dev` —
+та же страница на :3001, но с hot reload. Docker-стенд пересобирается только после
+завершения серии правок: `docker compose up -d --build copilotkit-demo`.
 
 ## Запуск
 
@@ -94,7 +155,12 @@ docker compose up -d --build
 Основные переменные:
 
 - `LLM_BASE_URL`, `LLM_TOKEN`, `LLM_MODEL` — OpenAI-совместимый провайдер;
-- `LLM_MODEL_INTENT/SCOUT/INVESTIGATOR/REPORTER/CRITIC/MEMORY` — необязательные модели по ролям;
+- `LLM_MODEL_INTENT/SCOUT/INVESTIGATOR/REPORTER/CRITIC/MEMORY/EVALUATOR/PLANNER` — необязательные модели по ролям;
+- `INVESTIGATION_PLANNER_ENABLED`, `PLANNER_MAX_ITEMS/PARALLEL/REVISIONS` — декомпозиция Deep;
+- `SCOPE_DISCOVERY_MAX_ITEMS=2`, `SCOPE_REQUIRED_MAX_ITEMS=2` — границы этапа;
+- `AGENT_PROMPT_VERSION` — версия промптов в Phoenix metadata и Experiments;
+- `EVALUATOR_ENABLED/POLL_SECONDS/THREAD_LIMIT/TRACE_ATTEMPTS` — фоновая оценка runs;
+- `EVALUATOR_TRACE_ATTRIBUTE_LIMIT`, `EVALUATOR_PHOENIX_ANNOTATIONS_ENABLED` — размер контекста и annotations;
 - `SUMMARIZATION_TRIGGER_TOKENS`, `SUMMARIZATION_KEEP_MESSAGES` — суммаризация истории;
 - `AGENT_TOOL_LIMIT_SCOUT/INVESTIGATOR/REPORTER`, `AGENT_TIMEOUT_SECONDS`,
   `EXPORT_TIMEOUT_SECONDS`, `MAX_REWORK` — лимиты и таймауты;
@@ -135,14 +201,18 @@ Anonymous-режим подходит только для локальной р�
 Endpoint: `http://localhost:9100/mcp`, заголовок `Authorization: Bearer $AGENT_MCP_TOKEN`.
 Вызовы возвращаются сразу; долгий run продолжается в Aegra:
 
-- `investigation_start(task, window?, mode?)` → `investigation_id`;
-- `investigation_status(investigation_id)` → этап, прогресс и ошибки;
-- `investigation_result(investigation_id)` → отчёт, аудит памяти и свежие S3-ссылки;
+- `investigation_start(task, window?, mode?, scope_mode?, alert?)` → `investigation_id`;
+- `investigation_status(investigation_id)` → этап, Scope, готово X/Y и ошибки;
+- `investigation_result(investigation_id)` → отчёт, claims, метрики, память и свежие S3-ссылки;
+- `investigation_continue(investigation_id, message, ...)` → следующий этап в том же треде;
+- `investigation_restart(investigation_id)` → повтор последнего запроса после отмены/ошибки;
 - `investigation_evidence(investigation_id, evidence_id?)` → полные Evidence;
 - `investigation_cancel(investigation_id)` → отмена активного run.
 
 Адаптер использует существующий граф и runs API. Доступ разрешён только к созданным
-через него тредам `inv-*`; второго investigation engine или task manager нет.
+через него тредам `inv-*`; второго investigation engine или task manager нет. TypedDict
+output schemas и `structuredContent` создаются штатным MCP SDK; параллельный continuation
+и base64 в ответе запрещены, ошибки содержат `error_code` и `retryable`.
 
 ## Текущий граф
 
@@ -150,6 +220,7 @@ Endpoint: `http://localhost:9100/mcp`, заголовок `Authorization: Bearer
 flowchart TD
     START([START]) --> entry --> memory_context --> intent
     intent -->|simple| chat --> END([END])
+    intent -->|обзор памяти| memory_inspect --> END
     intent -->|related case| memory_load --> memory_retrieve
     intent -->|export_data| export --> memory_save
     intent -->|new + история| archive
@@ -167,8 +238,10 @@ flowchart TD
     scout -->|нужно углубление| deep
 
     subgraph deep[Deep Investigation]
-      investigator --> critic_evidence
-      critic_evidence -->|rework_data| investigator
+      scope[InvestigationScope] --> planner
+      planner --> waves[Supervisor волн]
+      waves --> item[Item subgraph: investigator + Item Critic]
+      item -->|зависимости / ограниченный replan| waves
     end
     deep --> reporting
 
@@ -245,6 +318,11 @@ Quick и deep используют общие Evidence и handoff, но имею
 | Таймаут одного вложенного `create_agent.ainvoke` | 600 с |
 | Таймаут узла `export` | 120 с |
 | Возвраты на доработку за внешний run | 1 |
+| Work items / параллельные ветки | 5 / 2 |
+| Discovery items / обязательные items | 2 / 2 |
+| Optional-направления следующего этапа | до 3 |
+| Продолжения после tool limit на item | 1 |
+| Версии плана | 2 |
 | Строк на страницу `extract_data` | 100 |
 | Строк в `extract_data` по умолчанию | 1000 (`LOGIQ_EXTRACT_MAX_ROWS`) |
 | Допустимый `max_rows` одного вызова | 1–5000 |
@@ -254,8 +332,12 @@ Quick и deep используют общие Evidence и handoff, но имею
 новое сообщение, rework или retry structured response. Это не общий лимит чата.
 Autopilot не отменяет эти ограничения.
 
-При исчерпании tool limit middleware завершает текущий tool-цикл, внешний граф
-продолжает работу. Таймаут одного агента не ограничивает длительность всего run:
+При исчерпании tool limit роль автоматически продолжает работу новым итерационным
+шагом в том же run с обновлённым `run_tool_call_count` и сохранённым handoff. По
+умолчанию доступно 1 продолжение (`AGENT_MAX_CONTINUATIONS`). Только после их
+исчерпания отдельный LLM-вызов без инструментов формирует результат с limitation;
+служебный текст middleware не становится ответом. Evidence читаются пакетно.
+Таймаут одного агента не ограничивает длительность всего run:
 прямые вызовы intent, chat и критиков отдельным таймаутом сейчас не покрыты.
 
 ## Текущие ограничения и велосипеды
@@ -283,7 +365,10 @@ Autopilot не отменяет эти ограничения.
    skills по решению не выполняется.
 8. **Проверяемые отчёты** — фактический IQL, ZIP с Evidence и аудит памяти.
 9. **S3-артефакты** — SeaweedFS, object keys и обновляемые signed URL.
-10. **MCP агента** — асинхронные runs, отчёты, Evidence и отмена для других агентов.
+10. **MCP агента** — structuredContent, continuation/restart, отчёты, Evidence и отмена.
+11. **Scope и ограниченный Planner** — Discovery/Targeted/Alert, acceptance и optional.
+12. **Метрики и качество** — run/item metrics, Phoenix annotations и 24 golden-сценария.
+13. **Упрощение архитектуры** — общие state-каналы, skill runtime и единый artifact service.
 
 Этапы 1–4 образуют MVP. Архитектура, контракты и приёмочные сценарии —
 [DEV.md](docs/DEV.md).
@@ -294,27 +379,35 @@ Autopilot не отменяет эти ограничения.
 ├── agent/
 │   ├── graph.py           # supervisor и маршруты
 │   ├── quick_graph.py     # Quick Investigation subgraph
-│   ├── investigation_graph.py # Deep Investigation subgraph
+│   ├── investigation_graph.py # Deep и item-subgraphs
+│   ├── scope.py           # InvestigationScope и режимы этапа
+│   ├── planner.py         # acceptance, зависимости, волны и агрегация
 │   ├── reporting_graph.py # Reporting subgraph
 │   ├── subgraph.py        # delta-граница субграфов
 │   ├── agents.py          # runtime scout/investigator/reporter
+│   ├── skill_runtime.py   # проверка skill_run и anchors
 │   ├── investigation.py   # intent, quick/deep, окна и автоархивация
 │   ├── memory.py          # Case Store и консолидация Context Memory
 │   ├── memory_models.py   # схемы дел, фактов и операций
 │   ├── memory_store.py    # предметные таблицы и pgvector-поиск
 │   ├── artifact_store.py  # S3-ключи и подписанные ссылки
-│   ├── contracts.py       # Evidence, Finding, Coverage, CriticIssue, Hypothesis
+│   ├── artifacts.py       # единый сервис Markdown/ZIP
+│   ├── metrics.py         # длительность, токены и tool calls
+│   ├── contracts.py       # Evidence, Scope, WorkItem, Finding, CriticIssue, Hypothesis
 │   ├── export.py          # детерминированная таблица и файл
 │   ├── critics.py         # критики доказательств и отчёта
 │   ├── evidence.py        # Evidence Bundle и цепочка расследования
 │   ├── progress.py        # статус, лимиты и suggestion-действия
 │   ├── llm.py             # LLM и Pydantic-схемы ответов
-│   ├── state.py           # внешнее и внутреннее состояние
-│   ├── tools.py           # MCP tools, Evidence, отчёты
+│   ├── state.py           # общие Evidence/Case/Memory Channels
+│   ├── tools.py           # MCP tools, Evidence и findings
 │   ├── skills/            # registry, контракты и playbooks
 │   └── prompts/           # системные промпты
 ├── logicore-mcp/          # MCP-сервер и пагинация Mars API
 ├── agent-mcp/             # Асинхронный MCP-интерфейс расследований
+├── agui-agent/            # Изолированный AG-UI endpoint поверх графа
+├── copilotkit-demo/       # Рабочий стол аналитика и CopilotKit-чат
+├── agent-evaluator/       # Фоновая оценка runs по Phoenix
 ├── anomaly-relay/         # webhook LogiCore
 ├── ui/                    # agent-chat-ui
 ├── docs/DEV.md            # архитектура, контракты и приёмка

@@ -8,7 +8,8 @@ import llm as llm_mod
 from config import Settings
 from contracts import CriticIssue
 from evidence import claim_evidence_ids
-from progress import agent_progress, done_progress
+from observability import trace_config
+from progress import agent_progress, done_progress, simple_progress
 from prompts import (
     compose,
     context_block,
@@ -60,6 +61,10 @@ def _critic_messages(state: State, prompt: str, extra_block: str) -> list[BaseMe
         _intent_block(state),
         _user_requests_block(state),
         context_block(state),
+        structured_block("Scope и текущий work item", {
+            "scope": state.get("investigation_scope") or {},
+            "item": state.get("active_work_item") or {},
+        }),
         evidence_block(state, full=True, evidence_ids=claim_evidence_ids(state) or None),
         _findings_block(state),
         structured_block("Журнал гипотез", {"items": state.get("hypotheses") or []}),
@@ -74,6 +79,14 @@ def _critic_messages(state: State, prompt: str, extra_block: str) -> list[BaseMe
 def _deterministic_issues(state: State) -> list[dict]:
     records = {item.get("id"): item for item in state.get("evidence") or []}
     issues: list[CriticIssue] = []
+    for result_key, text_key in (("inv_result", "summary"), ("report_result", "answer")):
+        text = str((state.get(result_key) or {}).get(text_key) or "")
+        if text.strip().startswith("Tool call limit reached:"):
+            issues.append(CriticIssue(
+                claim=text,
+                reason="Служебное сообщение ToolCallLimitMiddleware выдано вместо результата этапа.",
+                suggested_action="rework_report" if result_key == "report_result" else "rework_data",
+            ))
     for result_key in ("inv_result", "report_result"):
         for claim in (state.get(result_key) or {}).get("claims") or []:
             unknown = [item for item in claim.get("evidence_ids") or [] if item not in records]
@@ -129,7 +142,10 @@ def _critic_run(state: State, prompt: str, model: Any, allowed_verdicts: tuple, 
     deterministic = _deterministic_issues(state)
     issues = list(deterministic)
     try:
-        result = model.invoke(_critic_messages(state, prompt, extra_block))
+        result = model.invoke(
+            _critic_messages(state, prompt, extra_block),
+            config=trace_config(prompt, state),
+        )
         if result is not None and result.verdict in allowed_verdicts:
             verdict = result.verdict
             feedback = getattr(result, "feedback", "") or ""
@@ -155,7 +171,45 @@ def _critic_run(state: State, prompt: str, model: Any, allowed_verdicts: tuple, 
 
 
 def node_critic_evidence(state: State) -> dict:
-    """Критик после инвестигейтора: достаточно ли улик для отчёта."""
+    """Критик после инвестигейтора или отдельного work item."""
+    active_item = state.get("active_work_item") or {}
+    if not active_item.get("id"):
+        active_item = next(
+            (item for item in state.get("work_items") or [] if item.get("status") == "critic_review"),
+            {},
+        )
+    if active_item.get("id"):
+        item_result = active_item.get("result") or {}
+        if not item_result:
+            item_result = next(
+                (item.get("result") or {} for item in state.get("work_items") or []
+                 if item.get("id") == active_item["id"]),
+                {},
+            )
+        item_state = {
+            **state,
+            "inv_result": item_result,
+            "inv_summary": item_result.get("summary") or "",
+        }
+        update = _critic_run(
+            item_state,
+            "critic_evidence",
+            llm_mod.critic_evidence_llm,
+            ("ok", "rework_data"),
+            structured_block("Результат work item", item_result),
+        )
+        verdict = update["critic"]["verdict"]
+        retry = verdict == "rework_data" and (active_item.get("attempt") or 0) <= settings.max_rework
+        status = "pending" if retry else ("done" if verdict in ("ok", "critic_unavailable") else "failed")
+        return {
+            "work_items": [{
+                "id": active_item["id"],
+                "status": status,
+                "critic": update["critic"],
+            }],
+            "rework": update["rework"],
+            "progress": simple_progress("planner", f"Проверена часть {active_item['id']}"),
+        }
     extra = structured_block("Результат инвестигейтора", state.get("inv_result"))
     update = _critic_run(
         state,
@@ -191,9 +245,10 @@ def node_critic_report(state: State) -> dict:
         text = "Дорабатываю ответ" if agent == "reporter" else "Собираю дополнительные данные"
         update["progress"] = agent_progress(state, agent, text, agent)
         update["suggestions"] = []
+        if verdict == "rework_data":
+            update["replan_requested"] = True
     else:
-        limitations = (state.get("report_result") or {}).get("limitations") or []
-        text = "Готово с ограничениями" if limitations else "Готово"
+        text = "Готово"
         if verdict == "critic_unavailable":
             text = "Готово без проверки критика"
         update["progress"] = done_progress(text)

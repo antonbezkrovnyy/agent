@@ -8,7 +8,7 @@ from pydantic import BaseModel, Field
 from langchain.chat_models import init_chat_model
 
 from config import Settings
-from contracts import Coverage, CriticIssue, RecommendedExportQuery
+from contracts import Coverage, CriticIssue, InvestigationPlan, InvestigationScope, RecommendedExportQuery
 from skills.contracts import Anchor, SkillRunResult
 
 settings = Settings()
@@ -72,6 +72,14 @@ class IntentDecision(BaseModel):
         default=False,
         description="true только для выгрузки сырых событий таблицей/файлом; никогда для отчёта расследования",
     )
+    inspect_memory: bool = Field(
+        default=False,
+        description="true, если пользователь спрашивает, что сохранено в памяти агента или просит показать её",
+    )
+    memory_query: str = Field(
+        default="",
+        description="Необязательная тема поиска по памяти; пусто для общего обзора последних фактов и дел",
+    )
     new_investigation: Literal["continue", "new", "uncertain"] = Field(
         default="continue",
         description="continue — та же задача; new — другая задача; uncertain — продолжить без вопроса",
@@ -134,6 +142,12 @@ class InvestigationResult(BaseModel):
     limitations: list[str] = Field(default_factory=list)
     not_checked: list[str] = Field(default_factory=list, description="Что не проверено и почему")
     recommended_export_query: RecommendedExportQuery | None = None
+    replan_needed: bool = Field(default=False, description="true только при невыполненном acceptance, ошибочном выводе или пробеле в критическом Evidence")
+    replan_reason: str = ""
+    replan_cause: Literal["none", "acceptance_failed", "conclusion_invalid", "missing_critical_evidence"] = Field(
+        default="none",
+        description="Машинная причина replan; новая аномалия или optional-направление не являются основанием",
+    )
     skill_run: SkillRunResult | None = Field(
         default=None,
         description="Фактический результат активного skill; null, если skill не выбран",
@@ -193,6 +207,18 @@ def build_context_memory_llm(model):
 
 
 intent_llm = build_intent_llm(model_for_role("intent"))
+scope_llm = model_for_role("planner").with_structured_output(
+    InvestigationScope,
+    method="function_calling",
+).with_fallbacks([
+    model_for_role("planner").with_structured_output(InvestigationScope, method="json_mode")
+])
+planner_llm = model_for_role("planner").with_structured_output(
+    InvestigationPlan,
+    method="function_calling",
+).with_fallbacks([
+    model_for_role("planner").with_structured_output(InvestigationPlan, method="json_mode")
+])
 critic_evidence_llm = model_for_role("critic").with_structured_output(CriticEvidence, method="function_calling")
 critic_report_llm = model_for_role("critic").with_structured_output(CriticReport, method="function_calling")
 context_memory_llm = build_context_memory_llm(model_for_role("memory"))

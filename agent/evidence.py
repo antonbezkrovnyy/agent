@@ -28,14 +28,19 @@ def claim_evidence_ids(state: dict) -> list[str]:
     return list(dict.fromkeys(item for item in ids if item in available))
 
 
+def _compact_value(value, limit: int = 2000):
+    encoded = json.dumps(value, ensure_ascii=False, default=str)
+    return value if len(encoded) <= limit else encoded[:limit] + "…[truncated]"
+
+
 def _result_overview(result: dict) -> dict:
     overview = {}
-    for key in ("ok", "count", "returned_rows", "total", "complete", "next_page", "truncated", "error", "hint"):
-        if key in result:
-            overview[key] = result[key]
-    events = result.get("events")
-    if isinstance(events, list):
-        overview["events_count"] = len(events)
+    for key, value in result.items():
+        if key == "events" and isinstance(value, list):
+            overview["events_count"] = len(value)
+            overview["events_preview"] = [_compact_value(item) for item in value[:2]]
+        else:
+            overview[key] = _compact_value(value)
     overview["result_keys"] = sorted(result)
     return overview
 
@@ -64,6 +69,7 @@ def evidence_bundle(state: dict, evidence_ids: Iterable[str] | None = None) -> d
     return {
         "investigation_id": context.get("id"),
         "work_mode": state.get("work_mode"),
+        "investigation_scope": state.get("investigation_scope") or {},
         "base_window": context.get("base_window"),
         "focus_window": context.get("focus_window"),
         "items": records,
@@ -137,6 +143,7 @@ def investigation_chain(state: dict) -> dict:
         "investigation_id": context.get("id"),
         "task": human_messages[-1] if human_messages else "",
         "work_mode": state.get("work_mode"),
+        "investigation_scope": state.get("investigation_scope") or {},
         "current_window": {
             "time_from": context.get("time_from"),
             "time_to": context.get("time_to"),
@@ -144,6 +151,25 @@ def investigation_chain(state: dict) -> dict:
         "base_window": context.get("base_window"),
         "anchors": list(state.get("anchors") or []),
         "visited_anchors": list(state.get("visited_anchors") or []),
+        "investigation_plan": state.get("investigation_plan") or {},
+        "work_items": [{
+            "id": item.get("id"),
+            "goal": item.get("goal"),
+            "acceptance": item.get("acceptance") or item.get("goal"),
+            "priority": item.get("priority") or "medium",
+            "estimated_cost": item.get("estimated_cost") or "medium",
+            "depends_on": item.get("depends_on") or [],
+            "required": item.get("required", True),
+            "status": item.get("status"),
+            "attempt": item.get("attempt") or 0,
+            "started_at": item.get("started_at") or "",
+            "finished_at": item.get("finished_at") or "",
+            "requested_window": item.get("requested_window") or {},
+            "result": item.get("result") or {},
+            "metrics": item.get("metrics") or {},
+            "critic": item.get("critic") or {},
+        } for item in state.get("work_items") or []],
+        "run_metrics": list(state.get("run_metrics") or []),
         "hypotheses": list(state.get("hypotheses") or []),
         "events": case_events(state),
         "limitations": _result_values(state, "limitations"),
@@ -193,9 +219,28 @@ def chain_markdown(state: dict) -> str:
         f"- Режим: `{chain['work_mode']}`",
         f"- Текущее окно: `{chain['current_window']['time_from']}` — `{chain['current_window']['time_to']}`",
         "",
-        "## Ход работы",
+        "## Охват текущего этапа",
         "",
     ]
+    scope = chain.get("investigation_scope") or {}
+    if scope:
+        lines.extend([
+            f"- Тип: `{scope.get('mode')}`; цель: {scope.get('objective')}",
+            f"- Политика данных: {scope.get('sampling_policy')}",
+            "- Выполняется сейчас:",
+            *(f"  - {item}" for item in scope.get("included") or []),
+        ])
+        optional = scope.get("optional") or []
+        if optional:
+            lines.append("- Не выполняется сейчас; варианты следующего этапа:")
+            lines.extend(f"  - {item.get('objective')}: {item.get('rationale')}" for item in optional)
+    else:
+        lines.append("Scope не зафиксирован.")
+    lines.extend([
+        "",
+        "## Ход работы",
+        "",
+    ])
     if not chain["events"]:
         lines.append("Значимых действий пока нет.")
     evidence_positions = {
@@ -243,6 +288,19 @@ def chain_markdown(state: dict) -> str:
                 f"{event.get('text')} Причина: {event.get('reason')} "
                 f"Evidence: {event.get('evidence_ids') or []}."
             )
+    if chain["work_items"]:
+        lines.extend(["", "## План расследования", ""])
+        for item in chain["work_items"]:
+            lines.append(
+                f"- `{item['id']}` — **{item['status']}**, попытка {item['attempt']}: {item['goal']} "
+                f"Зависимости: {item['depends_on']}. Окно: `{item['requested_window']}`."
+            )
+            lines.append(
+                f"  Acceptance: {item['acceptance']}; приоритет: {item['priority']}; "
+                f"стоимость: {item['estimated_cost']}."
+            )
+            if item.get("started_at"):
+                lines.append(f"  Начато: {item['started_at']}; завершено: {item.get('finished_at') or 'ещё выполняется'}.")
     if chain["anchors"]:
         lines.extend(["", "## Anchors", ""])
         visited = set(chain["visited_anchors"])

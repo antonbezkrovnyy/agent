@@ -1,14 +1,14 @@
-"""Состояние внешнего workflow и вложенных агентов.
+"""Состояние supervisor и приватных create_agent-агентов.
 
-Диалог (messages) — то, что видит пользователь: только сообщения
-пользователя и финальные ответы. Tool-циклы агентов живут в приватных каналах
-(scout_msgs / inv_msgs / rep_msgs) и в диалог не попадают.
+Общие каналы собраны в предметные mixin-группы, чтобы схемы не расходились.
+В публичном messages находятся только сообщения пользователя и финальные ответы;
+tool-циклы остаются в scout_msgs / inv_msgs / rep_msgs.
 """
 
 import operator
 from typing import Annotated, Sequence
 
-from typing_extensions import NotRequired
+from typing_extensions import TypedDict
 
 from langchain.agents import AgentState
 from langchain_core.messages import BaseMessage
@@ -28,6 +28,25 @@ def merge_hypotheses(left: list[dict], right: list[dict]) -> list[dict]:
     return list(merged.values())
 
 
+def merge_work_items(left: list[dict], right: list[dict]) -> list[dict]:
+    merged = {item.get("id"): dict(item) for item in left or [] if item.get("id")}
+    for item in right or []:
+        if item.get("id"):
+            merged[item["id"]] = {**merged.get(item["id"], {}), **item}
+    return list(merged.values())
+
+
+def max_value(left: int, right: int) -> int:
+    return max(left or 0, right or 0)
+
+
+def merge_tool_usage(left: dict, right: dict) -> dict:
+    merged = dict(left or {})
+    for agent, count in (right or {}).items():
+        merged[agent] = max(merged.get(agent, 0), count)
+    return merged
+
+
 def merge_progress(left: dict, right: dict) -> dict:
     if not left:
         return right
@@ -42,70 +61,72 @@ def merge_progress(left: dict, right: dict) -> dict:
     return right
 
 
-class AgentWorkState(AgentState):
-    """Внутреннее состояние create_agent: messages + поля для tools/промптов."""
+class EvidenceChannels(TypedDict):
+    """Артефакты и проверяемые результаты текущего дела."""
 
-    callback_url: NotRequired[str]
-    artifacts: NotRequired[Annotated[list[dict], operator.add]]
-    findings: NotRequired[Annotated[list[dict], operator.add]]
-    evidence: NotRequired[Annotated[list[dict], operator.add]]
-    hypotheses: NotRequired[Annotated[list[dict], merge_hypotheses]]
-    context: NotRequired[dict]
-    last_report: NotRequired[dict]
-    inv_summary: NotRequired[str]
-    inv_result: NotRequired[dict]
-    scout_note: NotRequired[str]
-    scout_result: NotRequired[dict]
-    active_skill: NotRequired[dict]
-    skill_runs: NotRequired[Annotated[list[dict], operator.add]]
-    anchors: NotRequired[list[dict]]
-    visited_anchors: NotRequired[list[str]]
-    memory_loaded: NotRequired[str]
-    memory_operations: NotRequired[Annotated[list[dict], operator.add]]
-    memory_error: NotRequired[str]
-    context_memories: NotRequired[list[dict]]
-    similar_cases: NotRequired[list[dict]]
-    critic: NotRequired[dict]
-    rework: NotRequired[int]
-    run_tool_call_count: NotRequired[dict]
-    progress: NotRequired[Annotated[dict, merge_progress]]
-
-
-class State(MessagesState):
     callback_url: str
     artifacts: Annotated[list[dict], operator.add]
-    # Доказательства и записи только текущего расследования
     evidence: Annotated[list[dict], operator.add]
     findings: Annotated[list[dict], operator.add]
     hypotheses: Annotated[list[dict], merge_hypotheses]
-    # ID, активное/base/focus-окна и история текущего расследования
+
+
+class CaseChannels(TypedDict):
+    """Контекст, handoff и версионируемые playbooks текущего дела."""
+
     context: dict
     last_report: dict
     inv_summary: str
     inv_result: dict
     scout_note: str
     scout_result: dict
-    report_result: dict
-    intent: dict
-    work_mode: str
-    depth_history: list[dict]
     active_skill: dict
+    investigation_scope: dict
     skill_runs: Annotated[list[dict], operator.add]
     anchors: list[dict]
     visited_anchors: list[str]
-    memory_candidates: list[dict]
+    critic: dict
+
+
+class MemoryChannels(TypedDict):
+    """Материалы retrieval и аудит собственной памяти агента."""
+
     memory_loaded: str
-    memory_saved: str
-    memory_facts_saved: int
     memory_operations: Annotated[list[dict], operator.add]
     memory_error: str
     context_memories: list[dict]
     similar_cases: list[dict]
+
+
+class AgentWorkState(AgentState, EvidenceChannels, CaseChannels, MemoryChannels):
+    """Внутреннее состояние create_agent: messages и поля tools/промптов."""
+
+    active_work_item: dict
+    rework: int
+    run_tool_call_count: dict
+    progress: Annotated[dict, merge_progress]
+
+
+class State(MessagesState, EvidenceChannels, CaseChannels, MemoryChannels):
+    """Checkpoint supervisor; бизнес-логика в этой схеме не размещается."""
+
+    report_result: dict
+    intent: dict
+    work_mode: str
+    depth_history: list[dict]
+    investigation_plan: dict
+    work_items: Annotated[list[dict], merge_work_items]
+    active_work_item: Annotated[dict, merge_progress]
+    replan_requested: bool
+    memory_candidates: list[dict]
+    memory_saved: str
+    memory_facts_saved: int
+    evaluation: dict
     transition: str
     archive_done: int
-    critic: dict
-    rework: int
-    tool_usage: dict
+    rework: Annotated[int, max_value]
+    tool_usage: Annotated[dict, merge_tool_usage]
+    run_metrics: Annotated[list[dict], operator.add]
     progress: Annotated[dict, merge_progress]
     suggestions: list[dict]
     scout_msgs: Annotated[Sequence[BaseMessage], add_messages]

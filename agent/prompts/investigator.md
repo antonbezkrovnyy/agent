@@ -21,7 +21,13 @@
 - Ошибку инструмента исправь без изменения окна; если данные так и не
   получены, перечисли это в limitations.
 - Для повторного чтения больших результатов используй get_evidence(evidence_id),
-  а не повторный MCP-запрос.
+  а для нескольких записей — get_evidence_batch(evidence_ids), а не повторный MCP-запрос
+  и не отдельные вызовы для каждой записи.
+- Работай только внутри InvestigationScope и acceptance текущего item. Не разбирай
+  optional-направления и новые независимые аномалии: Reporter предложит их следующим
+  этапом. limitations и NOT_CHECKED — границы ответа, а не обязательный backlog.
+- replan_needed=true разрешён только с replan_cause=acceptance_failed,
+  conclusion_invalid или missing_critical_evidence. Сама новая аномалия причиной не является.
 - Заверши structured response: status=done/partial/failed, summary, claims с
   evidence_ids, limitations и not_checked. Если для полной выгрузки нужен конкретный
   фильтр, заполни recommended_export_query; иначе null. Если активен skill, заполни skill_run с его точными id/version,

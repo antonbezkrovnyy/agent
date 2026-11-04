@@ -9,7 +9,8 @@ from langchain_openai import OpenAIEmbeddings
 from langgraph.types import Overwrite
 
 import llm as llm_mod
-from artifact_store import artifact_from_data_url, artifact_url
+from artifact_store import artifact_url
+from artifacts import create_report_artifacts
 from config import Settings
 from evidence import claim_evidence_ids, evidence_overview_block, investigation_chain
 from memory_models import (
@@ -20,10 +21,11 @@ from memory_models import (
     ContextMemoryOperation,
     MemoryOperationRecord,
 )
-from memory_store import MemoryStore
+from memory_store import MemoryStore, safe_json, safe_text
+from observability import trace_config
 from progress import agent_progress
 from prompts import compose, system_prompt
-from reporting import build_investigation_package, build_report, memory_audit_markdown
+from reporting import memory_audit_markdown
 from state import State
 
 
@@ -50,7 +52,7 @@ class InvestigationMemory:
         return self._embeddings
 
     def _embed(self, text: str) -> list[float]:
-        return self._get_embeddings().embed_query(text)
+        return self._get_embeddings().embed_query(safe_text(text))
 
     def save_case(self, user_id: str, case: dict) -> None:
         record = CaseRecord.model_validate(case)
@@ -93,6 +95,11 @@ class InvestigationMemory:
             self.settings.agent_memory_similarity_threshold,
         )
 
+    def recent_facts(self, scope: str, limit: int) -> list[dict]:
+        if not self.enabled:
+            return []
+        return self.store.recent_facts(scope, limit)
+
     def find_fact_by_statement(self, scope: str, statement: str) -> ContextFact | None:
         return self.store.find_fact_by_statement(scope, statement)
 
@@ -113,6 +120,7 @@ def _identity(config: RunnableConfig) -> tuple[str, str]:
 
 
 def _case_from_state(state: State, config: RunnableConfig) -> dict:
+    state = safe_json(state)
     user_id, thread_id = _identity(config)
     chain = investigation_chain(state)
     report = state.get("report_result") or {}
@@ -146,6 +154,10 @@ def _case_from_state(state: State, config: RunnableConfig) -> dict:
         inv_result=state.get("inv_result") or {},
         last_report=state.get("last_report") or {},
         memory_operations=list(state.get("memory_operations") or []),
+        investigation_scope=state.get("investigation_scope") or {},
+        investigation_plan=state.get("investigation_plan") or {},
+        work_items=list(state.get("work_items") or []),
+        run_metrics=list(state.get("run_metrics") or []),
         chain=chain,
     )
     return case.model_dump(mode="json")
@@ -174,6 +186,104 @@ def _current_task(state: State) -> str:
         if isinstance(item, HumanMessage) and isinstance(item.content, str)
     ]
     return messages[-1] if messages else ""
+
+
+def memory_overview(
+    state: State,
+    config: RunnableConfig,
+    query: str = "",
+    limit: int = 5,
+) -> dict:
+    """Read-only снимок памяти для пользователя и внутреннего инструмента."""
+    user_id, _ = _identity(config)
+    limit = max(1, min(limit, 10))
+    errors: list[str] = []
+    try:
+        facts = (
+            memory.search_facts(settings.agent_memory_scope, query, limit)
+            if query.strip()
+            else memory.recent_facts(settings.agent_memory_scope, limit)
+        )
+    except Exception as exc:
+        facts = []
+        errors.append(f"Context Memory недоступна: {type(exc).__name__}.")
+    try:
+        cases = memory.recent_cases(user_id, limit)
+    except Exception as exc:
+        cases = []
+        errors.append(f"Case Store недоступен: {type(exc).__name__}.")
+    context = state.get("context") or {}
+    return {
+        "ok": not errors,
+        "current_case": {
+            "id": context.get("id"),
+            "work_mode": state.get("work_mode") or "",
+            "evidence_count": len(state.get("evidence") or []),
+            "findings_count": len(state.get("findings") or []),
+            "hypotheses_count": len(state.get("hypotheses") or []),
+            "last_report_title": (state.get("last_report") or {}).get("title") or "",
+        } if context else None,
+        "facts": facts,
+        "cases": [{
+            "investigation_id": item.get("investigation_id"),
+            "task": item.get("task") or "",
+            "summary": item.get("summary") or "",
+            "updated_at": item.get("updated_at") or "",
+            "work_mode": item.get("work_mode") or "",
+        } for item in cases],
+        "errors": errors,
+        "notice": "Факты памяти не являются свежими Evidence и перепроверяются перед использованием.",
+    }
+
+
+def _memory_overview_markdown(overview: dict) -> str:
+    lines = ["## Что находится в моей памяти"]
+    current = overview.get("current_case")
+    if current:
+        lines.extend([
+            "\n### Текущее дело в state треда",
+            f"- ID: `{current['id']}`; режим: {current['work_mode'] or 'не задан'}.",
+            f"- Evidence: {current['evidence_count']}; находок: {current['findings_count']}; гипотез: {current['hypotheses_count']}.",
+        ])
+        if current.get("last_report_title"):
+            lines.append(f"- Последний отчёт: {current['last_report_title']}.")
+    else:
+        lines.append("\nВ этом треде активного дела нет.")
+    facts = overview.get("facts") or []
+    lines.append(f"\n### Долговременные факты ({len(facts)})")
+    if facts:
+        for fact in facts:
+            lines.append(
+                f"- {fact.get('statement')} "
+                f"[{fact.get('status')}, {fact.get('category')}; ID `{fact.get('id')}`; "
+                f"действует до: {fact.get('valid_to') or 'без срока'}]."
+            )
+    else:
+        lines.append("Активные факты не найдены.")
+    cases = overview.get("cases") or []
+    lines.append(f"\n### Последние сохранённые дела ({len(cases)})")
+    if cases:
+        for case in cases:
+            lines.append(
+                f"- **{case.get('task') or 'Без названия'}** — ID `{case.get('investigation_id')}`, "
+                f"режим {case.get('work_mode') or 'не задан'}, обновлено {case.get('updated_at') or 'неизвестно'}."
+            )
+    else:
+        lines.append("Сохранённые дела не найдены.")
+    lines.extend(["", *(overview.get("errors") or []), overview.get("notice") or ""])
+    return "\n".join(line for line in lines if line is not None)
+
+
+def node_memory_inspect(state: State, config: RunnableConfig) -> dict:
+    from progress import done_progress
+
+    intent = state.get("intent") or {}
+    overview = memory_overview(state, config, intent.get("memory_query") or "")
+    return {
+        "messages": [AIMessage(content=_memory_overview_markdown(overview), name="chat")],
+        "progress": done_progress("Показал содержимое памяти"),
+        "memory_error": " ".join(overview.get("errors") or []),
+    }
 
 
 def node_memory_retrieve(state: State, config: RunnableConfig) -> dict:
@@ -258,6 +368,9 @@ def node_memory_load(state: State, config: RunnableConfig) -> dict:
         "inv_result": case.get("inv_result") or {},
         "last_report": case.get("last_report") or {},
         "memory_operations": list(case.get("memory_operations") or []),
+        "investigation_scope": case.get("investigation_scope") or {},
+        "investigation_plan": case.get("investigation_plan") or {},
+        "work_items": list(case.get("work_items") or []),
         "intent": intent,
         "transition": "continue",
         "memory_loaded": investigation_id,
@@ -428,10 +541,13 @@ def _consolidate(state: State) -> tuple[int, list[str], list[dict]]:
     payload = _consolidation_input(state, existing_facts)
     messages = [
         SystemMessage(content=system_prompt(compose("memory_consolidation"))),
-        HumanMessage(content=json.dumps(payload, ensure_ascii=False, default=str)),
+        HumanMessage(content=json.dumps(safe_json(payload), ensure_ascii=False, default=str)),
     ]
-    response = llm_mod.context_memory_llm.invoke(messages)
-    result = response if isinstance(response, ContextMemoryConsolidation) else ContextMemoryConsolidation.model_validate(response)
+    response = llm_mod.context_memory_llm.invoke(
+        messages,
+        config=trace_config("memory_consolidation", state),
+    )
+    result = response if isinstance(response, ContextMemoryConsolidation) else ContextMemoryConsolidation.model_validate(safe_json(response))
     existing = {item["id"]: item for item in existing_facts}
     evidence_ids = {item.get("id") for item in state.get("evidence") or []}
     saved = 0
@@ -496,13 +612,7 @@ def node_memory_save(state: State, config: RunnableConfig) -> dict:
         if audit not in markdown:
             markdown = markdown.rstrip() + "\n\n" + audit
         title = report.get("title") or "Расследование"
-        filename, url, _ = build_report(title, markdown)
-        artifacts = [artifact_from_data_url(url, state.get("context") or {})]
-        report.update({"markdown": markdown, "filename": filename})
-        if state.get("evidence"):
-            package_name, package_url, _ = build_investigation_package(title, markdown, report_state)
-            artifacts.append(artifact_from_data_url(package_url, state.get("context") or {}))
-            report["package_filename"] = package_name
+        report, artifacts = create_report_artifacts(title, markdown, report_state)
         report_state["last_report"] = report
         extra = {"last_report": report, "artifacts": Overwrite(artifacts)}
         message.artifacts = [artifact_url(item) for item in artifacts]

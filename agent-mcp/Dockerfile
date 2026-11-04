@@ -9,6 +9,7 @@ RUN pip install --no-cache-dir \
     "pydantic-settings>=2"
 
 COPY agent-mcp/app.py ./app.py
+COPY agent-mcp/investigation_mcp_types.py ./investigation_mcp_types.py
 COPY agent/artifact_store.py ./artifact_store.py
 COPY agent/config.py ./config.py
 

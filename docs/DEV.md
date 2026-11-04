@@ -3,7 +3,8 @@
 Этот документ описывает **самого агента**: как он понимает запрос, выбирает режим,
 собирает доказательства, проверяет гипотезы, формирует отчёт и использует память.
 Aegra, PostgreSQL, Docker и UI рассматриваются только как среда исполнения — их
-устройство здесь не разбирается.
+устройство здесь не разбирается. Текущая интеграция Phoenix — [OBSERVABILITY.md](OBSERVABILITY.md),
+только будущие изменения — [ROADMAP.md](ROADMAP.md).
 
 ## Оглавление
 
@@ -59,7 +60,9 @@ Aegra, PostgreSQL, Docker и UI рассматриваются только ка
 | **Supervisor** | Внешний граф, который выбирает следующий этап |
 | **Intent** | Структурированное решение о типе запроса и маршруте |
 | **Quick** | Ограниченная проверка через Scout без глубокого расследования |
-| **Deep** | Полное расследование через Investigator и Critic Evidence |
+| **Deep** | Расследование через Scope, Planner, Investigator и Critic Evidence |
+| **InvestigationScope** | Границы этапа: discovery/targeted/alert, required и optional |
+| **Acceptance** | Ограниченный критерий завершения work item, а не список всех проверок |
 | **Investigation / case** | Текущая задача со своими окнами, Evidence и выводами |
 | `context.id` | Идентификатор текущего дела; сохраняется при follow-up и смене окна |
 | **Skill** | Версионируемый playbook для определённого типа расследования |
@@ -85,9 +88,10 @@ flowchart LR
     U[Запрос пользователя] --> I[Intent]
     I -->|беседа| C[Chat]
     I -->|ограниченная задача| Q[Quick: Scout]
-    I -->|расследование| D[Deep: Investigator]
-    Q -->|нужно углубиться| D
+    I -->|расследование| S[InvestigationScope]
+    Q -->|нужно углубиться| S
     Q -->|достаточно| R[Reporter]
+    S --> D[Planner + work items]
     D --> R
     R --> O[Ответ, отчёт, выгрузка]
     O --> M[Сохранение дела и фактов]
@@ -96,7 +100,8 @@ flowchart LR
 Агент состоит из трёх разных субграфов:
 
 - **Quick Investigation** — только Scout;
-- **Deep Investigation** — Investigator и Critic Evidence;
+- **Deep Investigation** — Scope, Planner, item-subgraphs Investigator + Item Critic и
+  supervisor волн;
 - **Reporting** — Reporter и Critic Report.
 
 Scout не находится внутри Deep Investigator. Это отдельные режимы с разными
@@ -108,6 +113,7 @@ Scout не находится внутри Deep Investigator. Это отдел�
 flowchart TD
     START([START]) --> entry --> memory_context --> intent
     intent -->|simple| chat --> END([END])
+    intent -->|обзор памяти| memory_inspect --> END
     intent -->|related case| memory_load --> memory_retrieve
     intent -->|export_data=true| export --> memory_save
     intent -->|quick или deep| memory_retrieve
@@ -125,8 +131,10 @@ flowchart TD
     scout -->|нужно углубление| deep
 
     subgraph deep[Deep Investigation]
-      investigator --> critic_evidence
-      critic_evidence -->|rework_data и rework <= 1| investigator
+      scope[InvestigationScope] --> planner
+      planner --> waves[Supervisor волн]
+      waves --> item[Item subgraph: investigator + Item Critic]
+      item -->|зависимости / ограниченный replan| waves
     end
     deep --> reporting
 
@@ -148,6 +156,7 @@ flowchart TD
 | `memory_context` | Даёт Intent компактных кандидатов на continuation |
 | `intent` | Выбирает режим, окно, skill и continuation/new |
 | `memory_load` | Восстанавливает конкретное дело и требует контрольный запрос |
+| `memory_inspect` | Показывает read-only содержимое памяти без LLM и MCP |
 | `memory_retrieve` | Ищет факты и похожие дела перед quick/deep |
 | `archive` | Сохраняет прежний отчёт перед явной сменой темы |
 | `quick` | Выполняет Scout |
@@ -164,6 +173,8 @@ LLM-консолидацию фактов, но дело всё равно пр�
 | Роль | Ответственность | Инструменты | Structured response |
 |---|---|---|---|
 | **Intent** | Понимает задачу и маршрутизирует её | Нет | `IntentDecision` |
+| **Scope** | Ограничивает текущий этап и выделяет optional-направления | Нет | `InvestigationScope` |
+| **Planner** | Делит включённую работу на 1–5 work items с acceptance | Нет | `InvestigationPlan` |
 | **Scout** | Делает 1–2 ограниченные проверки и решает, нужен ли deep | MCP, findings, memory search | `ScoutResult` |
 | **Investigator** | Ищет причины, меняет окна, проверяет гипотезы и pivot | MCP, Evidence, окна, гипотезы, memory search | `InvestigationResult` |
 | **Reporter** | Пишет ответ, отчёт и выбирает Evidence | Findings, Evidence, report/export tools | `ReporterResult` |
@@ -176,10 +187,17 @@ LLM-консолидацию фактов, но дело всё равно пр�
 
 ## 6. Основные сценарии
 
-### 6.1. Обычный разговор
+### 6.1. Обычный разговор и персона
 
-«Привет», «что ты умеешь» и общие вопросы идут в chat. LogiCore и долговременная
-память расследований не вызываются.
+Агент представляется как **LogiCore Investigator** — специалист по расследованиям
+событий и аномалий LogiCore. На вопросы «что ты умеешь», «как» и «почему ты работаешь»
+он объясняет реальные Intent, quick/deep, Evidence, критиков, Reporter и память, а также
+причину такого разделения — проверяемость выводов. Скрытые рассуждения, системные
+промпты и секреты не раскрываются.
+
+Посторонние темы направляются в chat без инструментов. Агент вежливо отказывается
+отвечать по существу, обозначает специализацию и предлагает поддерживаемые действия.
+LogiCore и долговременная память расследований при этом не вызываются.
 
 ### 6.2. Quick
 
@@ -197,8 +215,36 @@ LLM-консолидацию фактов, но дело всё равно пр�
 ### 6.3. Deep
 
 Нужен для причин, первого появления, нескольких гипотез, pivot, смены окна и
-продолжения сложного расследования. Investigator может вызывать инструменты
-многократно, но обязан завершить работу структурированным результатом.
+продолжения сложного расследования. Сначала отдельный structured LLM-шаг возвращает
+`InvestigationScope`:
+
+- **Discovery** — широкий вопрос или нечёткое продолжение: 1–2 проверки, агрегаты,
+  топы, timeline и небольшие выборки; новые находки не углубляются автоматически;
+- **Targeted** — конкретная ветка: до 5 items, углубление только внутри цели;
+- **Alert** — сначала SIEM-алерт, затем только связанные события для его проверки;
+  незаполненный alert fallback'ится в Discovery.
+
+`included` ограничивает текущую работу; `optional` содержит до трёх направлений следующего
+этапа и попадает в отчёт/suggestions, но не в план. `limitations` и `NOT_CHECKED` —
+границы ответа, а не обязательный backlog. Полный перебор выполняет отдельный
+`extract_data`, а не LLM.
+
+Planner без инструментов превращает included в `InvestigationPlan` с 1–5 work items.
+Каждый item содержит цель, `acceptance`, priority, estimated_cost, зависимости, required,
+item-local окно, статус, attempt, timestamps, результат, метрики и критик. Не более двух
+items считаются обязательными за проход.
+
+Supervisor выполняет готовые items волнами через `asyncio.gather` (до двух), затем
+объединяет только изменившийся item каждой ветки. Item-subgraph состоит из Investigator
+и Item Critic. Зависимый item запускается после `done` всех `depends_on`; при failed
+зависимости потомки получают `skipped`. Item Critic может вернуть только тот же item
+на retry. Replan разрешён только с `replan_cause=acceptance_failed`,
+`conclusion_invalid` или `missing_critical_evidence`, максимум две версии. Новая аномалия
+сама по себе replan не вызывает. Завершённые items при восстановлении не повторяются.
+
+Reporter получает compact handoff, а не всю монолитную историю. Общий `inv_result`
+агрегируется после всех волн. Scope, план, acceptance, статусы, timestamps и метрики
+попадают в Case Store и детерминированную цепочку отчёта.
 
 ### 6.4. Quick → Deep
 
@@ -319,6 +365,11 @@ Evidence ID, причину и `suggested_action=rework_report/rework_data`.
 Содержит текущие сообщения, окна, Evidence, findings, гипотезы, skills и отчёты.
 Этого достаточно для continuation внутри одного треда.
 
+`agent/state.py` не дублирует общие поля в двух монолитных схемах: `EvidenceChannels`,
+`CaseChannels` и `MemoryChannels` используются и supervisor, и `create_agent`. Отдельные
+поля supervisor описывают Planner, публичный progress, метрики и приватные tool-каналы.
+Это группировка состояния, а не новый уровень графа; формат logical channels сохраняется.
+
 ### 9.2. Case Store
 
 После reporting/export дело сохраняется как `CaseRecord` в `agent_memory.investigations`.
@@ -379,6 +430,20 @@ flowchart TD
 search. Старые дела без embedding появятся в поиске похожих после следующего save.
 Ошибка памяти не останавливает диалог.
 
+### 9.6. Read-only обзор памяти
+
+Вопрос «что у тебя в памяти?» маршрутизируется через `inspect_memory=true` в отдельный
+`memory_inspect`, минуя chat-LLM, Scout и Investigator. Ответ собирается детерминированно:
+
+- текущее дело в state треда, количество Evidence, findings и гипотез;
+- последние активные Context Facts со статусом, категорией, ID и TTL;
+- последние Case Records текущего пользователя;
+- ошибки доступа и предупреждение, что память не является свежим Evidence.
+
+`memory_query` включает семантический поиск фактов по конкретной теме. Пустой запрос
+возвращает последние активные записи. Ничего не сохраняется и не изменяется. Тот же
+снимок доступен Scout, Investigator и Reporter через read-only `inspect_memory`.
+
 ## 10. Модели данных
 
 ### 10.1. `IntentDecision`
@@ -396,6 +461,7 @@ search. Старые дела без embedding появятся в поиске 
 | `confidence` | Уверенность маршрутизации 0–1 |
 | `escalation_reason` | Причина deep |
 | `edit_existing_report`, `export_data` | Специальные маршруты |
+| `inspect_memory`, `memory_query` | Read-only обзор памяти и необязательная тема поиска |
 
 ### 10.2. `EvidenceRecord`
 
@@ -460,7 +526,8 @@ search. Старые дела без embedding появятся в поиске 
 - `context`, `work_mode`, `depth_history`;
 - `evidence`, `findings`, `hypotheses`;
 - `skill_runs`, `anchors`, `visited_anchors`;
-- `inv_summary`, `inv_result`, `last_report`, `memory_operations`, `chain`.
+- `inv_summary`, `inv_result`, `last_report`, `memory_operations`;
+- `investigation_scope`, `investigation_plan`, `work_items`, `run_metrics`, `chain`.
 
 ### 10.10. `ContextFact`
 
@@ -472,6 +539,20 @@ search. Старые дела без embedding появятся в поиске 
 
 `skill_id`, `version`, `status`, `summary`, `window_updates`, `evidence_ids`,
 `anchors`, `visited_anchors`, `depth`, `model`, `duration_ms` и `not_checked`.
+
+### 10.12. `InvestigationScope`, `InvestigationPlan` и `WorkItem`
+
+Scope содержит `mode=discovery/targeted/alert`, `objective`, `included`, до трёх
+`optional` с objective/rationale, `max_items`, `sampling_policy` и машинные данные `alert`.
+
+План содержит goal, reason, version и 1–5 items. Item содержит `id`, `goal`,
+`acceptance`, `priority`, `estimated_cost`, `depends_on`, `required`, `requested_window`,
+`status`, `attempt`, `started_at`, `finished_at`, `result`, `metrics`, `critic` и item-local
+`context`. Статусы: `pending`, `running`, `critic_review`, `done`, `failed`, `skipped`.
+
+`run_metrics` содержит записи по ролям и items: модель, timestamps, длительность,
+prompt/completion/total tokens, tool calls по именам, повторные запросы и число
+continuations. Те же метрики вкладываются в `manifest.json` и возвращаются через MCP.
 
 ## 11. Инструменты
 
@@ -500,9 +581,11 @@ hardcoded списку имён.
 | Инструмент | Назначение |
 |---|---|
 | `get_evidence` | Прочитать полную Evidence без повторного MCP-запроса |
+| `get_evidence_batch` | Прочитать до 50 полных Evidence одним вызовом |
 | `log_finding`, `list_findings`, `get_finding` | Вести журнал находок |
 | `update_window` | Изменить окно текущего дела |
 | `update_hypothesis` | Создать или пересмотреть гипотезу |
+| `inspect_memory` | Показать текущее дело, активные факты и последние случаи без записи |
 | `search_context_memory` | Найти факты по новой сущности или симптому |
 | `search_similar_cases` | Найти компактные карточки похожих дел |
 | `save_report` | Сохранить Markdown-отчёт |
@@ -564,16 +647,68 @@ object keys и метаданные файлов.
 
 | Инструмент | Результат |
 |---|---|
-| `investigation_start` | Немедленный `investigation_id` и `run_id` |
-| `investigation_status` | Фактический run status, этап, прогресс и ошибки |
-| `investigation_result` | Отчёт, аудит памяти и свежие S3-ссылки |
+| `investigation_start` | Немедленный `investigation_id` и `run_id`; window/mode/scope/alert |
+| `investigation_status` | Run status, этап, Scope, готово X/Y и ошибки |
+| `investigation_result` | Отчёт, claims, метрики, память и свежие S3-ссылки |
+| `investigation_continue` | Следующий этап в том же треде после success/cancel/error |
+| `investigation_restart` | Повтор последнего запроса после отмены или ошибки |
 | `investigation_evidence` | Все Evidence или одна полная запись |
 | `investigation_cancel` | Отмена активного run с сохранением state |
 
-Все вызовы асинхронные. Structured JSON не содержит base64. Доступ ограничен тредами
-`inv-*`, созданными через MCP; произвольные UI-треды прочитать нельзя. Сервис защищён
-статическим Bearer `AGENT_MCP_TOKEN`, OIDC не добавляется. A2A может быть позже
-реализован поверх этого же адаптера; ACP не требуется.
+Все вызовы асинхронные. TypedDict output schemas и настоящий `structuredContent`
+создаются штатным MCP SDK; base64 нет. Ошибки содержат `error_code` и `retryable`;
+параллельный continuation запрещён с `run_active`. Доступ ограничен тредами `inv-*`,
+созданными через MCP; произвольные UI-треды прочитать нельзя. Сервис защищён статическим
+Bearer `AGENT_MCP_TOKEN`, OIDC не добавляется. A2A может быть позже реализован поверх
+этого же адаптера; ACP не требуется.
+
+### 12.3. AG-UI sandbox
+
+`agui-agent/app.py` — изолированная обёртка того же графа по протоколу AG-UI
+(пакет `ag-ui-langgraph`): граф собирается in-process с `InMemorySaver`, endpoint
+`POST /agent` стримит SSE-события (`RUN_*`, `STEP_*`, `TEXT_MESSAGE_*`,
+`TOOL_CALL_*`, `STATE_SNAPSHOT/DELTA`, `RAW`). `RAW`-события — verbose-internals
+приватных tool-циклов (model/tools/middleware-шаги), для продового UI не предназначены.
+Треды песочницы не связаны с checkpoints Aegra. `copilotkit-demo/` — CopilotKit
+v2 runtime (`HttpAgent` из `@ag-ui/client`) и встроенный чат на
+`@copilotkit/react-core/v2`.
+
+`app/inspector.tsx` через `useAgent` показывает то же состояние run без второго
+запуска: текущую задачу, KPI, гипотезы, findings и метрики. `app/tree-data.ts`
+строит дерево расследования, `app/tree.tsx` отображает его как «work item →
+Evidence → связанные гипотезы и находки». Поскольку `EvidenceRecord.step_id`
+совпадает с ID самой Evidence, а не work item, привязка к этапу вычисляется по
+`created_at` и интервалу `started_at/finished_at` item. Это навигационная
+группировка UI, а не новая связь в контракте графа. Записи вне интервалов попадают
+в «Общие вызовы»; без плана они группируются по имени инструмента.
+
+Дерево поддерживает поиск по этапу, инструменту, Evidence ID и запросу, фильтр
+`partial/error/failed`, сворачивание веток и постраничное раскрытие длинных списков.
+Активный item раскрыт по умолчанию. Выбор Evidence передаёт `focusId` в
+`app/evidence.tsx` и переключает вкладку на полную запись с таблицей результата,
+фактическими аргументами, IQL и окном. LogiCore возвращает IQL, а не SQL; UI не
+генерирует SQL вместо него. `app/report.tsx` рендерит итоговый Markdown, claims,
+ограничения и артефакты.
+
+`app/steering.tsx` реализует неблокирующие коррективы без изменения графа. Во время
+run уточнение хранится в локальной очереди компонента; после перехода run в
+неактивное состояние оно отправляется через `agent.addMessage(...)` и
+`agent.runAgent()` как следующий run того же треда. Поэтому корректива не внедряется
+в середину уже выполняющегося графа и не останавливает его для ожидания пользователя.
+До отправки элемент очереди можно удалить. Вне run сообщение отправляется сразу.
+Остановка выполняется отдельно через `agent.abortRun()`; approval-interrupt нет.
+Локальная очередь не является персистентным хранилищем и не переживает перезагрузку
+страницы.
+
+`GET /artifacts/{key}` выдаёт подписанную ссылку только для ключей `investigations/`.
+Endpoint агента задаётся через `AGUI_ENDPOINT_URL`. Sandbox не изменяет `agent/`, `ui/`
+и `agent-mcp/`; модель и MCP берутся из тех же env, что и у aegra.
+
+Для разработки демо без пересборки Docker-образа: `docker compose stop copilotkit-demo`,
+затем `cd copilotkit-demo && npm install && COPILOTKIT_TELEMETRY_DISABLED=true npm run dev`.
+Next.js поднимется на том же порту 3001 с hot reload; по умолчанию runtime направлен
+на `http://localhost:2027/agent` (переопределяется `AGUI_ENDPOINT_URL`). После правок
+стенд собирается один раз: `docker compose up -d --build copilotkit-demo`.
 
 ## 13. LLM и embeddings
 
@@ -588,6 +723,7 @@ object keys и метаданные файлов.
 | `LLM_MODEL_REPORTER` | Reporter | Используется `LLM_MODEL` |
 | `LLM_MODEL_CRITIC` | Оба критика | Используется `LLM_MODEL` |
 | `LLM_MODEL_MEMORY` | Консолидация Context Memory | Используется `LLM_MODEL` |
+| `LLM_MODEL_PLANNER` | Декомпозиция Deep и replan | Используется `LLM_MODEL` |
 
 В `agent/config.py` базовым значением является `qwen3.7-flash`, но фактическая
 модель развёртывания задаётся через `.env`.
@@ -624,8 +760,11 @@ Structured output строится через function calling с fallback на 
 | Memory dedup | 0.90 | Insert становится update |
 | Observed TTL | 24 часа | Наблюдение перестаёт извлекаться |
 
-Tool limit принадлежит одному `ainvoke` и сбрасывается на новый вызов: новое
-сообщение, rework или retry structured response. Таймер его не сбрасывает.
+Tool limit принадлежит одному `ainvoke`. После него роль автоматически получает до
+`AGENT_MAX_CONTINUATIONS=1` продолжение на work item; перед каждым сбрасывается
+только `run_tool_call_count`, а handoff и Evidence сохраняются. Новое сообщение и rework
+тоже начинают новый вызов. Таймер счётчик не сбрасывает. Fallback с limitation создаётся
+только после исчерпания продолжений; текст middleware не считается ответом.
 
 ### 14.2. Что не является общим дедлайном
 
@@ -685,11 +824,15 @@ slash-команд нет.
 |---|---|
 | `agent/graph.py` | Supervisor и маршруты |
 | `agent/quick_graph.py` | Quick Investigation |
-| `agent/investigation_graph.py` | Deep Investigation и Critic Evidence |
+| `agent/investigation_graph.py` | Scope, Deep, item-subgraphs и supervisor волн |
+| `agent/scope.py` | Structured InvestigationScope и нормализация режимов |
+| `agent/planner.py` | Acceptance, готовность, зависимости и агрегация |
 | `agent/reporting_graph.py` | Reporting и Critic Report |
 | `agent/agents.py` | `create_agent`, модели, суммаризация, structured response |
+| `agent/skill_runtime.py` | Проверка skill_run, anchors и ограничений |
 | `agent/investigation.py` | Intent, continuation, окна и архивация |
-| `agent/contracts.py` | Evidence, Finding, Coverage, CriticIssue, Hypothesis |
+| `agent/subgraph.py` | Delta и merge item-веток без отката статусов |
+| `agent/contracts.py` | Evidence, Scope, Finding, Plan, WorkItem, CriticIssue, Hypothesis |
 | `agent/llm.py` | LLM и Pydantic-контракты ответов |
 | `agent/tools.py` | MCP и внутренние инструменты |
 | `agent/evidence.py` | Evidence Bundle и детерминированная цепочка |
@@ -697,7 +840,15 @@ slash-команд нет.
 | `agent/memory_models.py` | CaseRecord и ContextFact |
 | `agent/memory_store.py` | Предметная схема и pgvector-поиск |
 | `agent/artifact_store.py` | S3, object keys и подписанные URL |
+| `agent/artifacts.py` | Единый сервис Markdown/ZIP и памяти отчёта |
+| `agent/metrics.py` | Длительность, токены, tool calls и повторы |
+| `agent/state.py` | Общие Evidence/Case/Memory Channels и supervisor |
+| `agent/observability.py` | OpenInference role/scope/item metadata и prompt version |
 | `agent-mcp/app.py` | Асинхронный MCP-адаптер расследований |
+| `agent-mcp/investigation_mcp_types.py` | TypedDict output schemas |
+| `agui-agent/app.py` | AG-UI sandbox поверх графа (in-process, `InMemorySaver`) |
+| `copilotkit-demo/` | Рабочий стол аналитика, дерево run, Evidence, отчёт и steering поверх AG-UI |
+| `agent-evaluator/` | Оценка runs, annotations и SDK experiments |
 | `agent/skills/` | Версионируемые playbooks |
 
 ### Проверка
@@ -706,7 +857,8 @@ slash-команд нет.
 uv run --with "langchain==1.3.10" --with "langgraph==1.2.16" \
   --with "langchain-openai" --with "pydantic-settings" \
   --with "httpx" --with "tenacity" --with "pytest" --with "loguru" \
-  --with "psycopg" --with "mcp[cli]>=2,<3" pytest -q tests
+  --with "psycopg" --with "mcp[cli]>=2,<3" \
+  --with "fastapi" --with "uvicorn" pytest -q tests
 ```
 
 Тесты используют fake LLM/MCP и настоящий граф. Покрыты quick/deep, окна, Evidence,

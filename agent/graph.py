@@ -8,7 +8,7 @@ from agents import build_agents, node_chat
 from export import node_export
 from investigation import node_archive, node_intent
 from investigation_graph import build_investigation_graph
-from memory import node_memory_context, node_memory_load, node_memory_retrieve, node_memory_save
+from memory import node_memory_context, node_memory_inspect, node_memory_load, node_memory_retrieve, node_memory_save
 from progress import simple_progress
 from quick_graph import build_quick_graph
 from reporting_graph import build_reporting_graph
@@ -34,7 +34,13 @@ def entry(state: State) -> dict:
             "report_result": {},
             "critic": {},
             "rework": 0,
+            "investigation_scope": {},
+            "investigation_plan": {},
+            "work_items": Overwrite([]),
+            "active_work_item": {},
+            "replan_requested": False,
             "tool_usage": {},
+            "run_metrics": Overwrite([]),
             "progress": simple_progress("intent", "Определяю задачу"),
             "suggestions": [],
             "memory_candidates": [],
@@ -43,6 +49,7 @@ def entry(state: State) -> dict:
             "memory_facts_saved": 0,
             "memory_operations": Overwrite([]),
             "memory_error": "",
+            "evaluation": {},
             "context_memories": [],
             "similar_cases": [],
             "archive_done": 0,
@@ -74,6 +81,8 @@ def route_to_work(state: State) -> str:
 
 def route_after_intent(state: State) -> str:
     intent = state.get("intent") or {}
+    if intent.get("inspect_memory"):
+        return "memory_inspect"
     if not state.get("context") and intent.get("related_investigation_id"):
         return "memory_load"
     if not intent.get("needs_new_data") and not intent.get("export_data"):
@@ -125,6 +134,7 @@ def build_graph(checkpointer=None):
     builder.add_node("memory_context", node_memory_context)
     builder.add_node("intent", node_intent)
     builder.add_node("memory_load", node_memory_load)
+    builder.add_node("memory_inspect", node_memory_inspect)
     builder.add_node("memory_retrieve", node_memory_retrieve)
     builder.add_node("memory_save", node_memory_save)
     builder.add_node("archive", node_archive)
@@ -140,7 +150,7 @@ def build_graph(checkpointer=None):
     builder.add_conditional_edges(
         "intent",
         route_after_intent,
-        ["memory_load", "memory_retrieve", "archive", "export", "quick", "chat", "deep", "reporting"],
+        ["memory_load", "memory_inspect", "memory_retrieve", "archive", "export", "quick", "chat", "deep", "reporting"],
     )
     builder.add_conditional_edges(
         "memory_load",
@@ -161,6 +171,7 @@ def build_graph(checkpointer=None):
     builder.add_edge("deep", "reporting")
     builder.add_conditional_edges("reporting", route_after_reporting, ["deep", "memory_save"])
     builder.add_edge("memory_save", END)
+    builder.add_edge("memory_inspect", END)
     builder.add_edge("chat", END)
     builder.add_edge("export", "memory_save")
 

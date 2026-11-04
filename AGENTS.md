@@ -1,32 +1,46 @@
 # Правила работы с LogiCore Agent
 
 Действуют для всего репозитория. Запуск и текущие возможности — `README.md`,
-архитектура, контракты, ограничения и приёмочные сценарии — `docs/DEV.md`.
+архитектура, контракты, ограничения и приёмочные сценарии — `docs/DEV.md`,
+только планируемые доработки — `docs/ROADMAP.md`.
 
 ## Архитектурные границы
 
 - `agent/graph.py` — supervisor и маршрутизация.
 - `agent/quick_graph.py`, `investigation_graph.py`, `reporting_graph.py` — субграфы.
-- `agent/subgraph.py` — delta-граница; additive state не должен дублироваться.
+- `agent/subgraph.py` — delta-граница и merge результатов item-веток без отката статусов.
+- `agent/scope.py` — structured InvestigationScope до Planner; optional не исполняется.
+- `agent/planner.py` — acceptance, supervisor волн work items, не отдельный task manager.
 - `agent/agents.py` — runtime `create_agent` и узлы scout/investigator/reporter.
+- `agent/skill_runtime.py` — только проверка structured skill_run и anchors, не новый граф.
 - `agent/investigation.py` — intent, quick/deep, окна и автоматическая архивация.
 - `agent/memory.py` — Case Store, извлечение и консолидация Context Memory.
 - `agent/memory_models.py` — Pydantic-схемы дел, фактов и операций памяти.
 - `agent/memory_store.py` — предметная SQL-схема в отдельной `agent-memory-db`.
 - `agent/artifact_store.py` — S3-ключи и подписанные URL, без base64 в постоянном state.
+- `agent/artifacts.py` — единый сервис Markdown/ZIP и памяти отчёта.
+- `agent/metrics.py` — длительность, токены, tool calls и повторы по ролям/items.
 - `agent-mcp/app.py` — асинхронный MCP-адаптер над Aegra runs API, не второй движок.
-- `agent/contracts.py` — Evidence, Finding, Coverage, CriticIssue и Hypothesis.
+- `agent-mcp/investigation_mcp_types.py` — TypedDict для MCP structuredContent.
+- `agent-evaluator/` — оценка runs, Phoenix annotations и SDK experiments.
+- `agent/contracts.py` — Evidence, Scope, WorkItem, Finding, Coverage, CriticIssue, Hypothesis.
 - `agent/export.py` — детерминированная полная выгрузка без LLM.
 - `agent/critics.py` — прямые структурированные вызовы критиков.
 - `agent/evidence.py` — полные Evidence Bundle, обзоры и цепочка расследования.
 - `agent/progress.py` — публичный статус run, лимиты и suggestion-действия.
+- `agent/observability.py` — OpenInference role/scope/item metadata и prompt version.
 - `agent/llm.py` — Pydantic-схемы ответов и LLM.
-- `agent/state.py` — состояние; не переносить сюда бизнес-логику.
-- `agent/tools.py` — MCP tools, Evidence, findings и отчёты.
+- `agent/state.py` — общие Evidence/Case/Memory Channels и поля supervisor;
+  не переносить сюда бизнес-логику и не дублировать общие каналы в двух схемах.
+- `agent/tools.py` — MCP tools, Evidence и findings; файлы создаются через artifacts.py.
 - `agent/skills/` — Pydantic-контракты, registry и playbooks; исполнение через
-  существующий `create_agent`, без отдельного skill-runtime.
+  существующий `create_agent`, без отдельного графа skills.
+- `agui-agent/`, `copilotkit-demo/` — изолированная AG-UI-песочница поверх того же
+  пакета `agent/` (in-process, свои треды, `InMemorySaver`); не меняет поведение
+  основного стека и не дублирует его состояние.
 
-Не возвращать эти области в один большой `agents.py`.
+Не возвращать эти области в один большой `agents.py`. Новый субграф оправдан только
+самостоятельными input/output, retry или concurrency-семантикой, а не размером файла.
 
 ## Инварианты
 
@@ -41,8 +55,18 @@
   журнал попадает в Case Store, отчёт и manifest. Не заменять его одним счётчиком.
 - S3 state содержит только object keys и метаданные; подписанные URL создаются при
   выдаче. Внешний agent-mcp работает только с `inv-*` тредами и не дублирует граф.
+  Ответы используют штатный `structuredContent` через TypedDict, не JSON в text content.
+- Evaluator работает только после успешного run, хранит оценки в `run_evaluations` и
+  не меняет Evidence/отчёт. Не публиковать сообщение поверх более нового run.
 - Claims ссылаются только на существующие Evidence ID. Критик получает полные
-  записи по этим ID без скрытого усечения; агенты читают их через `get_evidence`.
+  записи по этим ID без скрытого усечения; Reporter читает их через batch-инструмент.
+- InvestigationScope строится structured LLM до Planner. Discovery ограничен двумя
+  items; required — максимум двумя. Optional попадает только в отчёт/suggestions.
+  Work item содержит acceptance/priority/estimated_cost. Replan разрешён только для
+  `acceptance_failed`, `conclusion_invalid` или `missing_critical_evidence`.
+- Planner делит deep на work items до Investigator. Supervisor выполняет волны через
+  item-subgraphs и `asyncio.gather`, не повторяя завершённые items. Item-worker меняет
+  только собственный item; Reporter имеет только `get_evidence_batch`.
 - Цепочка расследования строится детерминированно из state. LLM не добавляет в
   неё несуществующие действия и факты.
 - Гипотезы меняются только через `update_hypothesis`: `open` допускает отсутствие
@@ -90,7 +114,10 @@
 `ainvoke`. Технические таймауты: агент 600 с, export 120 с.
 
 При изменении лимитов обновлять тест `tests/test_tool_limit.py`, `README.md` и
-`docs/DEV.md`. Не описывать tool limit как общий лимит чата: это неверно.
+`docs/DEV.md`. Не описывать tool limit как общий лимит чата: это неверно. После лимита
+роль автоматически продолжает работу со сброшенным `run_tool_call_count`; fallback без
+инструментов — только после `AGENT_MAX_CONTINUATIONS`. Сырой текст middleware не
+является пользовательским ответом. Несколько Evidence читать через batch-инструмент.
 
 ## Изменения кода
 
@@ -111,7 +138,8 @@
 uv run --with "langchain==1.3.10" --with "langgraph==1.2.16" \
   --with "langchain-openai" --with "pydantic-settings" \
   --with "httpx" --with "tenacity" --with "pytest" --with "loguru" \
-  --with "psycopg" --with "mcp[cli]>=2,<3" pytest -q tests
+  --with "psycopg" --with "mcp[cli]>=2,<3" \
+  --with "fastapi" --with "uvicorn" pytest -q tests
 
 git diff --check
 ```

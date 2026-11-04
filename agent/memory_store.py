@@ -10,6 +10,23 @@ from psycopg.types.json import Jsonb
 from memory_models import CaseRecord, ContextFact
 
 
+def safe_text(value: str) -> str:
+    """Заменить lone surrogates, которые PostgreSQL не может закодировать в UTF-8."""
+    return value.encode("utf-8", errors="replace").decode("utf-8")
+
+
+def safe_json(value):
+    if isinstance(value, str):
+        return safe_text(value)
+    if isinstance(value, list):
+        return [safe_json(item) for item in value]
+    if isinstance(value, tuple):
+        return tuple(safe_json(item) for item in value)
+    if isinstance(value, dict):
+        return {safe_text(str(key)): safe_json(item) for key, item in value.items()}
+    return value
+
+
 class MemoryStore:
     def __init__(self, database_url: str, embedding_dimensions: int):
         self.database_url = database_url
@@ -106,9 +123,10 @@ class MemoryStore:
         if not self.enabled:
             return
         self._setup()
+        case = CaseRecord.model_validate(safe_json(case.model_dump(mode="json")))
         if embedding is not None:
             self._validate_embedding(embedding)
-        payload = case.model_dump(mode="json")
+        payload = safe_json(case.model_dump(mode="json"))
         with psycopg.connect(self.database_url) as connection:
             with connection.cursor() as cursor:
                 cursor.execute("""
@@ -218,6 +236,7 @@ class MemoryStore:
 
     def _write_fact(self, cursor, fact: ContextFact, embedding: list[float]) -> None:
         self._validate_embedding(embedding)
+        fact = ContextFact.model_validate(safe_json(fact.model_dump(mode="json")))
         cursor.execute("""
             INSERT INTO agent_memory.context_facts (
                 id, scope, statement, category, entities, status, source_kind,
@@ -309,6 +328,25 @@ class MemoryStore:
                 """, (scope, statement))
                 row = cursor.fetchone()
         return self._fact_from_row(row) if row else None
+
+    def recent_facts(self, scope: str, limit: int) -> list[dict]:
+        if not self.enabled:
+            return []
+        self._setup()
+        with psycopg.connect(self.database_url) as connection:
+            with connection.cursor() as cursor:
+                cursor.execute("""
+                    SELECT id, scope, statement, category, entities, status, source_kind,
+                           source_case_ids, evidence_ids, valid_from, valid_to,
+                           superseded_by, created_at, updated_at
+                    FROM agent_memory.context_facts
+                    WHERE scope = %s
+                      AND (valid_to IS NULL OR valid_to > now()) AND superseded_by IS NULL
+                    ORDER BY updated_at DESC
+                    LIMIT %s
+                """, (scope, limit))
+                rows = cursor.fetchall()
+        return [self._fact_from_row(row).model_dump(mode="json") for row in rows]
 
     def search_facts(
         self,

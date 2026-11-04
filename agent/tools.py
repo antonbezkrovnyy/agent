@@ -20,12 +20,12 @@ from langgraph.prebuilt import ToolRuntime
 from langgraph.types import Command
 
 from contracts import EvidenceRecord, FindingRecord, Hypothesis, HypothesisEvent
-from evidence import evidence_record, with_investigation_chain
+from artifacts import create_report_artifacts
+from evidence import evidence_record
 from llm import WindowUpdate
 from mcp_client import get_mcp_tools
 from progress import TOOL_LIMITS, simple_progress
-from artifact_store import artifact_from_data_url
-from reporting import build_investigation_package, build_report, post_report
+from reporting import post_report
 
 mcp_tools = get_mcp_tools()
 _MCP_TOOLS_BY_NAME = {item.name: item for item in mcp_tools}
@@ -152,6 +152,21 @@ def get_evidence(evidence_id: str, runtime: ToolRuntime = None) -> str:
             "available": available,
         }, ensure_ascii=False)
     return json.dumps({"ok": True, "evidence": record}, ensure_ascii=False)
+
+
+@tool
+def get_evidence_batch(evidence_ids: list[str], runtime: ToolRuntime = None) -> str:
+    """Прочитать несколько полных Evidence одним вызовом без запросов к LogiCore."""
+    state = runtime.state if runtime else {}
+    wanted = list(dict.fromkeys(evidence_ids))[:50]
+    records = state.get("evidence") or []
+    by_id = {item.get("id"): item for item in records}
+    return json.dumps({
+        "ok": True,
+        "items": [by_id[item] for item in wanted if item in by_id],
+        "missing_ids": [item for item in wanted if item not in by_id],
+        "truncated": len(evidence_ids) > len(wanted),
+    }, ensure_ascii=False)
 
 
 def _utc_iso(value: datetime.datetime) -> str:
@@ -369,16 +384,16 @@ def save_report(
     Файл прикрепится к следующему за вызовом ответу автоматически.
     """
     state = runtime.state if runtime else {}
-    markdown = with_investigation_chain(markdown, state)
-    fname, url, nbytes = build_report(title, markdown, filename)
-    artifacts = [artifact_from_data_url(url, state.get("context") or {})]
-    last_report = {"title": title, "markdown": markdown, "filename": fname}
-    result = {"ok": True, "filename": fname, "bytes": nbytes}
-    if state.get("evidence"):
-        package_name, package_url, package_bytes = build_investigation_package(title, markdown, state)
-        artifacts.append(artifact_from_data_url(package_url, state.get("context") or {}))
-        last_report["package_filename"] = package_name
-        result.update({"package_filename": package_name, "package_bytes": package_bytes})
+    last_report, artifacts = create_report_artifacts(title, markdown, state, filename)
+    result = {
+        "ok": True,
+        "filename": last_report["filename"],
+        "bytes": last_report["bytes"],
+        **({
+            "package_filename": last_report["package_filename"],
+            "package_bytes": last_report["package_bytes"],
+        } if last_report.get("package_filename") else {}),
+    }
     return Command(update={
         "messages": [ToolMessage(
             content=json.dumps(result, ensure_ascii=False),
@@ -386,7 +401,6 @@ def save_report(
             name="save_report",
         )],
         "artifacts": artifacts,
-        # Сырой текст — для будущих правок
         "last_report": last_report,
     })
 
@@ -405,17 +419,11 @@ async def send_report(
     при сбое — вместо этого вызови save_report.
     """
     state = runtime.state if runtime else {}
-    markdown = with_investigation_chain(markdown, state)
-    fname, url, nbytes = build_report(title, markdown)
+    last_report, artifacts = create_report_artifacts(title, markdown, state)
+    fname = last_report["filename"]
+    markdown = last_report["markdown"]
     target = (callback_url or "").strip() or str(state.get("callback_url") or "").strip()
-    artifacts = [artifact_from_data_url(url, state.get("context") or {})]
-    last_report = {"title": title, "markdown": markdown, "filename": fname}
-    if state.get("evidence"):
-        package_name, package_url, _ = build_investigation_package(title, markdown, state)
-        artifacts.append(artifact_from_data_url(package_url, state.get("context") or {}))
-        last_report["package_filename"] = package_name
-
-    result: dict[str, Any] = {"filename": fname, "bytes": nbytes}
+    result: dict[str, Any] = {"filename": fname, "bytes": last_report["bytes"]}
     if not target:
         result["ok"] = False
         result["error"] = "callback_url не задан: эндпоинт отсутствует в данных запуска"
@@ -485,6 +493,24 @@ def get_finding(index: int, runtime: ToolRuntime = None) -> str:
 
 
 @tool
+def inspect_memory(query: str = "", limit: int = 5, runtime: ToolRuntime = None) -> str:
+    """Показать read-only обзор памяти: текущее дело, факты и последние случаи.
+
+    Не изменяет память и не запускает расследование. query задаёт тематический поиск;
+    пустая строка возвращает последние активные факты и дела.
+    """
+    from memory import memory_overview
+
+    state = runtime.state if runtime else {}
+    config = runtime.config if runtime else {}
+    return json.dumps(
+        memory_overview(state, config, query, max(1, min(limit, 10))),
+        ensure_ascii=False,
+        default=str,
+    )
+
+
+@tool
 def search_context_memory(query: str, limit: int = 5) -> str:
     """Найти знания окружения по новым сущностям, симптомам или гипотезе.
 
@@ -535,21 +561,23 @@ def search_similar_cases(query: str, limit: int = 3, runtime: ToolRuntime = None
 
 # ── Тулзы на агента ──────────────────────────────────────────────
 # Скаут — MCP + журнал: увиденную улику подхватит следующая сторона
-scout_tools = list(mcp_tools or []) + [log_finding, search_context_memory, search_similar_cases]
+scout_tools = list(mcp_tools or []) + [log_finding, inspect_memory, search_context_memory, search_similar_cases]
 # Инвестигейтор — MCP + журнал расследования
 investigator_tools = list(mcp_tools or []) + [
     log_finding,
     list_findings,
     get_finding,
     get_evidence,
+    get_evidence_batch,
     update_window,
     update_hypothesis,
+    inspect_memory,
     search_context_memory,
     search_similar_cases,
 ]
 # Репортёр — отчёты, чтение журнала, Evidence и детерминированная выгрузка
 extract_data_tool = next((item for item in mcp_tools if item.name == "extract_data"), None)
-reporter_tools = [save_report, send_report, list_findings, get_finding, get_evidence]
+reporter_tools = [save_report, send_report, list_findings, get_finding, get_evidence_batch, inspect_memory]
 if extract_data_tool is not None:
     reporter_tools.append(extract_data_tool)
 # Чат-агент — без тулз

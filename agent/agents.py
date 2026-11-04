@@ -22,6 +22,7 @@ from langchain_core.messages import (
 import llm as llm_mod
 from artifact_store import artifact_url
 from config import Settings
+from observability import trace_config
 from evidence import chain_block
 from prompts import (
     compose,
@@ -31,12 +32,15 @@ from prompts import (
     inv_summary_block,
     last_report_block,
     memory_block,
+    scope_block,
     scout_block,
     skill_block,
     structured_block,
     system_prompt,
+    work_item_block,
+    work_items_block,
 )
-from progress import TOOL_LIMITS, agent_progress, done_progress, report_suggestions
+from progress import TOOL_LIMITS, agent_progress, done_progress, report_suggestions, simple_progress
 from skills import get_skill
 from state import INV_MSGS, REP_MSGS, SCOUT_MSGS, AgentWorkState, State
 from tools import investigator_tools, normalize_tool_result, reporter_tools, scout_tools
@@ -66,6 +70,8 @@ def _scout_prompt(request: ModelRequest) -> str:
 def _investigator_prompt(request: ModelRequest) -> str:
     state = request.state
     blocks = [
+        scope_block(state),
+        work_item_block(state),
         context_block(state),
         scout_block(state),
         skill_block(state),
@@ -80,7 +86,7 @@ def _investigator_prompt(request: ModelRequest) -> str:
 @dynamic_prompt
 def _reporter_prompt(request: ModelRequest) -> str:
     state = request.state
-    blocks: list[str] = [context_block(state), scout_block(state), evidence_block(state), chain_block(state)]
+    blocks: list[str] = [scope_block(state), work_items_block(state), context_block(state), scout_block(state), evidence_block(state), chain_block(state)]
     if state.get("inv_result"):
         blocks.append(structured_block("Структурированный результат инвестигейтора", state["inv_result"]))
     elif state.get("inv_summary"):
@@ -192,6 +198,8 @@ def _agent_input(state: State, work_key: str) -> dict:
         "scout_note": state.get("scout_note") or "",
         "scout_result": state.get("scout_result") or {},
         "active_skill": state.get("active_skill") or {},
+        "investigation_scope": state.get("investigation_scope") or {},
+        "active_work_item": state.get("active_work_item") or {},
         "skill_runs": list(state.get("skill_runs") or []),
         "anchors": list(state.get("anchors") or []),
         "visited_anchors": list(state.get("visited_anchors") or []),
@@ -238,6 +246,72 @@ def _structured_response(result: dict, schema=None) -> dict:
     raise RuntimeError("create_agent не вернул structured_response")
 
 
+def _limit_reached(result: dict, agent: str) -> bool:
+    counts = result.get("run_tool_call_count") or {}
+    return counts.get("__all__", 0) >= TOOL_LIMITS[agent]
+
+
+def _limit_note(agent: str) -> str:
+    return (
+        f"Исчерпан лимит {TOOL_LIMITS[agent]} вызовов инструментов. "
+        "Этап завершён по уже собранным данным; непроверенные действия перечислены в ограничениях."
+    )
+
+
+def _fallback_limited(schema, agent: str):
+    note = _limit_note(agent)
+    if schema is llm_mod.ScoutResult:
+        return llm_mod.ScoutResult(
+            note=note,
+            escalation={"needed": True, "reason": "tool_limit", "suggested_skill": None},
+        )
+    if schema is llm_mod.InvestigationResult:
+        return llm_mod.InvestigationResult(
+            status="partial",
+            summary=note,
+            limitations=[note],
+            not_checked=[note],
+        )
+    return llm_mod.ReporterResult(
+        answer=f"Работа остановлена по техническому ограничению. {note}",
+        limitations=[note],
+        not_checked=[note],
+    )
+
+
+async def _finalize_limited(agent: str, result: dict, schema):
+    """Получить схемный результат без инструментов после ToolCallLimitMiddleware."""
+    state = {**result, "context": result.get("context") or {}}
+    blocks = [context_block(state), evidence_block(state), chain_block(state)]
+    if result.get("inv_result"):
+        blocks.append(structured_block("Структурированный результат инвестигейтора", result["inv_result"]))
+    system = system_prompt(compose("base", agent), *blocks)
+    instruction = HumanMessage(content=(
+        _limit_note(agent)
+        + " Новые инструменты вызывать нельзя. Немедленно сформируй итоговый structured response "
+          "по уже имеющимся сообщениям и Evidence. Не возвращай текст middleware как ответ."
+    ))
+    model = llm_mod.model_for_role(agent)
+    structured = model.with_structured_output(schema, method="function_calling").with_fallbacks([
+        model.with_structured_output(schema, method="json_mode")
+    ])
+    try:
+        response = await structured.ainvoke([
+            SystemMessage(content=system),
+            *(result.get("messages") or []),
+            instruction,
+        ], config=trace_config(f"{agent}_fallback", result))
+    except Exception:
+        response = _fallback_limited(schema, agent)
+    result = response.model_dump()
+    note = _limit_note(agent)
+    if schema is not llm_mod.ScoutResult and note not in result.setdefault("limitations", []):
+        result["limitations"].append(note)
+    if schema is llm_mod.InvestigationResult:
+        result["status"] = "partial"
+    return result
+
+
 def _timeout_result(schema, messages: list[BaseMessage]) -> dict:
     note = "Технический таймаут: этап остановлен из-за слишком долгого ответа."
     if schema is llm_mod.ScoutResult:
@@ -253,8 +327,12 @@ def _timeout_result(schema, messages: list[BaseMessage]) -> dict:
 
 
 async def _run_agent(agent: str, state: State, work_key: str) -> tuple[dict, list[BaseMessage], dict]:
-    """Запустить create_agent и подготовить только дельты для внешнего State."""
-    agent_input = _agent_input(state, work_key)
+    """Выполнить роль с автоматическими продолжениями после run_limit."""
+    from metrics import summarize_agent_run
+
+    started_at = datetime.now(UTC)
+    original_input = _agent_input(state, work_key)
+    agent_input = original_input
     stage_text = {
         "scout": "Осматриваю журнал",
         "investigator": "Анализирую события",
@@ -267,39 +345,85 @@ async def _run_agent(agent: str, state: State, work_key: str) -> tuple[dict, lis
         agent,
     )
     schema = _agent_schema(agent)
-    for attempt in range(2):
-        try:
-            result = await asyncio.wait_for(
-                _agents[agent].ainvoke(agent_input),
-                timeout=settings.agent_timeout_seconds,
-            )
-        except TimeoutError:
-            result = _timeout_result(schema, agent_input["messages"])
-        input_count = len(agent_input["messages"])
-        new_messages = list(result["messages"][input_count:])
-        try:
-            _structured_response(result, schema)
+    total_calls = 0
+    segments_used = 0
+    for segment in range(settings.agent_max_continuations + 1):
+        segments_used = segment + 1
+        limited = False
+        for attempt in range(2):
+            try:
+                result = await asyncio.wait_for(
+                    _agents[agent].ainvoke(agent_input, config=trace_config(agent, agent_input)),
+                    timeout=settings.agent_timeout_seconds,
+                )
+            except TimeoutError:
+                result = _timeout_result(schema, agent_input["messages"])
+            total_calls += (result.get("run_tool_call_count") or {}).get("__all__", 0)
+            limited = result.get("structured_response") is None and _limit_reached(result, agent)
+            if limited and segment < settings.agent_max_continuations:
+                break
+            if limited:
+                result["structured_response"] = await _finalize_limited(agent, result, schema)
+            try:
+                _structured_response(result, schema)
+                break
+            except RuntimeError:
+                new_messages = result["messages"][len(agent_input["messages"]):]
+                if attempt == 1 or new_messages:
+                    raise
+        if not limited or segment == settings.agent_max_continuations:
             break
-        except RuntimeError:
-            if attempt == 1 or new_messages:
-                raise
+        agent_input = {
+            **result,
+            "run_tool_call_count": {},
+            "messages": [
+                *(result.get("messages") or []),
+                HumanMessage(content=(
+                    "Продолжи незавершённую работу с текущего места. Это новый итерационный шаг "
+                    "с обновлённым техническим лимитом, а не финал. Не повторяй уже выполненные "
+                    "запросы и чтение Evidence. Используй накопленные handoff и заверши structured response."
+                )),
+            ],
+            "progress": agent_progress(
+                {**result, "tool_usage": {}},
+                agent,
+                f"Продолжаю работу, шаг {segment + 2}/{settings.agent_max_continuations + 1}",
+                agent,
+            ),
+        }
 
+    input_count = len(original_input["messages"])
+    new_messages = list(result["messages"][input_count:])
     update: dict = {}
     for key in ("artifacts", "findings", "evidence"):
-        before = len(agent_input[key])
+        before = len(original_input[key])
         values = list(result.get(key) or [])
         if len(values) > before:
             update[key] = values[before:]
-    if result.get("hypotheses") != agent_input["hypotheses"]:
+    if result.get("hypotheses") != original_input["hypotheses"]:
         update["hypotheses"] = list(result.get("hypotheses") or [])
-    if result.get("last_report") != agent_input["last_report"]:
+    if result.get("last_report") != original_input["last_report"]:
         update["last_report"] = result.get("last_report") or {}
-    if result.get("context") != agent_input["context"]:
-        update["context"] = result.get("context") or agent_input["context"]
-    counts = result.get("run_tool_call_count") or {}
+    if result.get("context") != original_input["context"]:
+        update["context"] = result.get("context") or original_input["context"]
     usage = dict(state.get("tool_usage") or {})
-    usage[agent] = counts.get("__all__", usage.get(agent, 0))
+    usage[agent] = total_calls or usage.get(agent, 0)
     update["tool_usage"] = usage
+    finished_at = datetime.now(UTC)
+    item = state.get("active_work_item") or {}
+    update["run_metrics"] = [summarize_agent_run(
+        new_messages,
+        agent=agent,
+        model=llm_mod.model_name_for_role(agent),
+        investigation_id=(state.get("context") or {}).get("id") or "",
+        work_item_id=item.get("id") or "",
+        attempt=(item.get("attempt") or 0) + 1 if item.get("id") else 0,
+        scope_mode=(state.get("investigation_scope") or {}).get("mode") or "",
+        started_at=started_at.isoformat(timespec="milliseconds"),
+        finished_at=finished_at.isoformat(timespec="milliseconds"),
+        duration_ms=max(0, int((finished_at - started_at).total_seconds() * 1000)),
+        segments=segments_used,
+    )]
     return result, new_messages, update
 
 
@@ -349,98 +473,16 @@ def node_chat(state: State) -> dict:
     """Чат-агент: простой вопрос без инструментов."""
     system = system_prompt(compose("base", "chat"), scout_block(state))
     convo = [SystemMessage(content=system), *_agent_convo_messages(state)]
-    response = llm_mod.llm.invoke(convo)
+    response = llm_mod.llm.invoke(convo, config=trace_config("chat", state))
     update = _agent_final(state, response, "chat")
     update["progress"] = done_progress()
     return update
 
 
-def _anchor_key(anchor: dict) -> str:
-    return f"{anchor.get('type', 'custom')}:{str(anchor.get('value') or '').strip().lower()}"
-
-
 def _skill_run_update(state: State, result: dict, structured: dict) -> dict:
-    active = state.get("active_skill") or {}
-    if not active.get("id"):
-        return {}
-    run = structured.get("skill_run")
-    if not run or run.get("skill_id") != active["id"] or run.get("version") != active["version"]:
-        note = "Skill не вернул корректный structured skill_run."
-        structured.setdefault("limitations", []).append(note)
-        run = {
-            "skill_id": active["id"],
-            "version": active["version"],
-            "status": "failed",
-            "summary": structured.get("summary") or note,
-            "window_updates": 0,
-            "evidence_ids": [],
-            "not_checked": [note],
-        }
-    available = {item.get("id") for item in result.get("evidence") or state.get("evidence") or []}
-    unknown = [item for item in run.get("evidence_ids") or [] if item not in available]
-    if unknown:
-        run["evidence_ids"] = [item for item in run.get("evidence_ids") or [] if item in available]
-        run.setdefault("not_checked", []).append("Из skill_run удалены неизвестные evidence_id.")
-        run["status"] = "partial"
-    before = len((state.get("context") or {}).get("window_history") or [])
-    after = len((result.get("context") or {}).get("window_history") or [])
-    run["window_updates"] = max(0, after - before)
-    if run["window_updates"] > active.get("max_window_updates", 0):
-        run.setdefault("not_checked", []).append("Превышен лимит изменений окна skill.")
-        run["status"] = "partial"
+    from skill_runtime import skill_run_update
 
-    existing_anchors = list(state.get("anchors") or [])
-    merged = {_anchor_key(item): dict(item) for item in existing_anchors}
-    valid_anchors = []
-    for anchor in run.get("anchors") or []:
-        evidence_ids = [item for item in anchor.get("evidence_ids") or [] if item in available]
-        if not evidence_ids:
-            run.setdefault("not_checked", []).append(f"Anchor без Evidence пропущен: {_anchor_key(anchor)}.")
-            run["status"] = "partial"
-            continue
-        anchor = {**anchor, "evidence_ids": evidence_ids}
-        key = _anchor_key(anchor)
-        valid_anchors.append(anchor)
-        previous = merged.get(key)
-        if previous:
-            anchor["evidence_ids"] = list(dict.fromkeys([
-                *(previous.get("evidence_ids") or []),
-                *evidence_ids,
-            ]))
-        merged[key] = anchor
-    run["anchors"] = valid_anchors
-    if len(valid_anchors) > active.get("max_branches", 1):
-        run.setdefault("not_checked", []).append("Превышен лимит новых anchors skill.")
-        run["status"] = "partial"
-    if run.get("depth", 0) > active.get("max_depth", 0):
-        run.setdefault("not_checked", []).append("Превышена глубина pivot skill.")
-        run["status"] = "partial"
-
-    previous_visited = {item.strip().lower() for item in state.get("visited_anchors") or []}
-    run_visited = list(dict.fromkeys(
-        item.strip().lower() for item in run.get("visited_anchors") or [] if item.strip()
-    ))
-    if previous_visited.intersection(run_visited):
-        run.setdefault("not_checked", []).append("Обнаружено повторное посещение anchors.")
-        run["status"] = "partial"
-    run["visited_anchors"] = run_visited
-    if active["id"] == "entity_pivot":
-        visited = previous_visited.union(run_visited)
-        for key in sorted(set(merged).difference(visited)):
-            note = f"Ветка не исследована в этом skill_run: {key}."
-            if note not in run.setdefault("not_checked", []):
-                run["not_checked"].append(note)
-    recorded_at = datetime.now(UTC)
-    run["model"] = llm_mod.model_name_for_role("investigator")
-    if active.get("selected_at"):
-        selected_at = datetime.fromisoformat(active["selected_at"].replace("Z", "+00:00"))
-        run["duration_ms"] = max(0, int((recorded_at - selected_at).total_seconds() * 1000))
-    run["recorded_at"] = recorded_at.isoformat(timespec="seconds")
-    return {
-        "skill_runs": [run],
-        "anchors": list(merged.values()),
-        "visited_anchors": sorted(previous_visited.union(run_visited)),
-    }
+    return skill_run_update(state, result, structured)
 
 
 async def node_investigator(state: State) -> dict:
@@ -452,6 +494,26 @@ async def node_investigator(state: State) -> dict:
     final = AIMessage(content=structured["summary"], name="investigator")
     update[INV_MSGS] = [*new_messages[:-1], final]
     update.update(_skill_run_update(state, result, structured))
+    active_item = state.get("active_work_item") or {}
+    if active_item.get("id"):
+        item_context = update.pop("context", result.get("context") or state.get("context") or {})
+        attempt = (active_item.get("attempt") or 0) + 1
+        update["active_work_item"] = {**active_item, "attempt": attempt}
+        update["work_items"] = [{
+            "id": active_item["id"],
+            "status": "critic_review" if settings.critic_enabled else "done",
+            "attempt": attempt,
+            "started_at": active_item.get("started_at") or datetime.now(UTC).isoformat(timespec="seconds"),
+            "finished_at": datetime.now(UTC).isoformat(timespec="seconds"),
+            "result": structured,
+            "metrics": (update.get("run_metrics") or [{}])[-1],
+            "context": item_context,
+        }]
+        update["progress"] = simple_progress(
+            "planner",
+            f"Проверяю часть {active_item['id']}" if settings.critic_enabled else f"Часть {active_item['id']} готова",
+        )
+        return update
     update["inv_result"] = structured
     update["inv_summary"] = structured["summary"]
     update.update(_work_mode_update(state, "deep", "deep_investigation"))
@@ -485,9 +547,7 @@ async def node_reporter(state: State) -> dict:
     if settings.critic_enabled:
         update["progress"] = agent_progress(progress_state, "critic_report", "Проверяю ответ", "reporter")
     else:
-        update["progress"] = done_progress(
-            "Готово с ограничениями" if structured.get("limitations") else "Готово"
-        )
+        update["progress"] = done_progress()
     update.update(_agent_final(
         state,
         AIMessage(content=structured["answer"]),

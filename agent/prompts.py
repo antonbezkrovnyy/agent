@@ -54,6 +54,53 @@ def context_block(state: dict) -> str:
     )
 
 
+def scope_block(state: dict) -> str:
+    scope = state.get("investigation_scope") or {}
+    if not scope.get("objective"):
+        return ""
+    return structured_block(
+        "InvestigationScope: границы текущего этапа. Optional сейчас не выполняется",
+        scope,
+    )
+
+
+def work_item_block(state: dict) -> str:
+    item = state.get("active_work_item") or {}
+    if not item.get("id"):
+        return ""
+    return (
+        "Текущий work item. Выполни только его цель, не расширяй работу до всего расследования. "
+        "requested_window имеет приоритет над общим активным окном. Заверши structured response "
+        "с claims и handoff именно для этого item. Acceptance — критерий остановки, а не список "
+        "всех возможных проверок. Replan разрешён только при acceptance_failed, conclusion_invalid "
+        "или missing_critical_evidence; новую самостоятельную аномалию не разбирай в этом item:\n"
+        + json.dumps({
+            key: value for key, value in item.items()
+            if key in ("id", "goal", "acceptance", "priority", "estimated_cost", "depends_on", "required", "requested_window", "attempt")
+        }, ensure_ascii=False)
+    )
+
+
+def work_items_block(state: dict) -> str:
+    items = state.get("work_items") or []
+    completed = [item for item in items if item.get("status") == "done" and item.get("result")]
+    if not completed:
+        return ""
+    handoff = [{
+        "id": item["id"],
+        "goal": item.get("goal"),
+        "acceptance": item.get("acceptance") or item.get("goal"),
+        "priority": item.get("priority") or "medium",
+        "estimated_cost": item.get("estimated_cost") or "medium",
+        "required": item.get("required", True),
+        "result": item["result"],
+        "critic": item.get("critic") or {},
+    } for item in completed]
+    return "Компактные handoff завершённых work items. Используй их вместо повторного анализа всей истории:\n" + json.dumps(
+        handoff, ensure_ascii=False
+    )
+
+
 def skill_block(state: dict) -> str:
     skill = state.get("active_skill") or {}
     if not skill.get("id"):

@@ -32,7 +32,16 @@ def test_s3_upload_returns_key_and_fresh_signed_url(monkeypatch):
     monkeypatch.setattr(artifacts._settings, "artifact_s3_access_key", "agent")
     monkeypatch.setattr(artifacts._settings, "artifact_s3_secret_key", "secret")
     artifacts._store = None
+    real_datetime = artifacts.datetime
 
+    class Clock:
+        current = real_datetime.now(artifacts.UTC)
+
+        @classmethod
+        def now(cls, timezone=None):
+            return cls.current
+
+    monkeypatch.setattr(artifacts, "datetime", Clock)
     artifact = put_artifact("report.md", b"# report", "text/markdown", {"id": "case/1"}, "run 2")
     first = artifact_url(artifact)
     second = artifact_url(artifact)
@@ -44,6 +53,12 @@ def test_s3_upload_returns_key_and_fresh_signed_url(monkeypatch):
     assert "X-Amz-Signature=" in first
     assert "X-Amz-Expires=3600" in first
     assert second == first
+    from datetime import timedelta
+
+    Clock.current += timedelta(hours=2)
+    refreshed = artifact_url(artifact)
+    assert refreshed != first
+    assert artifact["key"] == "investigations/case/1/run-2/report.md"
     assert [item[0] for item in requests] == ["PUT", "PUT"]
 
 

@@ -46,12 +46,15 @@ def state_with_evidence():
     }
 
 
-def test_overview_points_to_full_evidence_without_dumping_events():
+def test_overview_contains_compact_results_without_dumping_all_events():
     text = evidence_overview_block(state_with_evidence())
 
     assert "get_evidence" in text
     assert '"events_count": 10' in text
-    assert "event-0" not in text
+    assert "event-0" in text
+    assert "event-1" in text
+    assert "event-9" not in text
+    assert '"marker": "unrelated"' in text
 
 
 def test_full_bundle_has_all_events_only_for_requested_claim():

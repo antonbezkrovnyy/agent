@@ -1,11 +1,13 @@
 import asyncio
 import importlib.util
 import os
+import sys
 from pathlib import Path
 
 import pytest
 
 
+sys.path.insert(0, str(Path(__file__).parents[1] / "agent-mcp"))
 spec = importlib.util.spec_from_file_location(
     "agent_mcp_app",
     Path(__file__).parents[1] / "agent-mcp" / "app.py",
@@ -128,3 +130,87 @@ def test_cancel_uses_active_aegra_run(monkeypatch):
         "POST",
         "/threads/inv-" + "d" * 32 + "/runs/run-active/cancel",
     )
+
+
+def test_continue_uses_same_thread_after_cancel(monkeypatch):
+    calls = []
+
+    async def request(method, path, **kwargs):
+        calls.append((method, path, kwargs))
+        if method == "GET":
+            return Response(payload=[{"run_id": "run-old", "status": "cancelled"}])
+        return Response(202, {"run_id": "run-new", "status": "pending"})
+
+    monkeypatch.setattr(agent_mcp, "_request", request)
+    result = run(agent_mcp.investigation_continue(
+        "inv-" + "e" * 32,
+        "Проверь выбранный host",
+        scope_mode="targeted",
+    ))
+
+    assert result["ok"] is True
+    assert result["run_id"] == "run-new"
+    assert calls[-1][1] == "/threads/inv-" + "e" * 32 + "/runs"
+    prompt = calls[-1][2]["json"]["input"]["messages"][0]["content"]
+    assert "InvestigationScope=targeted" in prompt
+
+
+def test_continue_rejects_parallel_run(monkeypatch):
+    async def request(method, path, **kwargs):
+        return Response(payload=[{"run_id": "run-active", "status": "running"}])
+
+    monkeypatch.setattr(agent_mcp, "_request", request)
+    result = run(agent_mcp.investigation_continue("inv-" + "f" * 32, "Продолжи"))
+
+    assert result["ok"] is False
+    assert result["error_code"] == "run_active"
+    assert result["run_id"] == "run-active"
+
+
+def test_restart_repeats_last_task_after_error(monkeypatch):
+    calls = []
+
+    async def request(method, path, **kwargs):
+        calls.append((method, path, kwargs))
+        if path.endswith("/state"):
+            return Response(payload={"values": {"messages": [
+                {"type": "human", "content": "Первый вопрос"},
+                {"type": "ai", "content": "Ответ"},
+                {"type": "human", "content": "Последний вопрос"},
+            ]}})
+        if method == "GET":
+            return Response(payload=[{"run_id": "run-error", "status": "error"}])
+        return Response(202, {"run_id": "run-retry", "status": "pending"})
+
+    monkeypatch.setattr(agent_mcp, "_request", request)
+    result = run(agent_mcp.investigation_restart("inv-" + "0" * 32))
+
+    assert result["run_id"] == "run-retry"
+    assert calls[-1][2]["json"]["input"]["messages"][0]["content"] == "Последний вопрос"
+
+
+def test_mcp_tools_expose_typed_output_schemas():
+    tools = run(agent_mcp.mcp.list_tools())
+    by_name = {tool.name: tool for tool in tools}
+
+    assert "investigation_continue" in by_name
+    schema = by_name["investigation_result"].output_schema
+    assert schema["type"] == "object"
+    assert {"report", "claims", "scope", "next_directions", "run_metrics"} <= set(schema["properties"])
+    start_schema = by_name["investigation_start"].output_schema
+    assert "error_code" in start_schema["properties"]
+
+
+def test_mcp_call_returns_structured_content_not_serialized_json(monkeypatch):
+    async def request(method, path, **kwargs):
+        return Response(payload={"values": {"evidence": [{"id": "ev-1", "result": {"count": 1}}]}})
+
+    monkeypatch.setattr(agent_mcp, "_request", request)
+    response = run(agent_mcp.mcp.call_tool(
+        "investigation_evidence",
+        {"investigation_id": "inv-" + "1" * 32},
+    ))
+    structured = response.get("structuredContent") if isinstance(response, dict) else response.structured_content
+
+    assert structured["ok"] is True
+    assert structured["evidence"][0]["id"] == "ev-1"

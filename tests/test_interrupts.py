@@ -113,7 +113,7 @@ def test_continuation_reuses_context_without_interrupt(patch_llm):
 
 def test_agent_timeout_returns_limitation(patch_llm, monkeypatch):
     class SlowAgent:
-        async def ainvoke(self, agent_input):
+        async def ainvoke(self, agent_input, config=None):
             await asyncio.sleep(1)
 
     patch_llm(FakeAgent({}), FakeStructured(intent()))

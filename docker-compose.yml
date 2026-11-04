@@ -30,16 +30,21 @@ services:
       retries: 5
 
   phoenix:
-    image: arizephoenix/phoenix:latest
+    image: arizephoenix/phoenix:19.0.0
     restart: unless-stopped
     ports:
       - "6006:6006"
       - "4317:4317"
       - "4318:4318"
     environment:
-      - PHOENIX_SQL_DATABASE_URL=sqlite:////tmp/phoenix.db
+      - PHOENIX_WORKING_DIR=/mnt/data
       - PHOENIX_ENABLE_OTLP=true
-    # Убираем command полностью - образ сам знает, как запустить сервер
+      - PHOENIX_DEFAULT_RETENTION_POLICY_DAYS=${PHOENIX_DEFAULT_RETENTION_POLICY_DAYS:-30}
+      - PHOENIX_ENABLE_MCP_SERVER=true
+      - PHOENIX_ENABLE_MCP_CODE_MODE=false
+      - PHOENIX_TELEMETRY_ENABLED=false
+    volumes:
+      - phoenix_data:/mnt/data
 
   agent-memory-db:
     image: pgvector/pgvector:pg18
@@ -94,7 +99,11 @@ services:
       - WORKER_COUNT=2
       - N_JOBS_PER_WORKER=5
       - OTEL_TARGETS=PHOENIX
+      - OTEL_SERVICE_NAME=logicore-agent
+      - OTEL_RESOURCE_ATTRIBUTES=openinference.project.name=${PHOENIX_PROJECT:-logicore-agent}
+      - PHOENIX_PROJECT=logicore-agent
       - PHOENIX_COLLECTOR_ENDPOINT=http://phoenix:6006/v1/traces
+      - PHOENIX_ENDPOINT=http://phoenix:6006
     depends_on:
       postgres:
         condition: service_healthy
@@ -165,6 +174,32 @@ services:
       timeout: 5s
       retries: 5
 
+  agent-evaluator:
+    build:
+      context: .
+      dockerfile: agent-evaluator/Dockerfile
+    restart: unless-stopped
+    env_file:
+      - ./.env
+    environment:
+      - AEGRA_API_URL=http://aegra:2026
+      - PHOENIX_URL=http://phoenix:6006
+      - PHOENIX_PROJECT=logicore-agent
+      - PHOENIX_PUBLIC_URL=${PHOENIX_PUBLIC_URL:-http://localhost:6006}
+      - AGENT_MEMORY_DATABASE_URL=postgresql://agent_memory:${AGENT_MEMORY_POSTGRES_PASSWORD:-agent_memory_password}@agent-memory-db:5432/agent_memory_db
+    depends_on:
+      aegra:
+        condition: service_healthy
+      agent-memory-db:
+        condition: service_healthy
+      phoenix:
+        condition: service_started
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:9200/health', timeout=3)"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
   # Приёмник нативного аномали-вебхука Логикора: POST /anomaly → тред в agra → run расследования
   anomaly-relay:
     build: ./anomaly-relay
@@ -194,8 +229,54 @@ services:
     environment:
       - NEXT_PUBLIC_API_URL=http://localhost:2026
       - NEXT_PUBLIC_ASSISTANT_ID=agent
+
+  # AG-UI sandbox: in-process обёртка того же agent/ пакета по протоколу AG-UI.
+  # Не влияет на aegra/agent-mcp; треды и раны песочницы живут отдельно.
+  agui-agent:
+    build:
+      context: .
+      dockerfile: agui-agent/Dockerfile
+    restart: unless-stopped
+    ports:
+      - "2027:2027"
+    env_file:
+      - ./.env
+    environment:
+      - AGENT_MEMORY_DATABASE_URL=postgresql://agent_memory:${AGENT_MEMORY_POSTGRES_PASSWORD:-agent_memory_password}@agent-memory-db:5432/agent_memory_db
+      - ARTIFACT_STORE_BACKEND=s3
+      - ARTIFACT_S3_ENDPOINT=http://seaweedfs:8333
+      - ARTIFACT_S3_PUBLIC_ENDPOINT=${ARTIFACT_S3_PUBLIC_ENDPOINT:-http://localhost:8333}
+      - ARTIFACT_S3_ACCESS_KEY=${ARTIFACT_S3_ACCESS_KEY:-agent}
+      - ARTIFACT_S3_SECRET_KEY=${ARTIFACT_S3_SECRET_KEY:-agent-local-secret}
+    depends_on:
+      logicore-mcp:
+        condition: service_healthy
+      agent-memory-db:
+        condition: service_healthy
+      seaweedfs:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:2027/health', timeout=3)"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+
+  # CopilotKit-чат поверх AG-UI sandbox (agui-agent). Отдельный порт, основной UI не трогаем.
+  copilotkit-demo:
+    build: ./copilotkit-demo
+    restart: unless-stopped
+    ports:
+      - "3001:3001"
+    environment:
+      - AGUI_ENDPOINT_URL=http://agui-agent:2027/agent
+      - COPILOTKIT_TELEMETRY_DISABLED=true
+    depends_on:
+      agui-agent:
+        condition: service_healthy
 volumes:
   postgres_data:
   agent_memory_data:
   redis_data:
   seaweedfs_data:
+  phoenix_data:

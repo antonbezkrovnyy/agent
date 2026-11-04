@@ -35,6 +35,10 @@ class CaseRecord(BaseModel):
     inv_result: dict = Field(default_factory=dict)
     last_report: dict = Field(default_factory=dict)
     memory_operations: list["MemoryOperationRecord"] = Field(default_factory=list)
+    investigation_scope: dict = Field(default_factory=dict)
+    investigation_plan: dict = Field(default_factory=dict)
+    work_items: list[dict] = Field(default_factory=list)
+    run_metrics: list[dict] = Field(default_factory=list)
     chain: dict = Field(default_factory=dict)
 
 

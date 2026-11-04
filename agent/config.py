@@ -15,6 +15,7 @@ class Settings(BaseSettings):
     llm_model_reporter: str = ""
     llm_model_critic: str = ""
     llm_model_memory: str = ""
+    llm_model_planner: str = ""
     llm_base_url: str
     llm_token: str
 
@@ -43,6 +44,15 @@ class Settings(BaseSettings):
     agent_tool_limit_scout: int = 10
     agent_tool_limit_investigator: int = 30
     agent_tool_limit_reporter: int = 60
+    # Автоматические продолжения роли внутри одного work item после run_limit
+    agent_max_continuations: int = 1
+    investigation_planner_enabled: bool = True
+    planner_max_items: int = 5
+    planner_max_parallel: int = 2
+    planner_max_revisions: int = 2
+    scope_discovery_max_items: int = 2
+    scope_required_max_items: int = 2
+    agent_prompt_version: str = "2026-11-03"
 
     # Отдельные Case Store и Context Memory, не БД Aegra checkpoints
     agent_memory_database_url: str = ""

@@ -125,6 +125,8 @@ def build_investigation_package(title: str, markdown: str, state: dict) -> tuple
         "incomplete_evidence_ids": [item.get("id") for item in evidence if item.get("status") != "ok"],
         "memory_operations": list(state.get("memory_operations") or []),
         "memory_error": state.get("memory_error") or "",
+        "investigation_scope": state.get("investigation_scope") or {},
+        "run_metrics": list(state.get("run_metrics") or []),
         "files": [
             {
                 "path": name,
