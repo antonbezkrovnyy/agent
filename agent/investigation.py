@@ -45,6 +45,7 @@ def _intent_structured(state: State) -> dict | None:
         "needs_new_data": getattr(decision, "needs_new_data", False),
         "edit_existing_report": getattr(decision, "edit_existing_report", False),
         "export_data": getattr(decision, "export_data", False),
+        "remember_fact": getattr(decision, "remember_fact", False),
         "inspect_memory": getattr(decision, "inspect_memory", False),
         "memory_query": getattr(decision, "memory_query", ""),
         "new_investigation": getattr(decision, "new_investigation", "continue"),
@@ -67,9 +68,17 @@ def _normalize_intent(decision: dict, state: State) -> dict:
     ):
         decision["needs_new_data"] = True
     if decision.get("needs_new_data") or decision.get("export_data"):
+        decision["remember_fact"] = False
         decision["inspect_memory"] = False
         decision["memory_query"] = ""
+    if decision.get("remember_fact"):
+        decision["inspect_memory"] = False
+        decision["memory_query"] = ""
+        decision["needs_new_data"] = False
+        decision["edit_existing_report"] = False
+        decision["export_data"] = False
     if decision.get("inspect_memory"):
+        decision["remember_fact"] = False
         decision["needs_new_data"] = False
         decision["edit_existing_report"] = False
         decision["export_data"] = False
@@ -86,6 +95,7 @@ def _intent_fallback(state: State) -> dict:
         "needs_new_data": True,
         "edit_existing_report": False,
         "export_data": False,
+        "remember_fact": False,
         "inspect_memory": False,
         "memory_query": "",
         "new_investigation": "continue" if has_context else "new",
@@ -146,6 +156,8 @@ def _focus_context(context: dict, decision: dict) -> dict:
 
 
 def _work_progress(state: State, decision: dict) -> dict:
+    if decision.get("remember_fact"):
+        return simple_progress("reporter", "Сохраняю факт в память")
     if decision.get("inspect_memory"):
         return simple_progress("memory_inspect", "Читаю содержимое памяти")
     if decision.get("export_data"):
@@ -193,7 +205,7 @@ def node_intent(state: State) -> dict:
             **skill.model_dump(),
             "selected_at": datetime.now(UTC).isoformat(timespec="milliseconds"),
         } if skill else {}
-    if decision.get("needs_new_data") or decision.get("export_data"):
+    if decision.get("needs_new_data") or decision.get("export_data") or decision.get("remember_fact"):
         if not state.get("context") and not decision.get("related_investigation_id"):
             update["context"] = _new_context(decision)
         elif transition != "new" and decision.get("window_requested") and state.get("context"):

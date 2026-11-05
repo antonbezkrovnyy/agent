@@ -27,6 +27,8 @@ def test_hypothesis_lifecycle_and_report_history():
         runtime=runtime(state),
     )
     state["hypotheses"] = merge_hypotheses(state["hypotheses"], created.update["hypotheses"])
+    assert created.update["messages"][1].name == "hypothesis"
+    assert created.update["messages"][1].content.startswith("Гипотеза: Сбой связан с deploy")
     hypothesis_id = state["hypotheses"][0]["id"]
 
     updated = update_hypothesis.func(

@@ -113,6 +113,50 @@ def test_user_fact_is_saved_without_evidence(monkeypatch):
     assert fake.saved_facts[0].valid_to is None
 
 
+def test_remember_fact_routes_to_reporter_and_saves_without_evidence(patch_llm, monkeypatch):
+    fake = FakeMemory()
+    monkeypatch.setattr(memory_mod, "memory", fake)
+    decision = intent("simple", new=False)
+    decision.remember_fact = True
+    decision.inspect_memory = True
+    operation = ContextMemoryOperation(
+        action="insert",
+        fact=draft(source="user", status="confirmed"),
+    )
+    agent = FakeAgent({"Ты — репортёр": [ai("Факт сохранён")]})
+    patch_llm(
+        agent,
+        FakeStructured(decision),
+        memory=FakeStructured(ContextMemoryConsolidation(operations=[operation])),
+    )
+
+    result = invoke(build_graph(), "запомни, поле generator — метка приёмника событий")
+
+    assert result["intent"]["remember_fact"] is True
+    assert result["intent"]["inspect_memory"] is False
+    assert result["report_result"]["answer"] == "Факт сохранён"
+    assert result["memory_saved"] == result["context"]["id"]
+    assert result["memory_facts_saved"] == 1
+    assert result["evidence"] == []
+    assert not [m for m in result["messages"] if m.name in ("scope", "planner")]
+    assert fake.saved_facts[0].source_kind == "user"
+    assert fake.saved_facts[0].source_case_ids == [result["context"]["id"]]
+
+
+def test_consolidation_reads_ui_content_blocks():
+    state = {
+        "messages": [HumanMessage(content=[{
+            "type": "text",
+            "text": "запомни, поле generator — метка приёмника",
+        }])],
+        "context": {"id": "case-ui"},
+    }
+
+    payload = memory_mod._consolidation_input(state, [])
+
+    assert payload["user_messages"] == ["запомни, поле generator — метка приёмника"]
+
+
 def test_confirmed_fact_requires_valid_evidence(monkeypatch):
     fake = FakeMemory()
     monkeypatch.setattr(memory_mod, "memory", fake)

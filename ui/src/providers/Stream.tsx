@@ -5,13 +5,11 @@ import React, {
   useState,
   useEffect,
   useMemo,
+  useRef,
 } from "react";
 import { useStream } from "@langchain/langgraph-sdk/react";
 import { type Message } from "@langchain/langgraph-sdk";
 import {
-  uiMessageReducer,
-  isUIMessage,
-  isRemoveUIMessage,
   type UIMessage,
   type RemoveUIMessage,
 } from "@langchain/langgraph-sdk/react-ui";
@@ -24,27 +22,21 @@ import { Switch } from "@/components/ui/switch";
 import { ArrowRight } from "lucide-react";
 import { PasswordInput } from "@/components/ui/password-input";
 import { getApiKey, setApiKey as storeApiKey } from "@/lib/api-key";
+import {
+  applyPublicInput,
+  applyPublicUIEvent,
+  applyPublicUpdate,
+  publicHistoryValues,
+  type PublicStreamValues,
+  type ProgressState,
+  type Suggestion,
+} from "@/lib/public-stream";
 import { resolveApiUrl } from "@/lib/resolve-api-url";
 import { useThreads } from "./Thread";
 import { toast } from "sonner";
 
-export type ProgressState = {
-  stage: string;
-  state: "running" | "waiting" | "limited" | "done";
-  text: string;
-  agent?: string;
-  tool_calls?: number;
-  tool_limit?: number;
-};
-
-export type Suggestion = { label: string; value: string };
-
-export type StateType = {
-  messages: Message[];
-  ui?: UIMessage[];
-  progress?: ProgressState;
-  suggestions?: Suggestion[];
-};
+export type { ProgressState, Suggestion } from "@/lib/public-stream";
+export type StateType = PublicStreamValues;
 
 const useTypedStream = useStream<
   StateType,
@@ -60,8 +52,13 @@ const useTypedStream = useStream<
   }
 >;
 
-type StreamContextType = ReturnType<typeof useTypedStream> & {
+type StreamContextType = Omit<
+  ReturnType<typeof useTypedStream>,
+  "values" | "messages"
+> & {
   apiUrl: string;
+  values: StateType;
+  messages: Message[];
 };
 const StreamContext = createContext<StreamContextType | undefined>(undefined);
 
@@ -105,6 +102,7 @@ const StreamSession = ({
 }) => {
   const [threadId, setThreadId] = useQueryState("threadId");
   const { getThreads, setThreads } = useThreads();
+  const [publicValues, setPublicValues] = useState<StateType>({ messages: [] });
   const streamValue = useTypedStream({
     apiUrl,
     apiKey: apiKey ?? undefined,
@@ -116,13 +114,11 @@ const StreamSession = ({
     }),
     threadId: threadId ?? null,
     fetchStateHistory: true,
-    onCustomEvent: (event, options) => {
-      if (isUIMessage(event) || isRemoveUIMessage(event)) {
-        options.mutate((prev) => {
-          const ui = uiMessageReducer(prev.ui ?? [], event);
-          return { ...prev, ui };
-        });
-      }
+    onUpdateEvent: (update, { namespace }) => {
+      setPublicValues((current) => applyPublicUpdate(current, update, namespace));
+    },
+    onCustomEvent: (event) => {
+      setPublicValues((current) => applyPublicUIEvent(current, event));
     },
     onThreadId: (id) => {
       setThreadId(id);
@@ -131,6 +127,48 @@ const StreamSession = ({
       sleep().then(() => getThreads().then(setThreads).catch(console.error));
     },
   });
+
+  const previousThreadId = useRef(threadId);
+  useEffect(() => {
+    if (previousThreadId.current) {
+      setPublicValues({ messages: [] });
+    }
+    previousThreadId.current = threadId;
+  }, [threadId]);
+
+  useEffect(() => {
+    if (streamValue.isThreadLoading || streamValue.isLoading) return;
+    const history = publicHistoryValues(streamValue.values);
+    setPublicValues((current) =>
+      history.messages.length > 0
+        ? history
+        : {
+            ...current,
+            progress: history.progress,
+            suggestions: history.suggestions,
+            context: history.context,
+            ui: history.ui,
+          },
+    );
+  }, [threadId, streamValue.isThreadLoading]);
+
+  const wasLoading = useRef(false);
+  useEffect(() => {
+    if (wasLoading.current && !streamValue.isLoading) {
+      setPublicValues(publicHistoryValues(streamValue.values));
+    }
+    wasLoading.current = streamValue.isLoading;
+  }, [streamValue.isLoading, threadId]);
+
+  const submit = ((values, options) => {
+    if (values && typeof values === "object" && "messages" in values) {
+      const messages = (values as { messages?: unknown }).messages;
+      if (Array.isArray(messages)) {
+        setPublicValues((current) => applyPublicInput(current, messages));
+      }
+    }
+    return streamValue.submit(values, options);
+  }) as StreamContextType["submit"];
 
   useEffect(() => {
     checkGraphStatus(apiUrl, apiKey, authScheme).then((ok) => {
@@ -151,7 +189,15 @@ const StreamSession = ({
   }, [apiKey, apiUrl, authScheme]);
 
   return (
-    <StreamContext.Provider value={{ ...streamValue, apiUrl }}>
+    <StreamContext.Provider
+      value={{
+        ...streamValue,
+        submit,
+        values: publicValues,
+        messages: publicValues.messages,
+        apiUrl,
+      }}
+    >
       {children}
     </StreamContext.Provider>
   );

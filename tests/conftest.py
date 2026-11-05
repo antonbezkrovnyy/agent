@@ -243,13 +243,19 @@ def build_graph():
     return graph_mod.build_graph(InMemorySaver())
 
 
+NOTIFICATION_NAMES = ("scope", "planner", "scout", "finding", "window", "hypothesis")
+
+
 def texts(result):
-    return [m.content for m in result["messages"]]
+    return [
+        m.content for m in result["messages"]
+        if m.name not in NOTIFICATION_NAMES
+    ]
 
 
 def assert_clean(result):
     for message in result["messages"]:
         assert isinstance(message, HumanMessage) or (
-            isinstance(message, AIMessage) and message.name in ("chat", "reporter")
+            isinstance(message, AIMessage) and message.name in ("chat", "reporter", *NOTIFICATION_NAMES)
         )
         assert not getattr(message, "tool_calls", None)

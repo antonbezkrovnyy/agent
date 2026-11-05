@@ -62,6 +62,8 @@ def entry(state: State) -> dict:
 
 def pick_agent(state: State) -> str:
     intent = state.get("intent") or {}
+    if intent.get("remember_fact"):
+        return "reporting"
     if intent.get("needs_new_data"):
         return "deep"
     if intent.get("edit_existing_report"):

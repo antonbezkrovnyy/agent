@@ -14,7 +14,7 @@ import json
 from typing import Any
 
 from langchain.agents.middleware import wrap_tool_call
-from langchain_core.messages import ToolMessage
+from langchain_core.messages import AIMessage, ToolMessage
 from langchain_core.tools import tool
 from langgraph.prebuilt import ToolRuntime
 from langgraph.types import Command
@@ -264,13 +264,23 @@ def update_window(
         "reason": reason,
     }
     progress = simple_progress("investigator", f"Окно: {reason}" if action != "preserve" else "Продолжаю анализ")
+    notification = AIMessage(
+        content=(
+            f"Окно: {current['time_from']} — {current['time_to']} → "
+            f"{active['time_from']} — {active['time_to']}. Причина: {reason}"
+        ),
+        name="window",
+    )
     return Command(update={
         "context": updated,
-        "messages": [ToolMessage(
-            content=json_dumps(payload, ensure_ascii=False),
-            tool_call_id=call_id,
-            name="update_window",
-        )],
+        "messages": [
+            ToolMessage(
+                content=json_dumps(payload, ensure_ascii=False),
+                tool_call_id=call_id,
+                name="update_window",
+            ),
+            notification,
+        ],
         "progress": progress,
     })
 
@@ -307,13 +317,24 @@ def log_finding(
         evidence_ids=evidence_ids,
         next_action=next_action,
     ).model_dump()
+    notification = AIMessage(
+        content=(
+            f"Находка: {claim}\n"
+            f"Evidence: {', '.join(evidence_ids) or 'нет'}.\n"
+            f"Следующий шаг: {next_action or 'уточнение не требуется'}"
+        ),
+        name="finding",
+    )
     return Command(update={
         "findings": [note],
-        "messages": [ToolMessage(
-            content=json_dumps(note, ensure_ascii=False),
-            tool_call_id=runtime.tool_call_id if runtime else "",
-            name="log_finding",
-        )],
+        "messages": [
+            ToolMessage(
+                content=json_dumps(note, ensure_ascii=False),
+                tool_call_id=runtime.tool_call_id if runtime else "",
+                name="log_finding",
+            ),
+            notification,
+        ],
     })
 
 
@@ -365,13 +386,24 @@ def update_hypothesis(
         updated_at=datetime.datetime.now(datetime.UTC).isoformat(timespec="seconds"),
         history=[*(previous.history if previous else []), event],
     )
+    notification = AIMessage(
+        content=(
+            f"Гипотеза: {text}\n"
+            f"Статус: {status}. Причина: {reason or 'не указана'}.\n"
+            f"Evidence: {', '.join(evidence_ids) or 'не требуются для open'}"
+        ),
+        name="hypothesis",
+    )
     return Command(update={
         "hypotheses": [record.model_dump()],
-        "messages": [ToolMessage(
-            content=json_dumps({"ok": True, "hypothesis": record.model_dump()}, ensure_ascii=False),
-            tool_call_id=call_id,
-            name="update_hypothesis",
-        )],
+        "messages": [
+            ToolMessage(
+                content=json_dumps({"ok": True, "hypothesis": record.model_dump()}, ensure_ascii=False),
+                tool_call_id=call_id,
+                name="update_hypothesis",
+            ),
+            notification,
+        ],
     })
 
 
@@ -564,8 +596,25 @@ def search_similar_cases(query: str, limit: int = 3, runtime: ToolRuntime = None
 
 
 # ── Тулзы на агента ──────────────────────────────────────────────
-# Скаут — MCP + журнал: увиденную улику подхватит следующая сторона
-scout_tools = list(mcp_tools or []) + [log_finding, inspect_memory, search_context_memory, search_similar_cases]
+SCOUT_MCP_TOOL_NAMES = {
+    "server_time",
+    "count_events",
+    "timeline",
+    "top_values",
+    "top_values_batch",
+    "field_fill_rates",
+    "duplicates",
+    "field_lookup",
+    "enum_lookup",
+    "search_events",
+    "get_event",
+}
+# Скаут — статистическая разведка; события только для точечных примеров.
+scout_tools = [item for item in mcp_tools if item.name in SCOUT_MCP_TOOL_NAMES] + [
+    log_finding,
+    search_context_memory,
+    search_similar_cases,
+]
 # Инвестигейтор — MCP + журнал расследования
 investigator_tools = list(mcp_tools or []) + [
     log_finding,

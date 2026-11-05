@@ -1,4 +1,4 @@
-from conftest import FakeAgent, FakeStructured, ai, build_graph, intent, invoke, tc, texts
+from conftest import FakeAgent, FakeStructured, ai, build_graph, intent, invoke, tc
 
 
 def test_tool_limit_moves_workflow_forward(patch_llm):
@@ -14,8 +14,14 @@ def test_tool_limit_moves_workflow_forward(patch_llm):
 
     result = invoke(build_graph(), "проверь события")
 
-    assert len(result["evidence"]) <= 10
-    assert texts(result) == ["проверь события", "Ответ готов"]
+    assert len(result["evidence"]) == 10
+    scout_metrics = next(item for item in result["run_metrics"] if item["agent"] == "scout")
+    assert scout_metrics["segments"] == 1
+    public_answers = [
+        message.content for message in result["messages"]
+        if message.name in (None, "chat", "reporter")
+    ]
+    assert public_answers == ["проверь события", "Ответ готов"]
     assert result["report_result"]["answer"] == "Ответ готов"
 
 

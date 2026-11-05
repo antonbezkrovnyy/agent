@@ -79,6 +79,22 @@ def test_discovery_caps_work_and_exposes_optional_next_steps(patch_llm):
     assert all(item["estimated_cost"] == "low" for item in result["work_items"])
     assert result["suggestions"][0]["value"].endswith("Разобрать конкретный host")
     assert "all-events" not in {item["id"] for item in result["work_items"]}
+    notifications = {
+        message.name: message
+        for message in result["messages"]
+        if message.name in ("scope", "planner")
+    }
+    assert set(notifications) == {"scope", "planner"}
+    assert "обзор" in notifications["scope"].content
+    assert "Собрать карту проблемы" in notifications["scope"].content
+    assert "Проверить timeline" in notifications["planner"].content
+    assert "Проверить top-values" in notifications["planner"].content
+    assert "all-events" not in notifications["planner"].content
+    assert not notifications["scope"].tool_calls
+    assert not notifications["planner"].tool_calls
+    agent_inputs = [message.content for convo in agent.convos for message in convo]
+    assert notifications["scope"].content not in agent_inputs
+    assert notifications["planner"].content not in agent_inputs
 
 
 def test_new_anomaly_without_valid_cause_does_not_replan(patch_llm):

@@ -48,7 +48,11 @@
 ## Инварианты
 
 - В публичном `messages` нет tool-сообщений и ответов с `tool_calls`; приватные
-  циклы остаются в `scout_msgs`, `inv_msgs`, `rep_msgs`.
+  циклы остаются в `scout_msgs`, `inv_msgs`, `rep_msgs`. Допускаются только сообщения
+  пользователя, финальные ответы и детерминированные уведомления `scope`/`planner`/
+  `scout`/`finding`/`window`/`hypothesis`.
+  Agent Chat UI использует `updates` и единый public reducer: merge по message ID,
+  human только от root, разрешённые AI-роли; вложенные `values` не заменяют чат.
 - Каждый MCP-результат нормализуется через `EvidenceRecord` и сохраняется с
   фактическими аргументами и окном; findings используют `FindingRecord`. IQL приходит
   из MCP и должен совпадать с выполненным запросом, агент не генерирует его повторно.
@@ -80,6 +84,8 @@
   для выбора режима/skill запрещены, fallback — консервативный state.
   `needs_new_data/export` имеют приоритет над `inspect_memory`; смена окна в
   continuation требует новых данных. Обзор памяти — только самостоятельный simple-запрос.
+  Явная команда запомнить факт — `remember_fact` → Reporter → `memory_save`, а не
+  `inspect_memory`; пользовательский факт сохраняется без Evidence даже на новом треде.
 - Windowed tools определяются по JSON Schema (`time_from/time_to`), а не по
   hardcoded списку имён.
 - Continuation сохраняет `context.id`, base/focus/history окон, `depth_history`,
@@ -122,8 +128,9 @@
 `ainvoke`. Технические таймауты: агент 600 с, export 120 с.
 
 При изменении лимитов обновлять тест `tests/test_tool_limit.py`, `README.md` и
-`docs/DEV.md`. Не описывать tool limit как общий лимит чата: это неверно. После лимита
-роль автоматически продолжает работу со сброшенным `run_tool_call_count`; fallback без
+`docs/DEV.md`. Не описывать tool limit как общий лимит чата: это неверно. У Scout 10
+выполненных вызовов на запуск без continuation. Investigator и Reporter после лимита
+автоматически продолжают работу со сброшенным `run_tool_call_count`; fallback без
 инструментов — только после `AGENT_MAX_CONTINUATIONS`. Сырой текст middleware не
 является пользовательским ответом. Несколько Evidence читать через batch-инструмент.
 

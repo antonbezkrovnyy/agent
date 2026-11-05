@@ -1,4 +1,48 @@
+import pytest
+
 from conftest import FakeAgent, FakeStructured, ai, build_graph, intent, invoke, tc
+from tools import SCOUT_MCP_TOOL_NAMES, scout_tools
+
+
+@pytest.mark.parametrize("query", [
+    "Сравни количество и распределение событий за вчера и сегодня",
+    "Поступают ли данные от источника saturn-1 за последний час?",
+    "Какова доля deny и средняя интенсивность событий за сутки?",
+])
+def test_statistical_requests_route_to_scout(patch_llm, query):
+    agent = FakeAgent({
+        "Ты — скаут": [
+            ai(calls=[tc("count_events", {})]),
+            ai(calls=[tc("ScoutResult", {
+                "note": "Статистика готова",
+                "signals": [],
+                "evidence_ids": [],
+                "escalation": {"needed": False, "reason": "", "suggested_skill": None},
+            })]),
+        ],
+        "Ты — репортёр": [ai("Готово")],
+    })
+    patch_llm(agent, FakeStructured(intent()))
+
+    result = invoke(build_graph(), query)
+
+    assert result["work_mode"] == "quick"
+    assert result["scout_result"]["note"] == "Статистика готова"
+    assert result["inv_msgs"] == []
+
+
+def test_scout_tools_exclude_full_export_and_memory_overview():
+    names = {item.name for item in scout_tools}
+
+    assert "count_events" in names
+    assert "search_events" in names
+    assert "extract_data" not in names
+    assert "inspect_memory" not in names
+    assert names <= SCOUT_MCP_TOOL_NAMES | {
+        "log_finding",
+        "search_context_memory",
+        "search_similar_cases",
+    }
 
 
 def test_quick_goes_directly_to_reporter(patch_llm):
@@ -22,6 +66,10 @@ def test_quick_goes_directly_to_reporter(patch_llm):
     assert result.get("inv_summary", "") == ""
     assert result["scout_result"]["escalation"]["needed"] is False
     assert result["report_result"]["answer"] == "За час 17 событий"
+    scout_messages = [message for message in result["messages"] if message.name == "scout"]
+    assert len(scout_messages) == 1
+    assert "17 событий" in scout_messages[0].content
+    assert not scout_messages[0].tool_calls
 
 
 def test_deep_skips_scout(patch_llm):
@@ -78,6 +126,10 @@ def test_update_window_controls_following_queries(patch_llm):
     assert result["context"]["window_history"][-1]["action"] == "replace"
     assert count["arguments"]["time_from"] == "2026-01-01T00:00:00+00:00"
     assert count["arguments"]["time_to"] == "2026-01-01T02:00:00+00:00"
+    window_messages = [message for message in result["messages"] if message.name == "window"]
+    assert len(window_messages) == 1
+    assert "Проверяю первое появление" in window_messages[0].content
+    assert not window_messages[0].tool_calls
 
 
 def test_explicit_window_is_not_overwritten(patch_llm):

@@ -1,6 +1,6 @@
 """Structured InvestigationScope: границы текущего этапа до планирования."""
 
-from langchain_core.messages import HumanMessage, SystemMessage
+from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 
 import llm as llm_mod
 from execution_audit import audit_messages
@@ -17,8 +17,8 @@ settings = Settings()
 
 def _current_task(state: State) -> str:
     messages = [
-        item.content for item in state.get("messages") or []
-        if getattr(item, "type", None) == "human" and isinstance(item.content, str)
+        getattr(item, "text", item.content) for item in state.get("messages") or []
+        if getattr(item, "type", None) == "human" and getattr(item, "text", item.content)
     ]
     return messages[-1] if messages else "Текущее расследование"
 
@@ -81,7 +81,15 @@ def node_scope(state: State) -> dict:
         scope = _fallback_scope(state)
     scope = _normalized_scope(scope)
     labels = {"discovery": "обзор", "targeted": "целевое расследование", "alert": "расследование алерта"}
+    notification = AIMessage(
+        content=(
+            f"Готовлю {labels[scope.mode]}: {scope.objective}. "
+            f"В текущем этапе — до {scope.max_items} проверок."
+        ),
+        name="scope",
+    )
     return {
         "investigation_scope": scope.model_dump(),
         "progress": simple_progress("scope", f"Охват: {labels[scope.mode]}, до {scope.max_items} проверок"),
+        "messages": [notification],
     }

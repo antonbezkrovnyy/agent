@@ -182,8 +182,8 @@ def node_memory_context(state: State, config: RunnableConfig) -> dict:
 
 def _current_task(state: State) -> str:
     messages = [
-        item.content for item in state.get("messages") or []
-        if isinstance(item, HumanMessage) and isinstance(item.content, str)
+        item.text for item in state.get("messages") or []
+        if isinstance(item, HumanMessage) and item.text
     ]
     return messages[-1] if messages else ""
 
@@ -403,8 +403,8 @@ def _consolidation_input(state: State, existing_facts: list[dict]) -> dict:
         item for item in state.get("evidence") or [] if item.get("id") in evidence_ids
     ]
     user_messages = [
-        item.content for item in state.get("messages") or []
-        if isinstance(item, HumanMessage) and isinstance(item.content, str)
+        item.text for item in state.get("messages") or []
+        if isinstance(item, HumanMessage) and item.text
     ]
     return {
         "case_id": (state.get("context") or {}).get("id"),
@@ -577,7 +577,9 @@ def node_memory_save(state: State, config: RunnableConfig) -> dict:
     empty = {"memory_operations": []}
     if not (state.get("context") or {}).get("id"):
         return empty
-    if not (state.get("evidence") or state.get("findings") or state.get("last_report")):
+    if not (state.get("intent") or {}).get("remember_fact") and not (
+        state.get("evidence") or state.get("findings") or state.get("last_report")
+    ):
         return empty
     if not getattr(memory, "enabled", True):
         return {**empty, "memory_saved": "", "memory_facts_saved": 0}

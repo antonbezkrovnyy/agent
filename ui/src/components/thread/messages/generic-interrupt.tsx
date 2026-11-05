@@ -51,7 +51,7 @@ function ChoiceInterruptView({ interrupt }: { interrupt: Record<string, any> }) 
       {},
       {
         command: { resume: value },
-        streamMode: ["values"],
+        streamMode: ["updates"],
         streamSubgraphs: true,
         streamResumable: true,
       },

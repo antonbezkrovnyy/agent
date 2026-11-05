@@ -57,7 +57,10 @@ class IntentDecision(BaseModel):
     )
     work_mode: Literal["quick", "deep"] = Field(
         default="quick",
-        description="quick — ограниченный ответ; deep — причины, первое появление, pivot или смена окна",
+        description=(
+            "quick — статистика, поступление данных, сравнение двух окон или одна проверка; "
+            "deep — причины, первое появление, гипотезы, pivot или расширение расследования"
+        ),
     )
     rationale: str = Field(description="Обоснование одним предложением")
     needs_new_data: bool = Field(
@@ -71,6 +74,10 @@ class IntentDecision(BaseModel):
     export_data: bool = Field(
         default=False,
         description="true только для выгрузки сырых событий таблицей/файлом; никогда для отчёта расследования",
+    )
+    remember_fact: bool = Field(
+        default=False,
+        description="true для явной команды запомнить или сохранить сообщённый пользователем факт; не для обзора памяти",
     )
     inspect_memory: bool = Field(
         default=False,

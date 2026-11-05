@@ -137,8 +137,8 @@ def _result_values(state: dict, key: str) -> list[str]:
 def investigation_chain(state: dict) -> dict:
     context = state.get("context") or {}
     human_messages = [
-        item.content for item in state.get("messages") or []
-        if getattr(item, "type", None) == "human" and isinstance(item.content, str)
+        getattr(item, "text", item.content) for item in state.get("messages") or []
+        if getattr(item, "type", None) == "human" and getattr(item, "text", item.content)
     ]
     return {
         "investigation_id": context.get("id"),

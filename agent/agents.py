@@ -182,6 +182,13 @@ def _agent_final(
     return update
 
 
+def _public_notifications(messages: list[BaseMessage]) -> list[AIMessage]:
+    return [
+        item for item in messages
+        if isinstance(item, AIMessage) and item.name in ("finding", "window", "hypothesis")
+    ]
+
+
 def _agent_convo_messages(state: State) -> list[BaseMessage]:
     """Пользователь и финальные ответы агентов, без служебных сообщений."""
     return filter_messages(
@@ -339,7 +346,7 @@ def _timeout_result(schema, messages: list[BaseMessage]) -> dict:
 
 
 async def _run_agent(agent: str, state: State, work_key: str) -> tuple[dict, list[BaseMessage], dict]:
-    """Выполнить роль с автоматическими продолжениями после run_limit."""
+    """Выполнить роль с учётом tool limit и допустимых для неё продолжений."""
     from metrics import summarize_agent_run
 
     started_at = datetime.now(UTC)
@@ -359,7 +366,8 @@ async def _run_agent(agent: str, state: State, work_key: str) -> tuple[dict, lis
     schema = _agent_schema(agent)
     total_calls = 0
     segments_used = 0
-    for segment in range(settings.agent_max_continuations + 1):
+    max_continuations = 0 if agent == "scout" else settings.agent_max_continuations
+    for segment in range(max_continuations + 1):
         segments_used = segment + 1
         limited = False
         for attempt in range(2):
@@ -372,7 +380,7 @@ async def _run_agent(agent: str, state: State, work_key: str) -> tuple[dict, lis
                 result = _timeout_result(schema, agent_input["messages"])
             total_calls += (result.get("run_tool_call_count") or {}).get("__all__", 0)
             limited = result.get("structured_response") is None and _limit_reached(result, agent)
-            if limited and segment < settings.agent_max_continuations:
+            if limited and segment < max_continuations:
                 break
             if limited:
                 result["structured_response"] = await _finalize_limited(agent, result, schema)
@@ -383,7 +391,7 @@ async def _run_agent(agent: str, state: State, work_key: str) -> tuple[dict, lis
                 new_messages = result["messages"][len(agent_input["messages"]):]
                 if attempt == 1 or new_messages:
                     raise
-        if not limited or segment == settings.agent_max_continuations:
+        if not limited or segment == max_continuations:
             break
         agent_input = {
             **result,
@@ -399,7 +407,7 @@ async def _run_agent(agent: str, state: State, work_key: str) -> tuple[dict, lis
             "progress": agent_progress(
                 {**result, "tool_usage": {}},
                 agent,
-                f"Продолжаю работу, шаг {segment + 2}/{settings.agent_max_continuations + 1}",
+                f"Продолжаю работу, шаг {segment + 2}/{max_continuations + 1}",
                 agent,
             ),
         }
@@ -468,6 +476,16 @@ async def node_scout(state: State) -> dict:
         **skill.model_dump(),
         "selected_at": datetime.now(UTC).isoformat(timespec="milliseconds"),
     } if skill else {}
+    summary = structured.get("answer_candidate") or structured["note"]
+    coverage = structured.get("coverage") or {}
+    if coverage.get("status") and coverage["status"] != "complete":
+        summary += f"\n\nПолнота данных: {coverage['status']}. {coverage.get('details') or ''}".rstrip()
+    if needs_deep:
+        summary += f"\n\nПерехожу к глубокому расследованию: {escalation.get('reason') or 'нужны дополнительные проверки'}"
+    update["messages"] = [
+        *_public_notifications(new_messages),
+        AIMessage(content=summary, name="scout"),
+    ]
     progress_state = {**state, "tool_usage": update["tool_usage"]}
     if needs_deep:
         text = {
@@ -506,6 +524,7 @@ async def node_investigator(state: State) -> dict:
         structured["status"] = "partial"
     final = AIMessage(content=structured["summary"], name="investigator")
     update[INV_MSGS] = [*new_messages[:-1], final]
+    update["messages"] = _public_notifications(new_messages)
     update.update(_skill_run_update(state, result, structured))
     active_item = state.get("active_work_item") or {}
     if active_item.get("id"):

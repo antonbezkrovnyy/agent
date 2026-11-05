@@ -42,7 +42,7 @@ export function SuggestionButtons({ suggestions }: { suggestions?: Suggestion[] 
         ],
       },
       {
-        streamMode: ["values"],
+        streamMode: ["updates"],
         streamSubgraphs: true,
         streamResumable: true,
       },

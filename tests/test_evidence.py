@@ -31,6 +31,10 @@ def test_evidence_is_structured_and_window_is_frozen(patch_llm):
 
     assert len(result["evidence"]) == 2
     assert result["findings"][0]["claim"] == "17 событий"
+    finding_messages = [message for message in result["messages"] if message.name == "finding"]
+    assert len(finding_messages) == 1
+    assert "17 событий" in finding_messages[0].content
+    assert not finding_messages[0].tool_calls
     delta = datetime.fromisoformat(context["time_to"]) - datetime.fromisoformat(context["time_from"])
     assert delta.total_seconds() == 3600
     for evidence in result["evidence"]:

@@ -1,6 +1,6 @@
 """Планирование и выполнение Deep Investigation по work items."""
 
-from langchain_core.messages import HumanMessage, SystemMessage
+from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 
 import llm as llm_mod
 from execution_audit import audit_messages
@@ -17,8 +17,8 @@ settings = Settings()
 
 def _current_task(state: State) -> str:
     messages = [
-        item.content for item in state.get("messages") or []
-        if getattr(item, "type", None) == "human" and isinstance(item.content, str)
+        getattr(item, "text", item.content) for item in state.get("messages") or []
+        if getattr(item, "type", None) == "human" and getattr(item, "text", item.content)
     ]
     return messages[-1] if messages else "Текущее расследование"
 
@@ -121,6 +121,10 @@ def node_planner(state: State) -> dict:
         except Exception:
             plan = _fallback_plan(state)
     plan = _normalized_plan(plan, state)
+    goal = plan.goal or (state.get("investigation_scope") or {}).get("objective") or "Текущее расследование"
+    notification_lines = [f"План расследования (версия {plan.version}): {goal}"]
+    notification_lines.extend(f"{index}. {item.goal}" for index, item in enumerate(plan.items, start=1))
+    notification = AIMessage(content="\n".join(notification_lines), name="planner")
     return {
         "investigation_plan": plan.model_dump(),
         "work_items": plan.model_dump()["items"],
@@ -130,6 +134,7 @@ def node_planner(state: State) -> dict:
             "planner",
             f"План: {len(plan.items)} {'часть' if len(plan.items) == 1 else 'частей'} расследования",
         ),
+        "messages": [notification],
     }
 
 
