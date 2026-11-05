@@ -7,6 +7,8 @@ from langchain_core.messages import AIMessage, BaseMessage, SystemMessage
 from langgraph.types import Overwrite
 
 import llm as llm_mod
+from execution_audit import audit_messages
+from control_overrides import with_prompt_override
 from agents import _agent_convo_messages
 from observability import trace_config
 from progress import agent_progress, simple_progress
@@ -24,9 +26,11 @@ def _intent_messages(state: State) -> list[BaseMessage]:
 
 def _intent_structured(state: State) -> dict | None:
     """Structured output с настроенным fallback на JSON mode."""
+    messages = with_prompt_override(state, "intent", _intent_messages(state))
+    audit_messages("intent", state, messages)
     try:
         decision = llm_mod.intent_llm.invoke(
-            _intent_messages(state),
+            messages,
             config=trace_config("intent", state),
         )
     except Exception:
@@ -49,7 +53,7 @@ def _intent_structured(state: State) -> dict | None:
         "related_investigation_id": getattr(decision, "related_investigation_id", None),
         "confidence": getattr(decision, "confidence", 0.0),
         "escalation_reason": getattr(decision, "escalation_reason", ""),
-        "window": window.model_dump() if window else {"last_minutes": 60},
+        "window": window.model_dump(mode="json") if window else {"last_minutes": 60},
     }
 
 

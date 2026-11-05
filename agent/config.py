@@ -19,7 +19,7 @@ class Settings(BaseSettings):
     llm_base_url: str
     llm_token: str
 
-    summarization_trigger_tokens: int = 6000
+    summarization_trigger_tokens: int = 230000
     summarization_keep_messages: int = 20
 
     # Logicore MCP (streamable-http в отдельном контейнере logicore-mcp, ADR-0010)

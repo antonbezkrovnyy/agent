@@ -11,8 +11,7 @@ from mcp.types import ToolAnnotations
 
 from logicore_mcp.domain.columns import RESERVED_COLUMNS, resolve_columns
 from logicore_mcp.domain.errors import FilterError, LogicoreError, WindowError
-from logicore_mcp.domain.filters import FieldSchema, message_contains_substrings, validate_filter
-from logicore_mcp.domain.iql import translate_filter
+from logicore_mcp.domain.filters import FieldSchema
 from logicore_mcp.domain.projection import (
     build_activity,
     build_event_card,
@@ -101,12 +100,13 @@ def _window_or_raise(
         raise _window_error_with_example(exc, tool=tool, echo=echo) from exc
 
 
-def _iql_or_raise(filter: Mapping[str, Any] | None, schema: Mapping[str, FieldSchema]) -> str | None:
-    """Валидация + трансляция JsonLogic → IQL; без фильтра — None (TD-0003)."""
+def _iql_or_raise(filter: str | None) -> str | None:
+    """Готовый IQL передаётся в MARS без промежуточной трансляции."""
     if filter is None:
         return None
-    validate_filter(filter, schema)
-    return translate_filter(filter, schema)
+    if not filter.strip():
+        raise FilterError("iql должен быть непустой строкой", hint='Пример: "action = \'login\'".')
+    return filter.strip()
 
 
 def _unknown_field_error(name: str, schema: Mapping[str, FieldSchema], prefix: str) -> FilterError:
@@ -120,6 +120,27 @@ def _unknown_field_error(name: str, schema: Mapping[str, FieldSchema], prefix: s
     return FilterError(f"{prefix}{name!r}", hint=hint)
 
 
+def _iql_string(value: str) -> str:
+    escaped = value.replace("\\", "\\\\").replace("'", "\\'")
+    return f"'{escaped}'"
+
+
+def _activity_iql(iql: str | None, groups: Sequence[Mapping[str, Any]] | None) -> str | None:
+    conditions: list[str] = []
+    for group in groups or ():
+        column = str(group["column"])
+        value = group.get("value")
+        if value is None:
+            conditions.append(f"{column} IS NULL")
+        elif isinstance(value, list):
+            conditions.append(f"{column} = [{', '.join(_iql_string(str(item)) for item in value)}]")
+        else:
+            conditions.append(f"{column} = {_iql_string(str(value))}")
+    if iql:
+        conditions.insert(0, f"({iql})")
+    return " AND ".join(conditions) or None
+
+
 async def _search_activity(
     client: EarthClient,
     *,
@@ -128,13 +149,14 @@ async def _search_activity(
     end: datetime,
     tenant_ids: list[int],
     has_rows: bool,
+    groups: Sequence[Mapping[str, Any]] | None = None,
 ) -> dict[str, Any] | None:
-    """Activity-блок поиска: пустые строки → пустая activity; сбой — опустить (PLAN-0007 п.3, TD-0008)."""
+    """Activity с теми же условиями, что и основная выдача поиска."""
     if not has_rows:
         return {"distinct": 0, "complete": True, "moments": []}
     groups_request = build_groups_request(
         columns=["timestamp"],
-        filters=iql,
+        filters=_activity_iql(iql, groups),
         time_from=start,
         time_to=end,
         tenant_ids=tenant_ids,
@@ -147,18 +169,44 @@ async def _search_activity(
         return None
 
 
+def _validate_query_options(
+    *,
+    groups: Sequence[Mapping[str, Any]] | None,
+    order_by: Sequence[Mapping[str, Any]] | None,
+    query_limit: int | None,
+    schema: Mapping[str, FieldSchema],
+) -> None:
+    if query_limit is not None and query_limit < 1:
+        raise FilterError("query_limit должен быть >= 1", hint="Это общий потолок строк, не размер страницы.")
+    for group in groups or ():
+        column = str(group.get("column") or "")
+        if column not in schema and column not in RESERVED_COLUMNS:
+            raise _unknown_field_error(column, schema, prefix="Неизвестное поле groups: ")
+    if order_by is not None and not order_by:
+        raise FilterError("order_by не может быть пустым", hint="Уберите параметр или укажите хотя бы одну колонку.")
+    for item in order_by or ():
+        column = str(item.get("column") or "")
+        if column not in schema and column not in RESERVED_COLUMNS:
+            raise _unknown_field_error(column, schema, prefix="Неизвестное поле order_by: ")
+        if item.get("action") not in ("ASC", "DESC"):
+            raise FilterError("order_by.action должен быть ASC или DESC", hint='Пример: {"column":"timestamp","action":"DESC"}.')
+
+
 def _prepare_search_args(
     *,
     page: int,
     limit: int,
     time_from: str | None,
     time_to: str | None,
-    filter: Mapping[str, Any] | None,
+    filter: str | None,
     columns: Sequence[str] | None,
     default_columns: Sequence[str],
     schema: Mapping[str, FieldSchema],
-) -> tuple[datetime, datetime, str, tuple[str, ...], str | None]:
-    """Валидация аргументов поиска до Earth: пагинация → окно → проекция → фильтр (TD-0001/0003/0021/0023)."""
+    groups: Sequence[Mapping[str, Any]] | None = None,
+    order_by: Sequence[Mapping[str, Any]] | None = None,
+    query_limit: int | None = None,
+) -> tuple[datetime, datetime, str, tuple[str, ...], str | None, Sequence[Mapping[str, Any]] | None, Sequence[Mapping[str, Any]] | None, int | None]:
+    """Проверяет окно, проекцию и нативные параметры поиска MARS."""
     if page < 1:
         raise FilterError("page должен быть >= 1", hint="Нумерация страниц с 1.")
     if limit < 1 or limit > MAX_LIMIT:
@@ -171,14 +219,18 @@ def _prepare_search_args(
         time_from,
         time_to,
         echo={
-            "filter": filter,
+            "iql": filter,
             "columns": list(columns) if columns is not None else None,
+            "groups": list(groups) if groups is not None else None,
+            "order_by": list(order_by) if order_by is not None else None,
+            "query_limit": query_limit,
             "page": page if page > 1 else None,
             "limit": limit if limit != DEFAULT_LIMIT else None,
         },
     )
     columns_tuple = resolve_columns(columns, default_columns, schema)
-    return start, end, wsource, columns_tuple, _iql_or_raise(filter, schema)
+    _validate_query_options(groups=groups, order_by=order_by, query_limit=query_limit, schema=schema)
+    return start, end, wsource, columns_tuple, _iql_or_raise(filter), groups, order_by, query_limit
 
 
 async def search_events_flow(
@@ -186,7 +238,7 @@ async def search_events_flow(
     *,
     time_from: str | None,
     time_to: str | None,
-    filter: Mapping[str, Any] | None,
+    filter: str | None,
     page: int,
     limit: int,
     schema: Mapping[str, FieldSchema],
@@ -194,10 +246,13 @@ async def search_events_flow(
     default_columns: Sequence[str] = (),
     include_activity: bool = False,
     order: str = "desc",
+    groups: Sequence[Mapping[str, Any]] | None = None,
+    order_by: Sequence[Mapping[str, Any]] | None = None,
+    query_limit: int | None = None,
 ) -> dict[str, Any]:
-    """Пайплайн поиска: окно → проекция → фильтр → Earth → конверт (TD-0001/0004/0005/0007/0025)."""
+    """Пайплайн поиска с нативными groups/order/limit MARS."""
     try:
-        start, end, wsource, columns_tuple, iql = _prepare_search_args(
+        start, end, wsource, columns_tuple, iql, groups, order_by, query_limit = _prepare_search_args(
             page=page,
             limit=limit,
             time_from=time_from,
@@ -206,6 +261,9 @@ async def search_events_flow(
             columns=columns,
             default_columns=default_columns,
             schema=schema,
+            groups=groups,
+            order_by=order_by,
+            query_limit=query_limit,
         )
     except LogicoreError as exc:
         return _error(exc)
@@ -221,6 +279,9 @@ async def search_events_flow(
         page=page,
         per_page=limit,
         order=order,
+        groups=list(groups) if groups is not None else None,
+        order_by=list(order_by) if order_by is not None else None,
+        query_limit=query_limit,
     )
     try:
         response, coverage = unwrap(await client.search_events(request))
@@ -231,26 +292,42 @@ async def search_events_flow(
     activity: dict[str, Any] | None = None
     if include_activity:
         activity = await _search_activity(
-            client, iql=iql, start=start, end=end, tenant_ids=tenant_ids, has_rows=bool(response.data)
+            client,
+            iql=iql,
+            start=start,
+            end=end,
+            tenant_ids=tenant_ids,
+            has_rows=bool(response.data),
+            groups=groups,
         )
 
     envelope = build_search_response(
-        rows=truncate_message_rows(
-            response.data,
-            match_substrings=message_contains_substrings(filter) if filter is not None else (),
-        ),
+        rows=truncate_message_rows(response.data),
         meta_total=response.meta.total,
         meta_schema=response.meta.schema_,
         requested_columns=columns_tuple,
         window=_window_payload(start, end, wsource),
         filter_applied=filter,
         activity=activity,
-        order=order,
+        order=order_by or order,
         page=page,
         per_page=limit,
     )
+    if groups is not None:
+        envelope["groups"] = list(groups)
+    if query_limit is not None:
+        envelope["query_limit"] = query_limit
+        if (page - 1) * limit + len(response.data) >= query_limit:
+            envelope["complete"] = False
+            envelope["truncated"] = True
+            envelope["has_more"] = False
+            envelope["next_page"] = None
+            envelope.pop("total", None)
+            envelope["total_note"] = "Общее число скрыто query_limit; для полного окна уберите его."
+            envelope["hint"] = f"Достигнут query_limit={query_limit}: результат ограничен запросом."
     if coverage is not None:
         envelope["coverage"] = coverage
+        envelope["complete"] = False
     envelope["iql"] = iql
     return envelope
 
@@ -259,7 +336,7 @@ def _validate_top_field(field: str, schema: Mapping[str, FieldSchema]) -> None:
     """Общая валидация поля для top_values/top_values_batch: запрещённые и неизвестные (TD-0005, TD-0008)."""
     if field in FORBIDDEN_TOP_FIELDS:
         hints = {
-            "message": "Текстовый поиск — search_events с contains по message.",
+            "message": "Текстовый поиск — search_events с IQL LIKE по message.",
             "timestamp": "Временную динамику смотрите в activity ответа search_events (include_activity: true).",
         }
         raise FilterError(f"Поле {field!r} недоступно для top_values", hint=hints[field])
@@ -272,19 +349,25 @@ async def count_events_flow(
     *,
     time_from: str | None,
     time_to: str | None,
-    filter: Mapping[str, Any] | None,
+    filter: str | None,
     schema: Mapping[str, FieldSchema],
+    groups: Sequence[Mapping[str, Any]] | None = None,
+    query_limit: int | None = None,
 ) -> dict[str, Any]:
-    """Пайплайн подсчёта: окно → фильтр → Earth /events/count → конверт с одним числом (TD-0017)."""
+    """Пайплайн подсчёта с нативными groups и общим query_limit MARS."""
     try:
         start, end, wsource = resolve_window(time_from=time_from, time_to=time_to)
     except LogicoreError as exc:
-        return _error(_window_error_with_example(exc, tool="count_events", echo={"filter": filter}))
+        return _error(
+            _window_error_with_example(
+                exc,
+                tool="count_events",
+                echo={"iql": filter, "groups": groups, "query_limit": query_limit},
+            )
+        )
     try:
-        iql: str | None = None
-        if filter is not None:
-            validate_filter(filter, schema)
-            iql = translate_filter(filter, schema)
+        iql = _iql_or_raise(filter)
+        _validate_query_options(groups=groups, order_by=None, query_limit=query_limit, schema=schema)
     except LogicoreError as exc:
         return _error(exc)
 
@@ -294,6 +377,8 @@ async def count_events_flow(
         time_from=start,
         time_to=end,
         tenant_ids=client.tenant_ids(),
+        groups=list(groups) if groups is not None else None,
+        query_limit=query_limit,
     )
     try:
         count, coverage = unwrap(await client.count_events(request))
@@ -309,8 +394,16 @@ async def count_events_flow(
         "filter_applied": filter,
         "iql": iql,
     }
+    if groups is not None:
+        envelope["groups"] = list(groups)
+    if query_limit is not None:
+        envelope["query_limit"] = query_limit
+        envelope["complete"] = count < query_limit
+        if count >= query_limit:
+            envelope["hint"] = f"count достиг query_limit={query_limit}: это не полное число событий окна."
     if coverage is not None:
         envelope["coverage"] = coverage
+        envelope["complete"] = False
     return envelope
 
 
@@ -319,14 +412,15 @@ async def timeline_flow(
     *,
     time_from: str | None,
     time_to: str | None,
-    filter: Mapping[str, Any] | None,
+    filter: str | None,
     schema: Mapping[str, FieldSchema],
+    groups: Sequence[Mapping[str, Any]] | None = None,
 ) -> dict[str, Any]:
-    """Пайплайн гистограммы: окно (выровненное до сетки бакетов) → фильтр → задача+ws-пуш → ряд (TD-0018)."""
+    """Пайплайн гистограммы с нативными groups MARS."""
     try:
         start, end, wsource = resolve_window(time_from=time_from, time_to=time_to)
     except LogicoreError as exc:
-        return _error(_window_error_with_example(exc, tool="timeline", echo={"filter": filter}))
+        return _error(_window_error_with_example(exc, tool="timeline", echo={"iql": filter, "groups": groups}))
     if end - start > TIMELINE_MAX_SPAN:
         return _error(
             FilterError(
@@ -336,10 +430,8 @@ async def timeline_flow(
         )
     start, end = align_bucket_grid(start, end)
     try:
-        iql: str | None = None
-        if filter is not None:
-            validate_filter(filter, schema)
-            iql = translate_filter(filter, schema)
+        iql = _iql_or_raise(filter)
+        _validate_query_options(groups=groups, order_by=None, query_limit=None, schema=schema)
     except LogicoreError as exc:
         return _error(exc)
 
@@ -349,6 +441,7 @@ async def timeline_flow(
         time_from=start,
         time_to=end,
         tenant_ids=client.tenant_ids(),
+        groups=list(groups) if groups is not None else None,
     )
     try:
         result, coverage = unwrap(await client.timeline(request))
@@ -390,8 +483,14 @@ async def timeline_flow(
             "total": total,
         },
     }
+    if groups is not None:
+        envelope["groups"] = list(groups)
+    if result.get("status") == "partial":
+        envelope["complete"] = False
+        envelope["hint"] = "Поток timeline закрылся без done: результат неполный; повторите вызов или сузьте окно."
     if coverage is not None:
         envelope["coverage"] = coverage
+        envelope["complete"] = False
     return envelope
 
 
@@ -401,7 +500,7 @@ async def top_values_flow(
     field: str,
     time_from: str | None,
     time_to: str | None,
-    filter: Mapping[str, Any] | None,
+    filter: str | None,
     limit: int,
     schema: Mapping[str, FieldSchema],
 ) -> dict[str, Any]:
@@ -423,14 +522,11 @@ async def top_values_flow(
             _window_error_with_example(
                 exc,
                 tool="top_values",
-                echo={"field": field, "filter": filter, "limit": limit if limit != 5 else None},
+                echo={"field": field, "iql": filter, "limit": limit if limit != 5 else None},
             )
         )
     try:
-        iql: str | None = None
-        if filter is not None:
-            validate_filter(filter, schema)
-            iql = translate_filter(filter, schema)
+        iql = _iql_or_raise(filter)
     except LogicoreError as exc:
         return _error(exc)
 
@@ -455,13 +551,14 @@ async def top_values_flow(
     response["iql"] = iql
     if coverage is not None:
         response["coverage"] = coverage
+        response["complete"] = False
     return response
 
 
 def _prepare_batch_args(
     *,
     fields: Sequence[str],
-    filter: Mapping[str, Any] | None,
+    filter: str | None,
     limit: int,
     time_from: str | None,
     time_to: str | None,
@@ -479,7 +576,7 @@ def _prepare_batch_args(
             "time_from": _example_time_from(),
         }
         if filter is not None:
-            example["filter"] = filter
+            example["iql"] = filter
         if limit != 5:
             example["limit"] = limit
         raise FilterError(
@@ -500,9 +597,9 @@ def _prepare_batch_args(
         "top_values_batch",
         time_from,
         time_to,
-        echo={"fields": list(unique), "filter": filter, "limit": limit if limit != 5 else None},
+        echo={"fields": list(unique), "iql": filter, "limit": limit if limit != 5 else None},
     )
-    return unique, start, end, wsource, _iql_or_raise(filter, schema)
+    return unique, start, end, wsource, _iql_or_raise(filter)
 
 
 def _batch_entries(unique: Mapping[str, None], results: Iterable[Any], limit: int) -> list[dict[str, Any]]:
@@ -520,6 +617,7 @@ def _batch_entries(unique: Mapping[str, None], results: Iterable[Any], limit: in
         entry = build_top_values(field=field, items=items, limit=limit)
         if coverage:
             entry["coverage"] = coverage
+            entry["complete"] = False
         entries.append(entry)
     return entries
 
@@ -530,7 +628,7 @@ async def top_values_batch_flow(
     fields: Sequence[str],
     time_from: str | None,
     time_to: str | None,
-    filter: Mapping[str, Any] | None,
+    filter: str | None,
     limit: int,
     schema: Mapping[str, FieldSchema],
 ) -> dict[str, Any]:
@@ -598,8 +696,8 @@ async def event_card_flow(client: EarthClient, *, uuid: str, timestamp: str) -> 
             "hint": (
                 "Пара uuid+timestamp не нашлась: живой uuid с чужим timestamp даёт тот же ответ, "
                 "поэтому «событие удалено» — не вывод. Возьми точную пару из строки выборки "
-                'search_events; известен только uuid — search_events с фильтром {"==": [{"var": "uuid"}, '
-                '"<uuid>"]} на широком time_from и возьми timestamp из строки.'
+                "search_events; известен только uuid — search_events с iql "
+                "\"uuid = '<uuid>'\" на широком time_from и возьми timestamp из строки."
             ),
         }
     envelope = {"ok": True, "found": True, "uuid": uuid, "timestamp": timestamp}
@@ -618,14 +716,14 @@ def _prepare_fill_rates_args(
     offset: int,
     time_from: str | None,
     time_to: str | None,
-    filter: Mapping[str, Any] | None,
+    filter: str | None,
     schema: Mapping[str, FieldSchema],
 ) -> tuple[datetime, datetime, str, str | None]:
     """Валидация аргументов карты заполненности: курсор → окно → фильтр (TD-0010, TD-0021)."""
     if offset < 0:
         raise FilterError("offset должен быть >= 0", hint="Это курсор продолжения из предыдущего ответа.")
-    start, end, wsource = _window_or_raise("field_fill_rates", time_from, time_to, echo={"filter": filter})
-    return start, end, wsource, _iql_or_raise(filter, schema)
+    start, end, wsource = _window_or_raise("field_fill_rates", time_from, time_to, echo={"iql": filter})
+    return start, end, wsource, _iql_or_raise(filter)
 
 
 async def _run_fill_rate_batches(
@@ -716,7 +814,7 @@ async def field_fill_rates_flow(
     *,
     time_from: str | None,
     time_to: str | None,
-    filter: Mapping[str, Any] | None,
+    filter: str | None,
     schema: Mapping[str, FieldSchema],
     offset: int = 0,
 ) -> dict[str, Any]:
@@ -731,6 +829,13 @@ async def field_fill_rates_flow(
         )
     except LogicoreError as exc:
         return _error(exc)
+    if offset > len(schema):
+        return _error(
+            FilterError(
+                f"offset={offset} больше числа полей схемы ({len(schema)})",
+                hint=f"Используйте offset от 0 до {len(schema)}; значение берите из предыдущего ответа.",
+            )
+        )
 
     await client.user_context()
     tenant_ids = client.tenant_ids()
@@ -830,7 +935,7 @@ async def duplicates_flow(
     *,
     time_from: str | None,
     time_to: str | None,
-    filter: Mapping[str, Any] | None,
+    filter: str | None,
     key_fields: Sequence[str] | None,
     limit: int,
     schema: Mapping[str, FieldSchema],
@@ -844,9 +949,9 @@ async def duplicates_flow(
             "duplicates",
             time_from,
             time_to,
-            echo={"key_fields": list(key), "filter": filter, "limit": limit if limit != 10 else None},
+            echo={"key_fields": list(key), "iql": filter, "limit": limit if limit != 10 else None},
         )
-        iql = _iql_or_raise(filter, schema)
+        iql = _iql_or_raise(filter)
     except LogicoreError as exc:
         return _error(exc)
 
@@ -898,6 +1003,7 @@ async def duplicates_flow(
             )
     if coverage is not None:
         envelope["coverage"] = coverage
+        envelope["complete"] = False
     return envelope
 
 

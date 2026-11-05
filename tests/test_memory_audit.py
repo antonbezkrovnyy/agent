@@ -72,7 +72,7 @@ def test_audit_covers_all_operation_outcomes(monkeypatch):
     report = memory_audit_markdown(audit, result["memory_error"])
     assert "Память расследования" in report
     assert "отклонено" in report
-    assert result["messages"][0].content == report
+    assert "messages" not in result
 
 
 def test_duplicate_insert_records_actual_update(monkeypatch):
@@ -110,7 +110,7 @@ def test_empty_and_failed_consolidation_have_explicit_audit(monkeypatch):
     )
     empty = memory_mod.node_memory_save(state_for_memory(), {})
     assert empty["memory_operations"] == []
-    assert "не предложила" in empty["messages"][0].content
+    assert "messages" not in empty
 
     monkeypatch.setattr(
         llm_mod,
@@ -121,7 +121,36 @@ def test_empty_and_failed_consolidation_have_explicit_audit(monkeypatch):
     assert failed["memory_operations"] == []
     assert failed["memory_facts_saved"] == 0
     assert "Context Memory недоступна" in failed["memory_error"]
-    assert "Аудит консолидации недоступен" in failed["messages"][0].content
+    assert "messages" not in failed
+
+
+def test_updated_artifacts_stay_on_reporter_answer(monkeypatch):
+    from langchain_core.messages import AIMessage
+
+    fake = FakeMemory()
+    monkeypatch.setattr(memory_mod, "memory", fake)
+    monkeypatch.setattr(
+        llm_mod,
+        "context_memory_llm",
+        FakeStructured(ContextMemoryConsolidation()),
+    )
+    state = {
+        **state_for_memory(),
+        "messages": [
+            HumanMessage(content="Проверь srv-auth-01"),
+            AIMessage(content="Итог расследования", id="answer-1", name="reporter"),
+        ],
+        "last_report": {"title": "Проверка", "markdown": "Итог расследования"},
+    }
+
+    result = memory_mod.node_memory_save(state, {})
+
+    assert "Память расследования" in result["last_report"]["markdown"]
+    assert len(result["artifacts"].value) == 2
+    assert len(result["messages"]) == 1
+    assert result["messages"][0].id == "answer-1"
+    assert result["messages"][0].content == "Итог расследования"
+    assert len(result["messages"][0].artifacts) == 2
 
 
 def test_manifest_contains_memory_audit():

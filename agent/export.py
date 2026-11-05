@@ -11,7 +11,7 @@ from langchain_core.messages import AIMessage
 import llm as llm_mod
 from agents import _agent_final
 from config import Settings
-from contracts import EvidenceRecord, RecommendedExportQuery
+from contracts import EvidenceRecord, RecommendedExportQuery, json_dumps
 from progress import done_progress, report_suggestions
 from reporting import build_report
 from state import State
@@ -46,14 +46,14 @@ def _export_text(result: Any) -> str:
         return content
     if isinstance(content, list) and all(isinstance(item, dict) and item.get("type") == "text" for item in content):
         return "\n".join(item.get("text", "") for item in content)
-    return json.dumps(content, ensure_ascii=False)
+    return json_dumps(content, ensure_ascii=False)
 
 
 def _markdown_cell(value: Any) -> str:
     if value is None:
         return ""
     if isinstance(value, (dict, list)):
-        value = json.dumps(value, ensure_ascii=False)
+        value = json_dumps(value, ensure_ascii=False)
     return str(value).replace("|", "\\|").replace("\r\n", "<br>").replace("\n", "<br>")
 
 

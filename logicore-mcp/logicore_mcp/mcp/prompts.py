@@ -58,12 +58,11 @@ def count(
     )
     return _msg(
         f"Посчитай события {scope} за {window}. Используй count_events — total поиска ненадёжен "
-        "(насыщается на больших окнах). Фильтр — JsonLogic по именам полей из схемы; null в == "
-        "означает IS NULL. В ответе: число, эхо применённого фильтра и окно. Если вышел ноль, "
-        "а данные ожидались — расследуй: какие значения поля реально есть (top_values), "
-        "не уходи в пустой ответ."
-        ' Пример: count_events {"time_from": "<time_from>", "filter": '
-        '{"==": [{"var": "<поле>"}, "<значение>"]}}.'
+        "(насыщается на больших окнах). Фильтр — готовое IQL-выражение MARS по именам полей "
+        "из схемы, без JsonLogic; NULL проверяется через IS NULL/IS NOT NULL. В ответе: число, "
+        "эхо применённого фильтра и окно. Если вышел ноль, а данные ожидались — расследуй: "
+        "какие значения поля реально есть (top_values), не уходи в пустой ответ."
+        ' Пример: count_events {"time_from": "<time_from>", "iql": "<поле> = \'<значение>\'"}.'
     )
 
 
@@ -102,7 +101,7 @@ def source_health(source: str | None = None) -> list[Any]:
         "час к часу. Вывод: кто жив, кто замолчал, аномалии с числами. Ноль по источнику — "
         "проверь, в каких полях вообще есть адреса, прежде чем говорить 'молчит'."
         ' Примеры: count_events {"time_from": "<15 мин назад>", '
-        '"filter": {"==": [{"var": "recv_ipv4"}, "<source>"]}}; '
+        '"iql": "recv_ipv4 = \'<source>\'"}; '
         'top_values {"field": "event_src_host", "time_from": "<час назад>", "time_to": "<сейчас>"}.'
     )
 
@@ -122,9 +121,9 @@ def user_activity(account: str, time_from: str | None = None, time_to: str | Non
         "Значения action расшифровывай через enum_lookup; если значения нет в словаре — скажи "
         "об этом прямо, не выдумывай."
         ' Примеры: top_values {"field": "action", "time_from": "<time_from>", '
-        '"filter": {"==": [{"var": "subject_account_name"}, "<account>"]}}; '
+        '"iql": "subject_account_name = \'<account>\'"}; '
         'search_events {"time_from": "<time_from>", '
-        '"filter": {"==": [{"var": "subject_account_name"}, "<account>"]}, "limit": 5}.'
+        '"iql": "subject_account_name = \'<account>\'", "limit": 5}.'
     )
 
 
@@ -143,7 +142,7 @@ def correlation(rule: str) -> list[Any]:
         "покажи список реально существующих правил."
         ' Примеры: top_values {"field": "correlation_rule", "time_from": "<time_from>", "limit": 20}; '
         'count_events {"time_from": "<time_from>", '
-        '"filter": {"contains": [{"var": "correlation_rule"}, "<rule>"]}}; '
+        '"iql": "correlation_rule LIKE \'%<rule>%\'"}; '
         'get_event {"uuid": "<uuid>", "timestamp": "<timestamp>"}.'
     )
 

@@ -1,10 +1,24 @@
 """Общие предметные контракты Evidence, findings, coverage и гипотез."""
 
+import json
 from datetime import UTC, datetime
 from typing import Any, Literal
 from uuid import uuid4
 
 from pydantic import BaseModel, Field, field_validator
+
+
+def json_default(value):
+    if hasattr(value, "isoformat"):
+        return value.isoformat()
+    if hasattr(value, "model_dump"):
+        return value.model_dump(mode="json")
+    return str(value)
+
+
+def json_dumps(value, **kwargs):
+    kwargs.setdefault("default", json_default)
+    return json.dumps(value, **kwargs)
 
 
 class EvidenceRecord(BaseModel):

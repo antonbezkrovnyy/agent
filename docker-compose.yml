@@ -222,7 +222,12 @@ services:
       start_period: 10s
 
   agent-chat-ui:
-    build: ./ui
+    build:
+      context: ./ui
+      args:
+        NEXT_PUBLIC_API_URL: http://localhost:2026
+        NEXT_PUBLIC_ASSISTANT_ID: agent
+        NEXT_PUBLIC_AUTH_SCHEME: ""
     restart: unless-stopped
     ports:
       - "3000:3000"
@@ -230,8 +235,7 @@ services:
       - NEXT_PUBLIC_API_URL=http://localhost:2026
       - NEXT_PUBLIC_ASSISTANT_ID=agent
 
-  # AG-UI sandbox: in-process обёртка того же agent/ пакета по протоколу AG-UI.
-  # Не влияет на aegra/agent-mcp; треды и раны песочницы живут отдельно.
+  # AG-UI + control API поверх общих Aegra threads/runs, без второго графа.
   agui-agent:
     build:
       context: .
@@ -242,6 +246,8 @@ services:
     env_file:
       - ./.env
     environment:
+      - AEGRA_API_URL=http://aegra:2026
+      - AEGRA_ASSISTANT=agent
       - AGENT_MEMORY_DATABASE_URL=postgresql://agent_memory:${AGENT_MEMORY_POSTGRES_PASSWORD:-agent_memory_password}@agent-memory-db:5432/agent_memory_db
       - ARTIFACT_STORE_BACKEND=s3
       - ARTIFACT_S3_ENDPOINT=http://seaweedfs:8333
@@ -249,6 +255,8 @@ services:
       - ARTIFACT_S3_ACCESS_KEY=${ARTIFACT_S3_ACCESS_KEY:-agent}
       - ARTIFACT_S3_SECRET_KEY=${ARTIFACT_S3_SECRET_KEY:-agent-local-secret}
     depends_on:
+      aegra:
+        condition: service_healthy
       logicore-mcp:
         condition: service_healthy
       agent-memory-db:
@@ -262,7 +270,7 @@ services:
       retries: 5
       start_period: 30s
 
-  # CopilotKit-чат поверх AG-UI sandbox (agui-agent). Отдельный порт, основной UI не трогаем.
+  # CopilotKit-рабочий стол поверх AG-UI/Aegra. Отдельный порт, основной UI не трогаем.
   copilotkit-demo:
     build: ./copilotkit-demo
     restart: unless-stopped

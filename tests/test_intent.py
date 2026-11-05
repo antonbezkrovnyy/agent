@@ -1,8 +1,28 @@
+import json
+from datetime import UTC, datetime
+
 from conftest import FakeStructured, intent
-from investigation import _intent_fallback
-from llm import IntentDecision, build_intent_llm
+from investigation import _intent_fallback, _intent_structured
+import llm as llm_mod
+from llm import IntentDecision, WindowSpec, build_intent_llm
 from langchain_core.messages import HumanMessage
 from langchain_core.runnables import RunnableLambda
+
+
+def test_intent_window_is_json_serializable(monkeypatch):
+    moment = datetime(2026, 11, 5, 3, 0, tzinfo=UTC)
+    decision = IntentDecision(
+        intent="complex",
+        rationale="Проверка окна",
+        needs_new_data=True,
+        window=WindowSpec(time_from=moment),
+    )
+    monkeypatch.setattr(llm_mod, "intent_llm", FakeStructured(decision))
+
+    result = _intent_structured({"messages": [HumanMessage(content="С 6 утра")]})
+
+    assert datetime.fromisoformat(result["window"]["time_from"].replace("Z", "+00:00")) == moment
+    json.dumps(result)
 
 
 def test_intent_uses_json_mode_fallback():

@@ -31,14 +31,14 @@ from logicore_mcp.earth.schemas import EventsResponse
 _EARTH_FMT = "%Y-%m-%d %H:%M:%S"
 
 
-def merge_events_responses(parts: list[Any], *, limit: int, order: str) -> EventsResponse:
-    """Склейка EventsResponse-частей первой страницы (TD-0029 п. 5; слой earth: типизированные ответы).
-
-    Строки конкатенируются и сортируются по timestamp (desc — новые сверху),
-    срез до limit; total — сумма меток частей: служебное значение для флага
-    truncated, в конверте при truncated ключ total опущен (TD-0004 п. 4);
-    meta — от первой части с обновлённым total (schema идентичен по построению).
-    """
+def merge_events_responses(
+    parts: list[Any],
+    *,
+    limit: int,
+    order: str,
+    order_by: list[dict[str, Any]] | None = None,
+) -> EventsResponse:
+    """Склеивает страницы и применяет фактическую multi-column сортировку запроса."""
     if not parts:
         raise ValueError("merge_events_responses: нет частей")
     first = parts[0]
@@ -48,7 +48,24 @@ def merge_events_responses(parts: list[Any], *, limit: int, order: str) -> Event
         rows.extend(response.data)
         meta_total = response.meta.total
         total += meta_total if isinstance(meta_total, int) else len(response.data)
-    rows.sort(key=lambda row: str(row.get("timestamp") or ""), reverse=order == "desc")
+    specifications = order_by or [
+        {"column": "timestamp", "action": order.upper()},
+        {"column": "uuid", "action": order.upper()},
+    ]
+
+    def value(row: dict[str, Any], column: str) -> tuple[int, Any]:
+        item = row.get(column)
+        if item is None:
+            return 0, ""
+        if isinstance(item, (int, float)):
+            return 1, item
+        return 1, str(item)
+
+    for specification in reversed(specifications):
+        rows.sort(
+            key=lambda row: value(row, str(specification["column"])),
+            reverse=specification["action"] == "DESC",
+        )
     return EventsResponse(
         result=first.result,
         message=first.message,
@@ -182,7 +199,7 @@ class ScheduledEarthClient:
             order = "desc"
             if order_by and str(order_by[0].get("action", "")).lower() != "desc":
                 order = "asc"
-            return merge_events_responses(parts, limit=per_page, order=order)
+            return merge_events_responses(parts, limit=per_page, order=order, order_by=order_by)
 
         return await self._run(request, call, combine)
 

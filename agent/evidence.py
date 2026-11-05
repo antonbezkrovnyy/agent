@@ -1,7 +1,8 @@
 """Evidence Bundle, компактные ссылки и цепочка текущего расследования."""
 
-import json
 from typing import Iterable
+
+from contracts import json_dumps
 
 
 def evidence_record(state: dict, evidence_id: str) -> dict | None:
@@ -29,7 +30,7 @@ def claim_evidence_ids(state: dict) -> list[str]:
 
 
 def _compact_value(value, limit: int = 2000):
-    encoded = json.dumps(value, ensure_ascii=False, default=str)
+    encoded = json_dumps(value, ensure_ascii=False, default=str)
     return value if len(encoded) <= limit else encoded[:limit] + "…[truncated]"
 
 
@@ -56,7 +57,7 @@ def evidence_overview_block(state: dict) -> str:
         items.append(item)
     return (
         "Обзор Evidence. Полную запись читай через get_evidence(evidence_id), "
-        "если preview недостаточно:\n" + json.dumps(items, ensure_ascii=False)
+        "если preview недостаточно:\n" + json_dumps(items, ensure_ascii=False)
     )
 
 
@@ -80,7 +81,7 @@ def full_evidence_block(state: dict, evidence_ids: Iterable[str] | None = None) 
     bundle = evidence_bundle(state, evidence_ids)
     if not bundle["items"]:
         return "Доказательства: отсутствуют."
-    return "Фактические результаты инструментов (полный Evidence Bundle):\n" + json.dumps(
+    return "Фактические результаты инструментов (полный Evidence Bundle):\n" + json_dumps(
         bundle, ensure_ascii=False
     )
 
@@ -178,7 +179,7 @@ def investigation_chain(state: dict) -> dict:
 
 
 def chain_block(state: dict) -> str:
-    return "Детерминированная цепочка расследования:\n" + json.dumps(
+    return "Детерминированная цепочка расследования:\n" + json_dumps(
         investigation_chain(state), ensure_ascii=False
     )
 
@@ -187,7 +188,7 @@ def evidence_query_block(record: dict) -> str:
     iql = record.get("iql")
     if iql:
         return f"\n\n```iql\n{iql}\n```"
-    arguments = json.dumps(record.get("arguments") or {}, ensure_ascii=False)
+    arguments = json_dumps(record.get("arguments") or {}, ensure_ascii=False)
     return f"\n\n```json\n{arguments}\n```"
 
 

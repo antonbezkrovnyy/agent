@@ -5,6 +5,8 @@ from typing import Any
 from langchain_core.messages import BaseMessage, HumanMessage, SystemMessage
 
 import llm as llm_mod
+from execution_audit import audit_messages
+from control_overrides import with_prompt_override
 from config import Settings
 from contracts import CriticIssue
 from evidence import claim_evidence_ids
@@ -141,9 +143,11 @@ def _critic_run(state: State, prompt: str, model: Any, allowed_verdicts: tuple, 
     verdict, feedback = "critic_unavailable", "Критик не вернул корректный вердикт."
     deterministic = _deterministic_issues(state)
     issues = list(deterministic)
+    messages = with_prompt_override(state, prompt, _critic_messages(state, prompt, extra_block))
+    audit_messages(prompt, state, messages)
     try:
         result = model.invoke(
-            _critic_messages(state, prompt, extra_block),
+            messages,
             config=trace_config(prompt, state),
         )
         if result is not None and result.verdict in allowed_verdicts:

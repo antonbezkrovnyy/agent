@@ -20,7 +20,7 @@ RUN pip install --no-cache-dir \
     "uvicorn>=0.30"
 
 COPY agent/ ./agent/
-COPY agui-agent/app.py ./app.py
+COPY agui-agent/app.py agui-agent/aegra_client.py agui-agent/agui_mapper.py agui-agent/control.py agui-agent/manual_tools.py agui-agent/dashboard.py ./
 
 EXPOSE 2027
 

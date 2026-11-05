@@ -8,13 +8,13 @@ import csv
 import datetime
 import hashlib
 import io
-import json
 import re
 import zipfile
 
 import httpx
 from tenacity import retry, stop_after_attempt, wait_exponential
 
+from contracts import json_dumps
 from evidence import queries_markdown
 
 _SAFE_SEGMENT = re.compile(r"[^A-Za-z0-9._-]+")
@@ -38,7 +38,7 @@ def build_report(title: str, markdown: str, filename: str | None = None) -> tupl
     now = datetime.datetime.now(datetime.UTC).isoformat(timespec="seconds")
     body = (
         "---\n"
-        f"title: {json.dumps(title, ensure_ascii=False)}\n"
+        f"title: {json_dumps(title, ensure_ascii=False)}\n"
         f"saved_at: {now}\n"
         "---\n\n" + markdown.rstrip() + "\n"
     )
@@ -51,7 +51,7 @@ def _csv_value(value):
     if value is None:
         return ""
     if isinstance(value, (dict, list)):
-        return json.dumps(value, ensure_ascii=False, default=str)
+        return json_dumps(value, ensure_ascii=False, default=str)
     return str(value)
 
 
@@ -102,7 +102,7 @@ def build_investigation_package(title: str, markdown: str, state: dict) -> tuple
     now = datetime.datetime.now(datetime.UTC).isoformat(timespec="seconds")
     report_body = (
         "---\n"
-        f"title: {json.dumps(title, ensure_ascii=False)}\n"
+        f"title: {json_dumps(title, ensure_ascii=False)}\n"
         f"saved_at: {now}\n"
         "---\n\n" + markdown.rstrip() + "\n"
     )
@@ -111,7 +111,7 @@ def build_investigation_package(title: str, markdown: str, state: dict) -> tuple
         "report.md": report_body.encode("utf-8"),
         "queries.md": queries_markdown(state).encode("utf-8"),
         "evidence.jsonl": (
-            "\n".join(json.dumps(item, ensure_ascii=False, default=str) for item in evidence) + "\n"
+            "\n".join(json_dumps(item, ensure_ascii=False, default=str) for item in evidence) + "\n"
         ).encode("utf-8"),
         "events.csv": events_csv.encode("utf-8"),
     }
@@ -136,7 +136,7 @@ def build_investigation_package(title: str, markdown: str, state: dict) -> tuple
             for name, data in files.items()
         ],
     }
-    files["manifest.json"] = (json.dumps(manifest, ensure_ascii=False, indent=2) + "\n").encode("utf-8")
+    files["manifest.json"] = (json_dumps(manifest, ensure_ascii=False, indent=2) + "\n").encode("utf-8")
 
     archive = io.BytesIO()
     with zipfile.ZipFile(archive, "w", compression=zipfile.ZIP_DEFLATED) as bundle:

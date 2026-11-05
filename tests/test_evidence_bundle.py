@@ -1,9 +1,32 @@
 import json
+from datetime import UTC, datetime
 from types import SimpleNamespace
 
 from critics import _critic_messages
-from evidence import evidence_overview_block, full_evidence_block, with_investigation_chain
-from tools import get_evidence
+from evidence import chain_block, evidence_overview_block, full_evidence_block, with_investigation_chain
+from tools import get_evidence, get_evidence_batch
+
+
+def test_evidence_blocks_and_tools_serialize_datetime_as_iso():
+    state = state_with_evidence()
+    moment = datetime(2026, 11, 5, 3, 0, tzinfo=UTC)
+    state["context"]["time_from"] = moment
+    state["evidence"][0]["arguments"]["time_from"] = moment
+    state["evidence"][0]["result"]["observed_at"] = moment
+    runtime = SimpleNamespace(state=state)
+
+    blocks = [
+        evidence_overview_block(state),
+        full_evidence_block(state),
+        chain_block(state),
+    ]
+    direct = json.loads(get_evidence.func("e1", runtime=runtime))
+    batch = json.loads(get_evidence_batch.func(["e1"], runtime=runtime))
+
+    assert all(moment.isoformat() in block for block in blocks)
+    assert direct["evidence"]["arguments"]["time_from"] == moment.isoformat()
+    assert direct["evidence"]["result"]["observed_at"] == moment.isoformat()
+    assert batch["items"][0]["arguments"]["time_from"] == moment.isoformat()
 
 
 def state_with_evidence():

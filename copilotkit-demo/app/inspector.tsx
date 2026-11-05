@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useAgent, UseAgentUpdate } from "@copilotkit/react-core/v2";
 import type { AbstractAgent } from "@ag-ui/client";
 import {
@@ -26,8 +26,12 @@ import { EvidenceExplorer } from "./evidence";
 import { ReportView } from "./report";
 import { InvestigationTree } from "./tree";
 import { SteeringPanel } from "./steering";
+import { restoreThread, THREAD_STORAGE_KEY } from "./thread-sync";
+import { ExecutionView } from "./execution";
+import { ControlView } from "./control-view";
+import { HomeDashboard } from "./home";
 
-type Tab = "overview" | "evidence" | "report";
+type Tab = "overview" | "execution" | "control" | "evidence" | "report";
 type SideTab = "plan" | "hypotheses" | "findings" | "metrics";
 type TimelineEntry = { at: string; kind: string; title: string; detail: string; status: unknown };
 
@@ -293,12 +297,18 @@ function Welcome() {
 export function Inspector() {
   const [tab, setTab] = useState<Tab>("overview");
   const [focusEvidenceId, setFocusEvidenceId] = useState("");
+  const [restoreError, setRestoreError] = useState("");
+  const [restoredState, setRestoredState] = useState<Dict>({});
+  const [activeThreadId, setActiveThreadId] = useState("");
+  const [, setRestoreVersion] = useState(0);
+  const restoreStarted = useRef(false);
   const { agent, isReady } = useAgent({
     agentId: "default",
     updates: [UseAgentUpdate.OnStateChanged, UseAgentUpdate.OnRunStatusChanged],
     throttleMs: 500,
   });
-  const state = record(agent.state);
+  const agentState = record(agent.state);
+  const state = Object.keys(agentState).length ? agentState : restoredState;
   const progress = record(state.progress);
   const evidence = list(state.evidence);
   const hypotheses = list(state.hypotheses);
@@ -308,6 +318,52 @@ export function Inspector() {
   const report = record(state.report_result);
   const lastReport = record(state.last_report);
   const hasReport = Boolean(text(report.answer, "") || text(lastReport.markdown, ""));
+
+  useEffect(() => {
+    if (restoreStarted.current) return;
+    restoreStarted.current = true;
+    const saved = new URLSearchParams(window.location.search).get("thread")
+      ?? localStorage.getItem(THREAD_STORAGE_KEY);
+    if (!saved) {
+      localStorage.setItem(THREAD_STORAGE_KEY, agent.threadId);
+      setActiveThreadId(agent.threadId);
+      return;
+    }
+    setActiveThreadId(saved);
+    restoreThread(agent, saved)
+      .then((result) => {
+        setRestoredState(record(result.state.values));
+        setRestoreVersion((version) => version + 1);
+      })
+      .catch((cause) => {
+        setRestoreError(cause instanceof Error ? cause.message : String(cause));
+      });
+  }, [agent]);
+
+  const startNewThread = () => {
+    agent.abortRun();
+    const threadId = crypto.randomUUID();
+    agent.threadId = threadId;
+    agent.setMessages([]);
+    agent.setState({});
+    localStorage.setItem(THREAD_STORAGE_KEY, threadId);
+    setActiveThreadId(threadId);
+    setRestoredState({});
+    setRestoreError("");
+    setRestoreVersion((version) => version + 1);
+  };
+
+  const openThread = (threadId: string, showReport = false) => {
+    setActiveThreadId(threadId);
+    setRestoreError("");
+    restoreThread(agent, threadId)
+      .then((result) => {
+        setRestoredState(record(result.state.values));
+        setRestoreVersion((version) => version + 1);
+        if (showReport) setTab("report");
+      })
+      .catch((cause) => setRestoreError(cause instanceof Error ? cause.message : String(cause)));
+  };
 
   const stats = useMemo(() => ({
     ok: evidence.filter((item) => item.status === "ok").length,
@@ -328,18 +384,14 @@ export function Inspector() {
 
   if (!hasActivity) {
     return (
-      <main className="investigation-desk">
-        <div className="desk-topline">
-          <div>
-            <div className="eyebrow">LOGICORE · РАБОЧИЙ СТОЛ АНАЛИТИКА</div>
-            <h1>Расследование</h1>
-          </div>
-          <div className="run-status">
-            <Badge tone={isReady ? "ok" : "running"}>{isReady ? "Готов к работе" : "Подключение"}</Badge>
-          </div>
-        </div>
-        <Welcome />
-      </main>
+      <>
+        {restoreError && <div className="error-box">{restoreError}</div>}
+        <HomeDashboard
+          onOpenThread={(threadId) => openThread(threadId)}
+          onOpenReport={(threadId) => openThread(threadId, true)}
+          onNewThread={startNewThread}
+        />
+      </>
     );
   }
 
@@ -353,8 +405,10 @@ export function Inspector() {
         <div className="run-status">
           <Badge tone={statusTone(progress.state)}>{isReady ? statusLabel(progress.state) : "Подключение"}</Badge>
           <span>{stageLabel(progress.stage)}</span>
+          <button type="button" className="button button-secondary button-small" onClick={startNewThread}>Новый тред</button>
         </div>
       </div>
+      {restoreError && <div className="error-box">{restoreError}</div>}
 
       <div className="metrics-grid">
         <MetricCard label="Текущий этап" value={stageLabel(progress.stage)} detail={roleLabel(progress.agent)} current />
@@ -366,6 +420,8 @@ export function Inspector() {
 
       <nav className="desk-tabs" aria-label="Разделы расследования">
         <button type="button" className={tab === "overview" ? "active" : ""} onClick={() => setTab("overview")}>Обзор</button>
+        <button type="button" className={tab === "execution" ? "active" : ""} onClick={() => setTab("execution")}>Агенты и граф</button>
+        <button type="button" className={tab === "control" ? "active" : ""} onClick={() => setTab("control")}>Пауза и откат</button>
         <button type="button" className={tab === "evidence" ? "active" : ""} onClick={() => setTab("evidence")}>Запросы и доказательства <span>{evidence.length}</span></button>
         <button type="button" className={tab === "report" ? "active" : ""} onClick={() => setTab("report")}>Итоговый отчёт {hasReport && <i />}</button>
       </nav>
@@ -374,6 +430,8 @@ export function Inspector() {
         setFocusEvidenceId(id);
         setTab("evidence");
       }} />}
+      {tab === "execution" && <ExecutionView state={state} threadId={activeThreadId || agent.threadId} running={agent.isRunning} />}
+      {tab === "control" && <ControlView agent={agent} state={state} threadId={activeThreadId || agent.threadId} />}
       {tab === "evidence" && <EvidenceExplorer evidence={evidence} focusId={focusEvidenceId} />}
       {tab === "report" && <ReportView state={state} />}
     </main>

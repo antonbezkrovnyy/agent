@@ -13,6 +13,7 @@ node_modules/
 # Логи и артефакты локальной разработки
 *.log
 .artifacts/
+.kimi-code/
 
 # ОС
 .DS_Store

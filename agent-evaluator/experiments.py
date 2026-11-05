@@ -42,12 +42,12 @@ async def _live_task(payload: dict) -> dict:
     thread_id = "exp-" + uuid4().hex
     prompt = payload["task"]
     if payload.get("window"):
-        prompt += "\nОкно: " + json.dumps(payload["window"], ensure_ascii=False)
+        prompt += "\nОкно: " + json.dumps(payload["window"], ensure_ascii=False, default=str)
     for key in ("mode", "scope_mode"):
         if payload.get(key):
             prompt += f"\nПользователь явно выбрал {key}={payload[key]}."
     if payload.get("alert"):
-        prompt += "\nSIEM alert payload:\n" + json.dumps(payload["alert"], ensure_ascii=False)
+        prompt += "\nSIEM alert payload:\n" + json.dumps(payload["alert"], ensure_ascii=False, default=str)
     timeout = int(os.environ.get("EXPERIMENT_TIMEOUT_SECONDS", "900"))
     async with httpx.AsyncClient(timeout=60) as client:
         created = await client.post(f"{base_url}/threads", json={

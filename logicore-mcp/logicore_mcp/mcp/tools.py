@@ -20,9 +20,12 @@ from logicore_mcp.mcp.contracts import (
     FIELD_PARAM,
     FIELDS_PARAM,
     FILTER_PARAM,
+    GROUPS_PARAM,
     KEY_FIELDS_PARAM,
     LOOKUP_FIELDS_PARAM,
+    ORDER_BY_PARAM,
     ORDER_PARAM,
+    QUERY_LIMIT_PARAM,
     SEARCH_LIMIT,
     TIME_FROM_PARAM,
     TIME_TO_PARAM,
@@ -101,20 +104,23 @@ def _envelope_unexpected(func: _ToolFn) -> _ToolFn:
 
 
 FILTER = (
-    "JsonLogic-дерево (объект, не строка) из and/or/!/==/!=/</<=/>/>=/in/contains; null в ==/!= — "
-    "IS [NOT] NULL. Имена полей — только из logicore://schema/fields; "
-    "timestamp-поля запрещены: окно — единственный способ фильтрации времени. "
-    "Массив-поля (напр. tags) — только contains; "
-    '«тег есть»: {"contains": [{"var": "tags"}, "unparsed"]}; '
-    '«тега нет»: {"!": [{"contains": [{"var": "tags"}, "unparsed"]}]} — НЕ через in. '
-    'Пример дерева: {"and": [{"==": [{"var": "action"}, "login"]}, {"!=": [{"var": "status"}, null]}]}. '
-    "Без фильтра — все события окна."
+    "Готовое IQL-выражение MARS для data.query.filters, строкой и без JsonLogic. "
+    "Передаётся в MARS как есть: AND/OR/NOT, сравнения, IN, LIKE, IS [NOT] NULL, "
+    "has() и другие ClickHouse-выражения. Это только условие, не полный SELECT и не "
+    "несколько statements. MCP не парсит IQL: синтаксические ошибки приходят в error/hint. "
+    "Имена полей — из logicore://schema/fields; окно — time_from/time_to. "
+    "Пример: \"action = 'login' AND status IS NOT NULL\". Без фильтра — все события окна."
 )
 FILTER_SHORT = (
-    "JsonLogic-дерево, как в search_events; имена полей — из "
-    "logicore://schema/fields; timestamp-поля запрещены (окно задаётся "
-    "time_from/time_to). Без фильтра — все события окна."
+    "Готовое IQL-выражение MARS, как в search_events; передаётся без JsonLogic-трансляции. "
+    "Окно задаётся time_from/time_to. Без фильтра — все события окна."
 )
+
+
+def _payload(items: Any) -> Any:
+    if items is None:
+        return None
+    return [item.model_dump() for item in items]
 
 
 @mcp.tool(annotations=READ_ONLY, title="Поиск событий", structured_output=False)
@@ -122,11 +128,14 @@ FILTER_SHORT = (
 async def search_events(
     time_from: TIME_FROM_PARAM,
     time_to: TIME_TO_PARAM = None,
-    filter: Annotated[FILTER_PARAM, Field(description=FILTER)] = None,
+    iql: Annotated[FILTER_PARAM, Field(description=FILTER)] = None,
     columns: COLUMNS_PARAM = None,
     page: Annotated[int, Field(description="Страница выборки, от 1.")] = 1,
     limit: SEARCH_LIMIT = 20,
     order: ORDER_PARAM = "desc",
+    groups: GROUPS_PARAM = None,
+    order_by: ORDER_BY_PARAM = None,
+    query_limit: QUERY_LIMIT_PARAM = None,
     include_activity: Annotated[
         bool,
         Field(
@@ -149,28 +158,28 @@ async def search_events(
 
     Полезно знать: по умолчанию (order=desc) строки идут от новых к старым,
     первая строка — самое свежее событие; order=asc меняет порядок на обратный.
-    При поиске подстроки в message каждая строка несёт match_context —
-    короткий фрагмент, где нашлось совпадение (поле message обрезается до 1000
-    символов, совпадение может быть за пределами видимого текста); потолок —
-    8 снипетов на строку, свыше — флаг match_context_truncated.
+    Для одинаковых timestamp применяется tie-breaker uuid, поэтому пагинация стабильна.
+    Поле message обрезается до 1000 символов; полный текст — через get_event.
 
     Пример: {"time_from": "2026-08-21T10:00:00Z", "time_to": "2026-08-21T12:00:00Z",
-    "filter": {"==": [{"var": "action"}, "login"]}, "limit": 20}
+    "iql": "action = 'login'", "limit": 20}
     Без фильтра — все события окна: {"time_from": "2026-08-21T10:00:00Z"}
 
-    Ответ: окно, эхо фильтра, строки. Если строк меньше, чем нашлось
-    (truncated: true), — общего числа в ответе не будет, точное число даёт
-    count_events.
+    Ответ: окно, фактический iql, события и пагинация. has_more=true и next_page
+    означают возможную следующую страницу; если она пуста, данных больше нет.
+    groups — дополнительные равенства, order_by — полная сортировка вместо order.
+    query_limit ограничивает весь результат: при достижении complete=false и has_more=false.
+    Общего total при усечении нет, точное число даёт count_events.
 
     Общее поле ответов: duration_s — сколько секунд шёл вызов (широкие окна и
-    contains по message дороже)."""
+    LIKE по message дороже)."""
     schema = await schema_fields_catalog()
     async with use_client() as client:
         return await search_events_flow(
             client,
             time_from=time_from,
             time_to=time_to,
-            filter=filter,
+            filter=iql,
             page=page,
             limit=limit,
             schema=schema,
@@ -178,6 +187,9 @@ async def search_events(
             default_columns=settings().default_columns,
             include_activity=include_activity,
             order=order,
+            groups=_payload(groups),
+            order_by=_payload(order_by),
+            query_limit=query_limit,
         )
 
 
@@ -186,18 +198,22 @@ async def search_events(
 async def extract_data(
     time_from: TIME_FROM_PARAM,
     time_to: TIME_TO_PARAM = None,
-    filter: Annotated[FILTER_PARAM, Field(description=FILTER_SHORT)] = None,
+    iql: Annotated[FILTER_PARAM, Field(description=FILTER_SHORT)] = None,
     columns: COLUMNS_PARAM = None,
     max_rows: EXTRACT_MAX_ROWS = None,
     page: Annotated[int, Field(description="Начальная страница, от 1; для продолжения — next_page из прошлого ответа.", ge=1)] = 1,
     order: ORDER_PARAM = "asc",
+    groups: GROUPS_PARAM = None,
+    order_by: ORDER_BY_PARAM = None,
+    query_limit: QUERY_LIMIT_PARAM = None,
 ) -> dict[str, Any]:
     """Выгружает события постранично, без ручной пагинации через LLM.
 
     Когда брать: нужна полная таблица или файл по событием, а не агрегат.
     Возвращает events, returned_rows, complete и next_page. complete=false —
-    результат неполный: достигнут max_rows, частичное покрытие или повтор страницы.
-    После max_rows продолжите с page=next_page и теми же окном, фильтром и order.
+    полнота не доказана: достигнут max_rows/query_limit, частичное покрытие или повтор страницы.
+    После max_rows продолжите с page=next_page и теми же окном, iql и order/order_by;
+    следующая пустая страница подтверждает завершение. При query_limit следующей страницы нет.
     Для агрегатов используйте count_events/top_values/timeline.
     """
     schema = await schema_fields_catalog()
@@ -206,13 +222,16 @@ async def extract_data(
             client,
             time_from=time_from,
             time_to=time_to,
-            filter=filter,
+            filter=iql,
             columns=columns,
             max_rows=max_rows or settings().extract_max_rows,
             page=page,
             order=order,
             default_columns=settings().default_columns,
             schema=schema,
+            groups=_payload(groups),
+            order_by=_payload(order_by),
+            query_limit=query_limit,
         )
 
 
@@ -221,7 +240,9 @@ async def extract_data(
 async def count_events(
     time_from: TIME_FROM_PARAM,
     time_to: TIME_TO_PARAM = None,
-    filter: Annotated[FILTER_PARAM, Field(description=FILTER_SHORT)] = None,
+    iql: Annotated[FILTER_PARAM, Field(description=FILTER_SHORT)] = None,
+    groups: GROUPS_PARAM = None,
+    query_limit: QUERY_LIMIT_PARAM = None,
 ) -> dict[str, Any]:
     """Возвращает точное число событий в журнале за период, при необходимости — под условием фильтра.
     Одним числом, без самих событий.
@@ -232,7 +253,9 @@ async def count_events(
 
     Пример: {"time_from": "2026-08-21T10:00:00Z"}
 
-    Ответ: {ok, count, window{from,to,source}, filter_applied}.
+    Ответ: {ok, count, window{from,to,source}, filter_applied, iql}.
+    groups — дополнительные равенства. При count >= query_limit результат помечается
+    complete=false: это потолок запроса, а не полное число событий окна.
 
     Общее поле ответов: duration_s — сколько секунд шёл вызов; широкие окна
     считаются заметно дольше."""
@@ -242,8 +265,10 @@ async def count_events(
             client,
             time_from=time_from,
             time_to=time_to,
-            filter=filter,
+            filter=iql,
             schema=schema,
+            groups=_payload(groups),
+            query_limit=query_limit,
         )
 
 
@@ -252,7 +277,8 @@ async def count_events(
 async def timeline(
     time_from: TIME_FROM_PARAM,
     time_to: TIME_TO_PARAM = None,
-    filter: Annotated[FILTER_PARAM, Field(description=FILTER_SHORT)] = None,
+    iql: Annotated[FILTER_PARAM, Field(description=FILTER_SHORT)] = None,
+    groups: GROUPS_PARAM = None,
 ) -> dict[str, Any]:
     """Строит гистограмму объёма событий за период: ровные бакеты «интервал → число событий», без самих событий.
 
@@ -266,11 +292,12 @@ async def timeline(
     с границами вне сетки не завершаются — сверяйте фактическое окно с
     возвращённым window, а не с запрошенным. Последний бакет может быть
     вырожденным (from == to, value 0/null) — это артефакт Earth, не падение
-    потока. Вычисление асинхронное.
+    потока. Вычисление асинхронное. Если поток закрылся без done, ответ будет
+    complete=false с hint — это неполный ряд, а не доказанный ноль/падение потока.
 
     Пример: {"time_from": "2026-08-21T10:00:00Z", "time_to": "2026-08-21T12:00:00Z"}
 
-    Ответ: {ok, window, filter_applied, timeline{buckets[{from,to,value}],
+    Ответ: {ok, window, filter_applied, iql, complete?, timeline{buckets[{from,to,value}],
     bucket_count, granularity_seconds, total}}."""
     schema = await schema_fields_catalog()
     async with use_client() as client:
@@ -278,8 +305,9 @@ async def timeline(
             client,
             time_from=time_from,
             time_to=time_to,
-            filter=filter,
+            filter=iql,
             schema=schema,
+            groups=_payload(groups),
         )
 
 
@@ -289,7 +317,7 @@ async def top_values(
     time_from: TIME_FROM_PARAM,
     field: FIELD_PARAM,
     time_to: TIME_TO_PARAM = None,
-    filter: Annotated[FILTER_PARAM, Field(description=FILTER_SHORT)] = None,
+    iql: Annotated[FILTER_PARAM, Field(description=FILTER_SHORT)] = None,
     limit: TOP_VALUES_LIMIT = 5,
 ) -> dict[str, Any]:
     """Показывает самые частые и самые редкие значения одного поля за период: какие action, importance, хосты и т.п.
@@ -301,12 +329,12 @@ async def top_values(
 
     Пример: {"field": "action", "time_from": "2026-08-21T10:00:00Z", "limit": 10}
 
-    Ответ: distinct (всего значений), complete (при false антитоп не возвращается —
-    был бы нечестным), null_count — ЧИСЛО null-ГРУПП (обычно 0 или 1), а не
-    null-событий; top/bottom[{value, count, share}] — share в % от суммы
-    распределения. Отсутствие значения в выдаче ≠ его ноль: середина
-    распределения не возвращается. Точная заполненность поля — два одинаковых
-    count_events (все события и field != null), а не этот тул."""
+    Ответ: distinct — число прочитанных значений (при complete=false это только
+    нижняя граница, распределение потолком 100 не доказано полным; bottom тогда не
+    возвращается). null_count — ЧИСЛО null-ГРУПП, не null-событий.
+    top/bottom[{value,count,share}] — share в % от суммы прочитанных групп;
+    при complete=false это НЕ доля всех событий окна. Отсутствие значения в
+    выдаче ≠ его ноль. Точная заполненность — два count_events (все и field != null)."""
     schema = await schema_fields_catalog()
     async with use_client() as client:
         return await top_values_flow(
@@ -314,7 +342,7 @@ async def top_values(
             field=field,
             time_from=time_from,
             time_to=time_to,
-            filter=filter,
+            filter=iql,
             limit=limit,
             schema=schema,
         )
@@ -338,8 +366,8 @@ async def get_event(
     Когда брать: нужны полные детали конкретного события, когда строка из
     search_events уже найдена. Пара uuid + timestamp берётся ТОЛЬКО из одной
     строки этой выдачи: живой uuid с чужим timestamp даёт found=false, как и
-    несуществующий. Известен только uuid — сначала search_events с фильтром
-    {"==": [{"var": "uuid"}, "<uuid>"]} на широком time_from, затем эта пара.
+    несуществующий. Известен только uuid — сначала search_events с iql
+    "uuid = '<uuid>'" на широком time_from, затем эта пара.
 
     Пример вызова: {"uuid": "0ea9d1f2-... (из строки выборки)", "timestamp": "2026-08-21T10:15:30Z"}
 
@@ -356,7 +384,7 @@ async def top_values_batch(
     time_from: TIME_FROM_PARAM,
     fields: FIELDS_PARAM,
     time_to: TIME_TO_PARAM = None,
-    filter: Annotated[FILTER_PARAM, Field(description=FILTER_SHORT)] = None,
+    iql: Annotated[FILTER_PARAM, Field(description=FILTER_SHORT)] = None,
     limit: TOP_VALUES_LIMIT = 5,
 ) -> dict[str, Any]:
     """Обходит несколько полей за один вызов: для каждого — топ-значения и заполненность.
@@ -379,7 +407,7 @@ async def top_values_batch(
             fields=fields,
             time_from=time_from,
             time_to=time_to,
-            filter=filter,
+            filter=iql,
             limit=limit,
             schema=schema,
         )
@@ -390,7 +418,7 @@ async def top_values_batch(
 async def field_fill_rates(
     time_from: TIME_FROM_PARAM,
     time_to: TIME_TO_PARAM = None,
-    filter: Annotated[
+    iql: Annotated[
         FILTER_PARAM,
         Field(description=FILTER_SHORT + " Заполненность в разрезе (напр., только mime = TEXT) — штатный сценарий."),
     ] = None,
@@ -428,7 +456,7 @@ async def field_fill_rates(
             client,
             time_from=time_from,
             time_to=time_to,
-            filter=filter,
+            filter=iql,
             schema=schema,
             offset=offset,
         )
@@ -439,7 +467,7 @@ async def field_fill_rates(
 async def duplicates(
     time_from: TIME_FROM_PARAM,
     time_to: TIME_TO_PARAM = None,
-    filter: Annotated[
+    iql: Annotated[
         FILTER_PARAM,
         Field(description=FILTER_SHORT + " Дубликаты в разрезе источника/фильтра."),
     ] = None,
@@ -456,18 +484,19 @@ async def duplicates(
     "key_fields": ["generator", "event_type", "timestamp"]}
 
     Ответ: key, duplicate_groups[{<поля ключа>, count}] убыв. count;
-    duplicate_groups_total — сколько групп найдено всего; пустой список =
-    дубликатов нет; truncated: true — показано меньше, чем найдено (limit или
-    потолок 100 групп, причина — ceiling_reached/hint); truncated: false —
-    выдача полна. Группы с count>1 — кандидаты повторов, не доказательство
-    дубля сбора: heartbeat законно повторяет строку."""
+    duplicate_groups_total — число групп в прочитанном распределении. При
+    ceiling_reached=true достигнут потолок 100: это нижняя граница, а не итог окна,
+    поэтому сузьте окно/фильтр. Пустой список без ceiling_reached = дубликатов нет.
+    truncated=true — показано меньше, чем прочитано (limit или потолок, см. hint).
+    Группы с count>1 — кандидаты повторов, не доказательство дубля сбора:
+    heartbeat законно повторяет строку."""
     schema = await schema_fields_catalog()
     async with use_client() as client:
         return await duplicates_flow(
             client,
             time_from=time_from,
             time_to=time_to,
-            filter=filter,
+            filter=iql,
             key_fields=key_fields,
             limit=limit,
             schema=schema,

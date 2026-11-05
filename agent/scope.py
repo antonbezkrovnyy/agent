@@ -3,6 +3,8 @@
 from langchain_core.messages import HumanMessage, SystemMessage
 
 import llm as llm_mod
+from execution_audit import audit_messages
+from control_overrides import with_prompt_override
 from config import Settings
 from contracts import InvestigationScope
 from observability import trace_config
@@ -70,6 +72,8 @@ def node_scope(state: State) -> dict:
         )),
         HumanMessage(content="Сформируй InvestigationScope для текущего этапа."),
     ]
+    messages = with_prompt_override(state, "scope", messages)
+    audit_messages("scope", state, messages)
     try:
         response = llm_mod.scope_llm.invoke(messages, config=trace_config("scope", state))
         scope = response if isinstance(response, InvestigationScope) else InvestigationScope.model_validate(response)

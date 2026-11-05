@@ -560,6 +560,7 @@ continuations. Те же метрики вкладываются в `manifest.js
 
 ### 11.1. MCP LogiCore
 
+Руководство по запуску и передаче MCP другой команде — [logicore-mcp/README.md](../logicore-mcp/README.md).
 Все инструменты read-only:
 
 | Инструмент | Назначение |
@@ -576,7 +577,20 @@ continuations. Те же метрики вкладываются в `manifest.js
 | `server_time` | Текущее серверное время |
 
 Windowed tools определяются по JSON Schema через `time_from/time_to`, а не по
-hardcoded списку имён.
+hardcoded списку имён. Фильтрация принимает параметр `iql` — готовое выражение для
+`data.query.filters` MARS, например `"action = 'login' AND status IS NOT NULL"` или
+`"positionCaseInsensitive(message, 'error') > 0"`. Строка передаётся без JsonLogic и
+без собственной трансляции MCP; преобразование в ClickHouse SQL выполняет Earth.
+Evidence сохраняет фактический `iql`, а не перегенерированный запрос. `iql` — только
+условие, не полный `SELECT`; MCP его не парсит, ошибки MARS возвращаются в `error/hint`.
+Пагинация событий стабилизирована по `timestamp + uuid`. `search_events` и `extract_data`
+также принимают нативные `groups`, `order_by` и `query_limit`; `count_events` принимает
+`groups` и `query_limit`, `timeline` — `groups`. `groups` — дополнительные равенства по AND,
+не GROUP BY. `order_by` заменяет простой `order` и поддерживает несколько колонок.
+`query_limit` — общий потолок результата, не размер страницы; при его достижении
+`complete=false`, а у search дополнительно `has_more=false`. `complete=false` означает,
+что полнота не доказана или данные частичны; `distinct` и итоги групп при достижении
+потолка относятся только к прочитанным группам, а не ко всему окну.
 
 ### 11.2. Внутренние инструменты агента
 
@@ -664,47 +678,58 @@ object keys и метаданные файлов.
 Bearer `AGENT_MCP_TOKEN`, OIDC не добавляется. A2A может быть позже реализован поверх
 этого же адаптера; ACP не требуется.
 
-### 12.3. AG-UI sandbox
+### 12.3. AG-UI copilot и control API
 
-`agui-agent/app.py` — изолированная обёртка того же графа по протоколу AG-UI
-(пакет `ag-ui-langgraph`): граф собирается in-process с `InMemorySaver`, endpoint
-`POST /agent` стримит SSE-события (`RUN_*`, `STEP_*`, `TEXT_MESSAGE_*`,
-`TOOL_CALL_*`, `STATE_SNAPSHOT/DELTA`, `RAW`). `RAW`-события — verbose-internals
-приватных tool-циклов (model/tools/middleware-шаги), для продового UI не предназначены.
-Треды песочницы не связаны с checkpoints Aegra. `copilotkit-demo/` — CopilotKit
-v2 runtime (`HttpAgent` из `@ag-ui/client`) и встроенный чат на
-`@copilotkit/react-core/v2`.
+`agui-agent/app.py` — адаптер между AG-UI и Aegra Agent Protocol, а не второй
+execution engine. `aegra_client.py` создаёт threads и runs, подключается к существующему
+SSE, читает state/history/topology и отменяет runs. `agui_mapper.py` преобразует
+`values`, `updates`, `custom` и terminal events в `STATE_SNAPSHOT`, `STEP_*`,
+`TEXT_MESSAGE_*`, `TOOL_CALL_*`, `RUN_*` и `RAW`. Публичные текстовые ответы берутся
+только из `values.messages`; приватные tool-циклы остаются отдельными.
 
-`app/inspector.tsx` через `useAgent` показывает то же состояние run без второго
-запуска: текущую задачу, KPI, гипотезы, findings и метрики. `app/tree-data.ts`
-строит дерево расследования, `app/tree.tsx` отображает его как «work item →
-Evidence → связанные гипотезы и находки». Поскольку `EvidenceRecord.step_id`
-совпадает с ID самой Evidence, а не work item, привязка к этапу вычисляется по
-`created_at` и интервалу `started_at/finished_at` item. Это навигационная
-группировка UI, а не новая связь в контракте графа. Записи вне интервалов попадают
-в «Общие вызовы»; без плана они группируются по имени инструмента.
+Второго графа и `InMemorySaver` нет. CopilotKit и основной UI работают с общими
+Aegra threads и PostgreSQL checkpoints. `forwardedProps.aegraRunId` подключает
+существующий run без создания нового; `resume` использует `command.resume`,
+`checkpointId` запускает новую ветку от указанного состояния. Новый run использует
+`stream_subgraphs=true`, `durability=sync` и `multitask_strategy=reject`.
 
-Дерево поддерживает поиск по этапу, инструменту, Evidence ID и запросу, фильтр
-`partial/error/failed`, сворачивание веток и постраничное раскрытие длинных списков.
-Активный item раскрыт по умолчанию. Выбор Evidence передаёт `focusId` в
-`app/evidence.tsx` и переключает вкладку на полную запись с таблицей результата,
-фактическими аргументами, IQL и окном. LogiCore возвращает IQL, а не SQL; UI не
-генерирует SQL вместо него. `app/report.tsx` рендерит итоговый Markdown, claims,
-ограничения и артефакты.
+`agent/execution_audit.py` записывает фактические system prompts, входные сообщения
+и список tools в `agent_memory.execution_events` и одновременно передаёт их как
+custom events. Таблица находится вне checkpoints, поэтому длинные prompts не
+дублируются в каждом state. Сбой журнала не меняет результат модели. Топология UI
+читается через `/assistants/{id}/graph` и `/subgraphs`.
 
-`app/steering.tsx` реализует неблокирующие коррективы без изменения графа. Во время
-run уточнение хранится в локальной очереди компонента; после перехода run в
-неактивное состояние оно отправляется через `agent.addMessage(...)` и
-`agent.runAgent()` как следующий run того же треда. Поэтому корректива не внедряется
-в середину уже выполняющегося графа и не останавливает его для ожидания пользователя.
-До отправки элемент очереди можно удалить. Вне run сообщение отправляется сразу.
-Остановка выполняется отдельно через `agent.abortRun()`; approval-interrupt нет.
-Локальная очередь не является персистентным хранилищем и не переживает перезагрузку
-страницы.
+`copilotkit-demo/app/inspector.tsx` показывает общее состояние без повторного запуска.
+`tree-data.ts` и `tree.tsx` строят навигационное дерево «work item → Evidence →
+связанные гипотезы и находки». Привязка Evidence к item вычисляется по времени,
+поскольку `step_id` совпадает с ID Evidence, а не work item. `execution.tsx` и
+`graph.tsx` выводят prompts, приватные сообщения и topology. `evidence.tsx` выводит
+таблицы, фактические аргументы, IQL и окна; SQL вместо IQL не генерируется.
+`report.tsx` рендерит Markdown, claims, ограничения и артефакты.
+
+`control-view.tsx` и `agui-agent/control.py` реализуют управление:
+
+- cancel активного run и resume через Aegra;
+- `interrupt_before/after` для перехода по узлам;
+- редактирование последней задачи и pending work items через Pydantic;
+- проверку ID, зависимостей, циклов, required-лимита и запрет перезаписи выполненных items;
+- run-scoped `control_overrides.<role>.prompt`, применяемый при следующем вызове роли;
+- историю checkpoints и ветвление без удаления прежней истории.
+
+`agent/step_mode.py` — opt-in `ToolStepMiddleware`: при
+`control_overrides._step.tools=true` вызывается LangGraph `interrupt` перед каждым
+набором tool calls с фактическими аргументами. После `command.resume` выполнение
+продолжается с того же места. По умолчанию флаг выключен, автопилот и отсутствие
+обязательных approval-интерраптов сохраняются.
+
+`agui-agent/manual_tools.py` разрешает только существующие read-only MCP tools и
+только на паузе. Фактический результат нормализуется общим `build_mcp_evidence` в
+`EvidenceRecord` и добавляется новым checkpoint; фиктивные ToolMessage не создаются.
+`steering.tsx` отдельно реализует follow-up очередь после активного run. Локальная
+очередь не является persistent control API и не переживает перезагрузку.
 
 `GET /artifacts/{key}` выдаёт подписанную ссылку только для ключей `investigations/`.
-Endpoint агента задаётся через `AGUI_ENDPOINT_URL`. Sandbox не изменяет `agent/`, `ui/`
-и `agent-mcp/`; модель и MCP берутся из тех же env, что и у aegra.
+AG-UI endpoint задаётся через `AGUI_ENDPOINT_URL`, Aegra backend — `AEGRA_API_URL`.
 
 Для разработки демо без пересборки Docker-образа: `docker compose stop copilotkit-demo`,
 затем `cd copilotkit-demo && npm install && COPILOTKIT_TELEMETRY_DISABLED=true npm run dev`.
@@ -750,7 +775,7 @@ Structured output строится через function calling с fallback на 
 | `MAX_REWORK` | 1 на внешний run | Дальше возвращается текущий результат |
 | Agent timeout | 600 с на `create_agent.ainvoke` | Схемный результат с limitation |
 | Export timeout | 120 с | Evidence error и ответ об ошибке |
-| Summarization | 6000 tokens / 20 messages | История сокращается middleware |
+| Summarization | 230000 tokens / 20 messages | История сокращается middleware |
 | Critic context | 2000 message / 8000 dialog chars | Вход ограничивается |
 | Report injection | 8000 chars | Длинный отчёт помечается обрезанным |
 | Recent cases | 3 | Только кандидаты для continuation |
@@ -788,6 +813,9 @@ Tool limit принадлежит одному `ainvoke`. После него р
 
 В публичном `messages` находятся только сообщения пользователя и финальные ответы.
 Tool calls и внутренние рассуждения остаются в `scout_msgs`, `inv_msgs`, `rep_msgs`.
+Аудит Context Memory сохраняется в деле и файлах отчёта, но не создаёт второй AI-ответ.
+Если `memory_save` пересобирает файлы, он обновляет attachments исходного ответа Reporter
+по тому же message ID.
 
 Отдельный `progress` показывает:
 
@@ -800,8 +828,8 @@ Tool calls и внутренние рассуждения остаются в `s
 
 Progress не передаётся LLM и не создаёт служебные сообщения в истории. После ответа
 `suggestions` предлагает обычные follow-up действия: показать таблицу, сохранить
-отчёт или продолжить расследование. Подтверждений, approval-interrupts и
-slash-команд нет.
+отчёт или продолжить расследование. Обязательных подтверждений, approval-interrupts и
+slash-команд нет; ручные pause/resume и tool-step режим включаются только явным действием.
 
 ## 16. Текущие ограничения
 
@@ -846,10 +874,17 @@ slash-команд нет.
 | `agent/metrics.py` | Длительность, токены, tool calls и повторы |
 | `agent/state.py` | Общие Evidence/Case/Memory Channels и supervisor |
 | `agent/observability.py` | OpenInference role/scope/item metadata и prompt version |
+| `agent/execution_audit.py` | Фактические model inputs в `agent_memory.execution_events` |
+| `agent/control_overrides.py` | Run-scoped prompt overrides |
+| `agent/step_mode.py` | Opt-in пауза перед tool calls |
 | `agent-mcp/app.py` | Асинхронный MCP-адаптер расследований |
 | `agent-mcp/investigation_mcp_types.py` | TypedDict output schemas |
-| `agui-agent/app.py` | AG-UI sandbox поверх графа (in-process, `InMemorySaver`) |
-| `copilotkit-demo/` | Рабочий стол аналитика, дерево run, Evidence, отчёт и steering поверх AG-UI |
+| `agui-agent/app.py` | AG-UI и control endpoints поверх Aegra |
+| `agui-agent/aegra_client.py` | Runs, attach/resume, state, history, topology и cancel |
+| `agui-agent/agui_mapper.py` | Aegra SSE → AG-UI events |
+| `agui-agent/control.py` | Валидированные state edits |
+| `agui-agent/manual_tools.py` | Read-only ручные MCP-вызовы с Evidence |
+| `copilotkit-demo/` | Дерево, prompts, topology, Evidence и управление run |
 | `agent-evaluator/` | Оценка runs, annotations и SDK experiments |
 | `agent/skills/` | Версионируемые playbooks |
 

@@ -19,7 +19,7 @@ from langchain_core.tools import tool
 from langgraph.prebuilt import ToolRuntime
 from langgraph.types import Command
 
-from contracts import EvidenceRecord, FindingRecord, Hypothesis, HypothesisEvent
+from contracts import EvidenceRecord, FindingRecord, Hypothesis, HypothesisEvent, json_dumps
 from artifacts import create_report_artifacts
 from evidence import evidence_record
 from llm import WindowUpdate
@@ -72,6 +72,28 @@ def _with_progress(request, result):
     return result
 
 
+def build_mcp_evidence(name: str, args: dict, data: dict, evidence_id: str, investigation_id: str | None) -> dict:
+    return EvidenceRecord(
+        id=evidence_id,
+        investigation_id=investigation_id,
+        step_id=evidence_id,
+        tool=name,
+        arguments=args,
+        iql=data.get("iql"),
+        window=data.get("window") or {
+            "from": args.get("time_from"),
+            "to": args.get("time_to"),
+            "source": "investigation-context",
+        },
+        status=_result_status(data),
+        complete=_result_status(data) == "ok",
+        result_ref=f"evidence://{investigation_id}/{evidence_id}",
+        created_at=datetime.datetime.now(datetime.UTC).isoformat(timespec="seconds"),
+        result=data,
+        error=data.get("error"),
+    ).model_dump()
+
+
 @wrap_tool_call
 async def normalize_tool_result(request, handler):
     """Зафиксировать окно, нормализовать content и сохранить Evidence."""
@@ -93,7 +115,7 @@ async def normalize_tool_result(request, handler):
 
     try:
         result = await handler(request)
-        text = result.text or json.dumps(result.content, ensure_ascii=False)
+        text = result.text or json_dumps(result.content, ensure_ascii=False)
         try:
             data = json.loads(text)
         except (TypeError, json.JSONDecodeError):
@@ -103,7 +125,7 @@ async def normalize_tool_result(request, handler):
         message = result.model_copy(update={"content": text})
     except Exception as exc:
         data = {"ok": False, "error": f"{type(exc).__name__}: {exc}"}
-        text = json.dumps(data, ensure_ascii=False)
+        text = json_dumps(data, ensure_ascii=False)
         message = ToolMessage(
             content=text,
             tool_call_id=request.tool_call["id"],
@@ -113,27 +135,9 @@ async def normalize_tool_result(request, handler):
 
     evidence_id = request.tool_call["id"]
     investigation_id = (request.state.get("context") or {}).get("id")
-    evidence = EvidenceRecord(
-        id=evidence_id,
-        investigation_id=investigation_id,
-        step_id=evidence_id,
-        tool=name,
-        arguments=args,
-        iql=data.get("iql"),
-        window=data.get("window") or {
-            "from": args.get("time_from"),
-            "to": args.get("time_to"),
-            "source": "investigation-context",
-        },
-        status=_result_status(data),
-        complete=_result_status(data) == "ok",
-        result_ref=f"evidence://{investigation_id}/{evidence_id}",
-        created_at=datetime.datetime.now(datetime.UTC).isoformat(timespec="seconds"),
-        result=data,
-        error=data.get("error"),
-    ).model_dump()
+    evidence = build_mcp_evidence(name, args, data, evidence_id, investigation_id)
     message = message.model_copy(update={
-        "content": json.dumps({"evidence_id": evidence_id, **data}, ensure_ascii=False)
+        "content": json_dumps({"evidence_id": evidence_id, **data}, ensure_ascii=False)
     })
     return _with_progress(request, Command(update={"messages": [message], "evidence": [evidence]}))
 
@@ -145,13 +149,13 @@ def get_evidence(evidence_id: str, runtime: ToolRuntime = None) -> str:
     record = evidence_record(state, evidence_id)
     if record is None:
         available = [item.get("id") for item in state.get("evidence") or []]
-        return json.dumps({
+        return json_dumps({
             "ok": False,
             "error": "Evidence не найдено",
             "evidence_id": evidence_id,
             "available": available,
         }, ensure_ascii=False)
-    return json.dumps({"ok": True, "evidence": record}, ensure_ascii=False)
+    return json_dumps({"ok": True, "evidence": record}, ensure_ascii=False)
 
 
 @tool
@@ -161,7 +165,7 @@ def get_evidence_batch(evidence_ids: list[str], runtime: ToolRuntime = None) -> 
     wanted = list(dict.fromkeys(evidence_ids))[:50]
     records = state.get("evidence") or []
     by_id = {item.get("id"): item for item in records}
-    return json.dumps({
+    return json_dumps({
         "ok": True,
         "items": [by_id[item] for item in wanted if item in by_id],
         "missing_ids": [item for item in wanted if item not in by_id],
@@ -189,7 +193,7 @@ def update_window(
     call_id = runtime.tool_call_id if runtime else ""
     if not context.get("id"):
         message = ToolMessage(
-            content=json.dumps({"ok": False, "error": "Контекст расследования отсутствует"}, ensure_ascii=False),
+            content=json_dumps({"ok": False, "error": "Контекст расследования отсутствует"}, ensure_ascii=False),
             tool_call_id=call_id,
             name="update_window",
             status="error",
@@ -199,7 +203,7 @@ def update_window(
     current = {"time_from": context["time_from"], "time_to": context["time_to"]}
     if action != "preserve" and (time_from is None or time_to is None):
         message = ToolMessage(
-            content=json.dumps({"ok": False, "error": "Для смены окна нужны time_from и time_to"}, ensure_ascii=False),
+            content=json_dumps({"ok": False, "error": "Для смены окна нужны time_from и time_to"}, ensure_ascii=False),
             tool_call_id=call_id,
             name="update_window",
             status="error",
@@ -215,7 +219,7 @@ def update_window(
         end = _utc_iso(time_to)
         if start >= end:
             message = ToolMessage(
-                content=json.dumps({"ok": False, "error": "time_from должен быть раньше time_to"}, ensure_ascii=False),
+                content=json_dumps({"ok": False, "error": "time_from должен быть раньше time_to"}, ensure_ascii=False),
                 tool_call_id=call_id,
                 name="update_window",
                 status="error",
@@ -263,7 +267,7 @@ def update_window(
     return Command(update={
         "context": updated,
         "messages": [ToolMessage(
-            content=json.dumps(payload, ensure_ascii=False),
+            content=json_dumps(payload, ensure_ascii=False),
             tool_call_id=call_id,
             name="update_window",
         )],
@@ -285,7 +289,7 @@ def log_finding(
     if unknown:
         return Command(update={
             "messages": [ToolMessage(
-                content=json.dumps({
+                content=json_dumps({
                     "ok": False,
                     "error": "Неизвестные evidence_ids",
                     "unknown": unknown,
@@ -306,7 +310,7 @@ def log_finding(
     return Command(update={
         "findings": [note],
         "messages": [ToolMessage(
-            content=json.dumps(note, ensure_ascii=False),
+            content=json_dumps(note, ensure_ascii=False),
             tool_call_id=runtime.tool_call_id if runtime else "",
             name="log_finding",
         )],
@@ -343,7 +347,7 @@ def update_hypothesis(
         error = "Гипотеза с указанным hypothesis_id не найдена"
     if error:
         return Command(update={"messages": [ToolMessage(
-            content=json.dumps({"ok": False, "error": error}, ensure_ascii=False),
+            content=json_dumps({"ok": False, "error": error}, ensure_ascii=False),
             tool_call_id=call_id,
             name="update_hypothesis",
             status="error",
@@ -364,7 +368,7 @@ def update_hypothesis(
     return Command(update={
         "hypotheses": [record.model_dump()],
         "messages": [ToolMessage(
-            content=json.dumps({"ok": True, "hypothesis": record.model_dump()}, ensure_ascii=False),
+            content=json_dumps({"ok": True, "hypothesis": record.model_dump()}, ensure_ascii=False),
             tool_call_id=call_id,
             name="update_hypothesis",
         )],
@@ -396,7 +400,7 @@ def save_report(
     }
     return Command(update={
         "messages": [ToolMessage(
-            content=json.dumps(result, ensure_ascii=False),
+            content=json_dumps(result, ensure_ascii=False),
             tool_call_id=runtime.tool_call_id if runtime else "",
             name="save_report",
         )],
@@ -456,7 +460,7 @@ async def send_report(
 
     update: dict = {
         "messages": [ToolMessage(
-            content=json.dumps(result, ensure_ascii=False),
+            content=json_dumps(result, ensure_ascii=False),
             tool_call_id=runtime.tool_call_id if runtime else "",
             name="send_report",
         )],
@@ -479,7 +483,7 @@ def list_findings(runtime: ToolRuntime = None) -> str:
     findings = state.get("findings") or []
     if not findings:
         return "Записей нет: log_finding ещё не вызывался."
-    return json.dumps(list(enumerate(findings, start=1)), ensure_ascii=False)
+    return json_dumps(list(enumerate(findings, start=1)), ensure_ascii=False)
 
 
 @tool
@@ -489,7 +493,7 @@ def get_finding(index: int, runtime: ToolRuntime = None) -> str:
     findings = state.get("findings") or []
     if not 1 <= index <= len(findings):
         return f"Записи №{index} нет: всего записей {len(findings)}."
-    return json.dumps(findings[index - 1], ensure_ascii=False)
+    return json_dumps(findings[index - 1], ensure_ascii=False)
 
 
 @tool
@@ -503,7 +507,7 @@ def inspect_memory(query: str = "", limit: int = 5, runtime: ToolRuntime = None)
 
     state = runtime.state if runtime else {}
     config = runtime.config if runtime else {}
-    return json.dumps(
+    return json_dumps(
         memory_overview(state, config, query, max(1, min(limit, 10))),
         ensure_ascii=False,
         default=str,
@@ -524,9 +528,9 @@ def search_context_memory(query: str, limit: int = 5) -> str:
             query,
             max(1, min(limit, 10)),
         )
-        return json.dumps({"ok": True, "facts": facts}, ensure_ascii=False)
+        return json_dumps({"ok": True, "facts": facts}, ensure_ascii=False)
     except Exception as exc:
-        return json.dumps({
+        return json_dumps({
             "ok": False,
             "error": f"Context Memory недоступна: {type(exc).__name__}",
         }, ensure_ascii=False)
@@ -551,9 +555,9 @@ def search_similar_cases(query: str, limit: int = 3, runtime: ToolRuntime = None
             max(1, min(limit, 10)),
             (state.get("context") or {}).get("id") or "",
         )
-        return json.dumps({"ok": True, "cases": cases}, ensure_ascii=False, default=str)
+        return json_dumps({"ok": True, "cases": cases}, ensure_ascii=False, default=str)
     except Exception as exc:
-        return json.dumps({
+        return json_dumps({
             "ok": False,
             "error": f"Поиск похожих дел недоступен: {type(exc).__name__}",
         }, ensure_ascii=False)

@@ -1,9 +1,9 @@
 """SSE-клиент таймлайна Earth (Mars API): POST /mars/api/v1/events/timeline → text/event-stream.
 
 События потока: init (скелет intervals), chunk (интервал со значением),
-done (завершение), error (ошибка потока). На выходе — finished-payload прежней
-формы {"status": "finished", "data": [бакеты {from, to, value}]}: timeline_flow
-и merge потребляют без изменений (TD-0018, ревизия Mars API 2026-10-29).
+done (завершение), error (ошибка потока). На выходе — {"status": "finished"|"partial",
+"data": [бакеты {from, to, value}]}: без done данные помечаются частичными,
+чтобы timeline_flow не выдавал их за полный результат (TD-0018, Mars API).
 """
 
 import asyncio
@@ -27,6 +27,10 @@ class TimelineTransportError(Exception):
     def __init__(self, message: str) -> None:
         super().__init__(message)
         self.message = message
+
+
+class TimelineTimeoutError(TimelineTransportError):
+    """Таймаут потока, при котором планировщик может разделить окно."""
 
 
 def _normalize_ts(value: Any) -> Any:
@@ -105,13 +109,13 @@ async def fetch_timeline(
             while True:
                 remaining = deadline - loop.time()
                 if remaining <= 0:
-                    raise TimelineTransportError(f"Таймлайн не посчитался за {settings.ws_wait:.0f} с")
+                    raise TimelineTimeoutError(f"Таймлайн не посчитался за {settings.ws_wait:.0f} с")
                 try:
                     raw = await asyncio.wait_for(stream.__anext__(), timeout=remaining)
                 except StopAsyncIteration:
                     break
                 except TimeoutError:
-                    raise TimelineTransportError(f"Таймлайн не посчитался за {settings.ws_wait:.0f} с") from None
+                    raise TimelineTimeoutError(f"Таймлайн не посчитался за {settings.ws_wait:.0f} с") from None
                 if raw == "":
                     if event_name or data_lines:
                         _on_event(event_name, "\n".join(data_lines))
@@ -124,13 +128,14 @@ async def fetch_timeline(
             if event_name or data_lines:
                 _on_event(event_name, "\n".join(data_lines))
     except httpx.TimeoutException as exc:
-        raise TimelineTransportError(f"Поток таймлайна недоступен (таймаут): {exc}") from None
+        raise TimelineTimeoutError(f"Поток таймлайна недоступен (таймаут): {exc}") from None
     except httpx.HTTPError as exc:
         raise TimelineTransportError(f"Поток таймлайна недоступен: {exc}") from None
 
     if intervals is None:
         raise TimelineTransportError("Поток закрыт без init-скелета")
+    status = "finished" if seen_done else "partial"
     if not seen_done:
-        logger.warning("timeline sse: поток закрыт без done, берём накопленное состояние")
-    logger.info("earth sse: endpoint=timeline buckets={}", len(intervals))
-    return {"status": "finished", "data": intervals}
+        logger.warning("timeline sse: поток закрыт без done, результат помечен частичным")
+    logger.info("earth sse: endpoint=timeline buckets={} status={}", len(intervals), status)
+    return {"status": status, "data": intervals}

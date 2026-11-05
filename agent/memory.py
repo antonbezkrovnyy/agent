@@ -605,7 +605,6 @@ def node_memory_save(state: State, config: RunnableConfig) -> dict:
     audit = memory_audit_markdown(operations, error)
     report_state = {**state, "memory_operations": operations, "memory_error": error}
     extra: dict = {}
-    message = AIMessage(content=audit, name="reporter")
     if state.get("last_report"):
         report = dict(state["last_report"])
         markdown = report.get("markdown") or ""
@@ -615,7 +614,18 @@ def node_memory_save(state: State, config: RunnableConfig) -> dict:
         report, artifacts = create_report_artifacts(title, markdown, report_state)
         report_state["last_report"] = report
         extra = {"last_report": report, "artifacts": Overwrite(artifacts)}
-        message.artifacts = [artifact_url(item) for item in artifacts]
+        final_message = next(
+            (
+                item
+                for item in reversed(state.get("messages") or [])
+                if isinstance(item, AIMessage) and item.name == "reporter" and item.id
+            ),
+            None,
+        )
+        if final_message is not None:
+            message = final_message.model_copy(deep=True)
+            message.artifacts = [artifact_url(item) for item in artifacts]
+            extra["messages"] = [message]
     try:
         memory.save_case(user_id, _case_from_state(report_state, config))
     except Exception as exc:
@@ -625,6 +635,5 @@ def node_memory_save(state: State, config: RunnableConfig) -> dict:
         "memory_facts_saved": saved,
         "memory_operations": operations,
         "memory_error": error,
-        "messages": [message],
         **extra,
     }

@@ -1,6 +1,5 @@
 """Проекция ответов Earth в конверты инструментов (TD-0001…TD-0010)."""
 
-from collections.abc import Mapping
 from typing import Any
 
 from logicore_mcp.domain.errors import EarthError
@@ -8,55 +7,18 @@ from logicore_mcp.domain.errors import EarthError
 ACTIVITY_CEILING = 20
 TOP_VALUES_CEILING = 100
 MESSAGE_PREVIEW_CHARS = 1000
-MATCH_CONTEXT_PAD = 60
-MATCH_CONTEXT_MAX = 160
-MATCH_CONTEXT_ENTRIES = 8
 TOTAL_NOTE = "выдача усечена лимитом; total недостоверен и опущен; точное число под условие — count_events"
 
 
-def _match_entry(message: str, value: str, cap: int) -> dict[str, Any] | None:
-    """Снипет первого вхождения подстроки в полном message (TD-0030)."""
-    position = message.find(value)
-    if position < 0:
-        return None
-    start = max(0, position - MATCH_CONTEXT_PAD)
-    end = min(len(message), position + len(value) + MATCH_CONTEXT_PAD)
-    if end - start > MATCH_CONTEXT_MAX:
-        end = start + MATCH_CONTEXT_MAX
-    context = ("…" if start > 0 else "") + message[start:end] + ("…" if end < len(message) else "")
-    return {"value": value, "position": position, "in_preview": position < cap, "context": context}
-
-
-def truncate_message_rows(
-    rows: list[dict[str, Any]],
-    cap: int = MESSAGE_PREVIEW_CHARS,
-    match_substrings: tuple[str, ...] = (),
-) -> list[dict[str, Any]]:
-    """Копии строк выборки: усечённый message, флаг message_truncated, БЕЗ null-полей (TD-0007, TD-0021).
-
-    Каждая строка отдаёт только заполненные поля (набор у строк свой) — пустые ключи
-    не грузят контекст модели (R-0004); фактический состав колонок — в meta.schema запроса.
-    При contains-подстроках фильтра строка получает match_context — снипеты вхождений
-    из ПОЛНОГО message до усечения: причина матча видна и за пределами preview (TD-0030).
-    Потолок MATCH_CONTEXT_ENTRIES на строку; при превышении — флаг match_context_truncated.
-    """
+def truncate_message_rows(rows: list[dict[str, Any]], cap: int = MESSAGE_PREVIEW_CHARS) -> list[dict[str, Any]]:
+    """Возвращает заполненные поля строк и укорачивает message до preview-размера."""
     truncated: list[dict[str, Any]] = []
     for row in rows:
         clone = {key: value for key, value in row.items() if value is not None}
         message = clone.get("message")
-        if isinstance(message, str):
-            if match_substrings:
-                entries = [entry for entry in (_match_entry(message, s, cap) for s in match_substrings) if entry]
-                if entries:
-                    truncated_ctx = len(entries) > MATCH_CONTEXT_ENTRIES
-                    if truncated_ctx:
-                        clone["match_context"] = entries[:MATCH_CONTEXT_ENTRIES]
-                        clone["match_context_truncated"] = True
-                    else:
-                        clone["match_context"] = entries
-            if len(message) > cap:
-                clone["message"] = message[:cap]
-                clone["message_truncated"] = True
+        if isinstance(message, str) and len(message) > cap:
+            clone["message"] = message[:cap]
+            clone["message_truncated"] = True
         truncated.append(clone)
     return truncated
 
@@ -89,7 +51,7 @@ def build_activity(items: list[dict[str, Any]]) -> dict[str, Any]:
     ]
     return {
         "distinct": len(items),
-        "complete": len(items) <= ACTIVITY_CEILING,
+        "complete": len(items) < ACTIVITY_CEILING,
         "moments": moments,
     }
 
@@ -101,9 +63,9 @@ def build_search_response(
     meta_schema: list[dict[str, Any]] | None,
     requested_columns: tuple[str, ...],
     window: dict[str, str],
-    filter_applied: Mapping[str, Any] | None,
+    filter_applied: str | None,
     activity: dict[str, Any] | None = None,
-    order: str = "desc",
+    order: Any = "desc",
     page: int = 1,
     per_page: int | None = None,
 ) -> dict[str, Any]:

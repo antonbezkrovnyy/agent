@@ -86,6 +86,11 @@ def _business_error(payload: dict[str, Any]) -> EarthError:
     message = payload.get("message") or "без сообщения"
     if "Ошибка получения данных" in str(message):
         return EarthError("Фильтр не поддержан или некорректен для Earth", hint=str(message))
+    if "bad sql string" in str(message).lower():
+        return EarthError(
+            "MARS отклонил SQL/IQL-выражение",
+            hint="Проверьте iql: это одно WHERE-условие без SELECT и ';'. Исправьте синтаксис и повторите.",
+        )
     return EarthError(f"Ошибка Earth: {message}", hint=None)
 
 
@@ -277,11 +282,14 @@ class HttpEarthClient:
 
     async def timeline(self, request: dict[str, Any]) -> dict[str, Any]:
         """Гистограмма окна: SSE-поток Mars API /events/timeline (TD-0018, ревизия 2026-10-29)."""
-        from logicore_mcp.earth.timeline_sse import TimelineTransportError, fetch_timeline
+        from logicore_mcp.earth.timeline_sse import TimelineTimeoutError, TimelineTransportError, fetch_timeline
 
         token = await self._auth.token()
         try:
-            result = await fetch_timeline(self._http._client, self._settings, token, request)
+            async with self._http._gate:
+                result = await fetch_timeline(self._http._client, self._settings, token, request)
+        except TimelineTimeoutError as exc:
+            raise EarthTimeoutError("Таймлайн Earth не успел завершиться", hint=EARTH_TIMEOUT_HINT) from exc
         except TimelineTransportError as exc:
             raise EarthError(exc.message, hint="Таймлайн Earth недоступен; объёмы — count_events.") from exc
         logger.info("earth call: endpoint=timeline status=200 user={}", self._settings.user)

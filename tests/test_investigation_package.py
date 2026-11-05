@@ -3,11 +3,23 @@ import csv
 import io
 import json
 import zipfile
+from datetime import UTC, datetime
 from types import SimpleNamespace
 
 from evidence import chain_markdown, queries_markdown
 from reporting import build_investigation_package
 from tools import save_report
+
+
+def test_manifest_serializes_datetime_as_iso():
+    state = state_with_evidence()
+    moment = datetime(2026, 11, 5, 3, 0, tzinfo=UTC)
+    state["run_metrics"] = [{"started_at": moment}]
+
+    _, url, _ = build_investigation_package("Проверка", "# Вывод", state)
+    manifest = json.loads(unzip(url).read("manifest.json"))
+
+    assert manifest["run_metrics"][0]["started_at"] == moment.isoformat()
 
 
 def state_with_evidence():

@@ -1,6 +1,22 @@
+import json
+from datetime import UTC, datetime
+
 from conftest import FakeAgent, FakeStructured, ai, build_graph, intent, invoke, tc
 from contracts import InvestigationPlan, InvestigationScope, ScopeDirection, WorkItem
+from prompts import structured_block, work_item_block
 from scope import _normalized_scope
+
+
+def test_structured_blocks_serialize_datetime_as_iso():
+    moment = datetime(2026, 11, 5, 3, 0, tzinfo=UTC)
+    block = structured_block("Данные", {"window": {"time_from": moment}})
+    item_block = work_item_block({
+        "active_work_item": {"id": "main", "requested_window": {"time_from": moment}},
+    })
+
+    payload = json.loads(block.split(":\n", 1)[1])
+    assert payload["window"]["time_from"] == "2026-11-05T03:00:00+00:00"
+    assert moment.isoformat() in item_block
 
 
 def scope(mode="discovery", max_items=3, optional=None, alert=None):

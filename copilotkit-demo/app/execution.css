@@ -1,0 +1,36 @@
+.execution-view { display: grid; gap: 14px; }
+.graph-legend { display: flex; flex-wrap: wrap; gap: 16px; margin-bottom: 10px; color: var(--muted); font-size: 11px; }
+.graph-legend span { display: inline-flex; align-items: center; gap: 6px; }
+.graph-dot { width: 8px; height: 8px; border-radius: 2px; background: #314058; }
+.graph-dot.active { background: var(--accent); }
+.graph-canvas { overflow: auto; border: 1px solid var(--border); border-radius: 9px; background: #0a111e; }
+.graph-edge { fill: none; stroke: #52627a; stroke-width: 1.3; }
+.graph-edge.conditional { stroke-dasharray: 4 4; }
+.graph-edge + marker path, #graph-arrow path { fill: #52627a; }
+.graph-node rect { fill: #111b2c; stroke: #334259; }
+.graph-node text { fill: #b7c3d5; font-size: 11px; font-family: ui-monospace, monospace; }
+.graph-node.active rect { fill: #123432; stroke: var(--accent); stroke-width: 2; }
+.graph-node.active text { fill: #8df0d7; font-weight: 700; }
+.subgraph-list { display: flex; gap: 8px; margin-top: 10px; }
+.subgraph-list span { padding: 4px 9px; border: 1px solid var(--border); border-radius: 6px; color: var(--muted); font: 11px ui-monospace, monospace; }
+.subgraph-list span.active { border-color: var(--accent); color: var(--accent); }
+.execution-grid { display: grid; grid-template-columns: minmax(0, 1.15fr) minmax(0, .85fr); gap: 14px; align-items: start; }
+.execution-grid select { max-width: 170px; }
+.prompt-list, .execution-message-list { display: grid; gap: 9px; }
+.prompt-card, .execution-message { border: 1px solid var(--border); border-radius: 8px; padding: 10px 12px; background: #0d1625; }
+.prompt-card-heading, .execution-message-meta { display: flex; flex-wrap: wrap; align-items: baseline; gap: 8px; }
+.prompt-card-heading strong { color: var(--accent); }
+.prompt-card-heading span, .prompt-card-heading time, .execution-message-meta small { color: var(--muted); font-size: 10px; }
+.prompt-card-heading time { margin-left: auto; }
+.prompt-card-meta { margin: 5px 0 8px; overflow: hidden; color: var(--muted); font-size: 10px; text-overflow: ellipsis; white-space: nowrap; }
+.prompt-card details, .tool-call-detail { margin-top: 7px; }
+.prompt-card summary, .tool-call-detail summary { cursor: pointer; color: #b8c5d8; font-size: 11px; }
+.prompt-text, .execution-message pre, .tool-call-detail pre { overflow: auto; margin: 8px 0 0; color: #c5d0df; font: 11px/1.55 ui-monospace, SFMono-Regular, Consolas, monospace; white-space: pre-wrap; overflow-wrap: anywhere; }
+.prompt-text { max-height: 520px; padding: 10px; border-radius: 6px; background: #080f1b; }
+.prompt-messages { display: grid; gap: 7px; margin-top: 8px; }
+.execution-message pre { max-height: 320px; }
+.execution-message-meta { color: var(--muted); font-size: 10px; }
+.execution-message-meta strong { color: #c5d0df; font-size: 11px; }
+.message-tool { border-left: 2px solid #50749c; }
+.message-ai { border-left: 2px solid var(--accent); }
+@media (max-width: 1400px) { .execution-grid { grid-template-columns: 1fr; } }

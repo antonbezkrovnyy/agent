@@ -8,6 +8,8 @@ Mars API, Aegra предоставляет API и checkpoints, Phoenix соби�
 
 - **этот README** — что работает сейчас и как запустить;
 - [DEV.md](docs/DEV.md) — полное руководство по работе и устройству агента;
+- [logicore-mcp/README.md](logicore-mcp/README.md) — handoff MCP: запуск, контракты,
+  IQL, ограничения и приёмочные сценарии;
 - [ROADMAP.md](docs/ROADMAP.md) — только планируемые доработки и их приёмочные сценарии;
 - [EVALUATION.md](docs/EVALUATION.md) — фоновая оценка runs по Phoenix;
 - [OBSERVABILITY.md](docs/OBSERVABILITY.md) — текущая интеграция Phoenix, metadata и retention;
@@ -32,7 +34,8 @@ Mars API, Aegra предоставляет API и checkpoints, Phoenix соби�
 - Skills `incident_dating`, `event_drilldown` и `entity_pivot` v1 автоматически
   выбираются по задаче. Есть адаптивные окна, разбор `uuid + timestamp`, typed
   anchors, дедупликация `type:value`, ограничения глубины/ширины и `NOT_CHECKED`.
-- Поиск, подсчёт и агрегаты через 12 read-only MCP-инструментов.
+- Поиск, подсчёт и агрегаты через 12 read-only MCP-инструментов. Фильтры принимаются
+  как готовый `iql` и передаются в MARS напрямую, без JsonLogic-трансляции.
 - Отдельные Quick, Deep Investigation и Reporting-субграфы с delta-границей,
   которая не дублирует additive state в supervisor.
 - Приватные tool-циклы scout, investigator и reporter через `create_agent` и
@@ -91,51 +94,47 @@ Multiuser/OIDC намеренно не реализуется. Текущий an
 |---|---:|---|
 | `aegra` | 2026 | LangGraph/Aegra API, workers и checkpoints |
 | `agent-chat-ui` | 3000 | Веб-чат на Next.js |
-| `agui-agent` | 2027 | AG-UI sandbox: in-process обёртка пакета `agent/` по протоколу AG-UI |
-| `copilotkit-demo` | 3001 | CopilotKit-чат поверх AG-UI sandbox (песочница, не прод) |
+| `agui-agent` | 2027 | AG-UI адаптер и control API поверх Aegra runs, без второго графа |
+| `copilotkit-demo` | 3001 | CopilotKit-рабочий стол аналитика поверх общих Aegra threads |
 | `logicore-mcp` | 9000, только Docker-сеть | 12 read-only MCP-инструментов |
 | `agent-mcp` | 9100 | Асинхронный MCP-интерфейс расследований |
 | `agent-evaluator` | 9200, только Docker-сеть | Фоновая оценка завершённых runs |
 | `seaweedfs` | 8333 | S3-файлы отчётов и пакетов Evidence |
 | `anomaly-relay` | 2025 | Webhook LogiCore → тред и run |
 | `postgres` | 5432 | Состояние Aegra, не отдельная память случаев |
-| `agent-memory-db` | только Docker-сеть | Case Store и Context Memory в схеме `agent_memory`, pgvector |
+| `agent-memory-db` | только Docker-сеть | Case Store, Context Memory и журнал исполнения в `agent_memory`, pgvector |
 | `redis` | 6379 | Очередь задач и SSE-брокер |
 | `phoenix` | 6006 | OpenInference/OpenTelemetry-трассировка |
 
-### AG-UI sandbox
+### AG-UI copilot
 
-`agui-agent` (порт 2027) поднимает тот же пакет `agent/` in-process и отдаёт
-ход расследования событиями протокола [AG-UI](https://github.com/ag-ui-protocol/ag-ui)
-через `POST /agent` (SSE): `RUN_*`, `STEP_*`, `TEXT_MESSAGE_*`, `TOOL_CALL_*`,
-`STATE_SNAPSHOT/DELTA`. `copilotkit-demo` (порт 3001) — рабочий стол аналитика
-поверх этого эндпоинта; чат открывается отдельной панелью и не сжимает dashboard.
+`agui-agent` (порт 2027) преобразует AG-UI запросы в Aegra runs API и возвращает
+`RUN_*`, `STEP_*`, `TEXT_MESSAGE_*`, `TOOL_CALL_*`, `STATE_SNAPSHOT` и `RAW`.
+Собственного графа и `InMemorySaver` у адаптера нет: CopilotKit и основной чат
+используют общие Aegra threads, runs и PostgreSQL checkpoints. После перезагрузки
+страницы состояние восстанавливается, активный run подключается повторно без нового
+запуска. `copilotkit-demo` (порт 3001) — рабочий стол аналитика с отдельной панелью чата.
 
-На вкладке «Расследование» доступны текущая задача, KPI, гипотезы, находки,
-метрики ролей и компактное дерево «этап плана → вызовы инструментов». Ветки
-сворачиваются, активный этап раскрывается автоматически, длинные списки вызовов
-показываются порциями. Поиск ищет по этапу, инструменту, Evidence ID и запросу;
-фильтр «Только проблемы» оставляет failed-этапы и вызовы `partial/error`. Вызовы
-без work item группируются по инструментам, а неоднозначно привязанные к плану —
-в «Общие вызовы». Клик по вызову открывает полную запись на вкладке Evidence.
+Вкладка «Обзор» содержит текущую задачу, KPI, план, гипотезы, находки, метрики и
+компактное дерево «этап → вызовы». Есть поиск, фильтр проблем, сворачивание веток
+и постраничное раскрытие длинных списков. «Агенты и граф» показывает топологию
+supervisor и субграфов, фактические system prompts, входные сообщения и приватные
+tool-циклы ролей. Prompts сохраняются в `agent_memory.execution_events` вне
+checkpoint, чтобы не раздувать состояние графа.
 
-Вкладка «Запросы и доказательства» показывает таблицы результатов и фактический
-запрос LogiCore с окном для повторной проверки. LogiCore возвращает IQL, не SQL;
-интерфейс не подменяет один язык запросов другим. Вкладка «Итоговый отчёт»
-рендерит Markdown, claims, ограничения и файлы отчёта.
+«Пауза и откат» использует Aegra control API: ручная остановка, resume,
+`interrupt_after` для пошагового режима, история checkpoints и ветвление от выбранного
+состояния без удаления истории. Задача, pending work items и prompt override меняются
+через валидированные формы, а не произвольный JSON. Отдельный opt-in останавливает
+Scout/Investigator/Reporter перед tool calls; обязательных approval-интерраптов нет.
+Ручные read-only MCP-вызовы доступны только на паузе и сохраняются как обычные
+`EvidenceRecord`. «Скорректировать ход» по-прежнему отправляет follow-up после
+текущего run, не меняя выполняющийся граф.
 
-Панель «Скорректировать ход» принимает уточнения без interrupt. Во время активного
-run сообщение ставится в локальную очередь и отправляется новым run в том же треде
-только после завершения текущего; уже выполняющийся граф оно не изменяет. Очередь
-можно просмотреть и удалить из неё сообщения до отправки. Вне run уточнение
-отправляется сразу. Кнопка «Остановить run» вызывает AG-UI `abortRun()` и не
-добавляет в граф approval-интеррапт.
-
-Песочница изолирована: треды и runs живут отдельно от Aegra, сбой sandbox не влияет
-на основной стек. `STATE_SNAPSHOT` содержит полное состояние графа (intent, scope,
-гипотезы, Evidence, `tool_usage`), поток событий большой — это нормально для
-локального просмотра. До первого run вместо нулевых KPI показывается короткий
-сценарий работы и пример запроса.
+«Запросы и доказательства» показывает таблицы результатов, фактические аргументы,
+IQL и окна. LogiCore возвращает IQL, не SQL. «Итоговый отчёт» рендерит Markdown,
+claims, ограничения и файлы отчёта. План реализации и приёмочные сценарии —
+[AG_UI_COPILOT_PLAN.md](docs/AG_UI_COPILOT_PLAN.md).
 
 Для правок демо без пересборки образа: `docker compose stop copilotkit-demo`, затем
 `cd copilotkit-demo && npm install && COPILOTKIT_TELEMETRY_DISABLED=true npm run dev` —
@@ -259,7 +258,8 @@ flowchart TD
 проходит критиков.
 
 Публичный `messages` содержит только сообщения пользователя и финальные ответы.
-Tool-циклы остаются в `scout_msgs`, `inv_msgs`, `rep_msgs`.
+Tool-циклы остаются в `scout_msgs`, `inv_msgs`, `rep_msgs`. Аудит памяти не создаёт
+отдельный AI-ответ; обновлённые файлы прикрепляются к исходному ответу Reporter.
 
 `memory_retrieve` ищет до пяти релевантных фактов и до трёх похожих дел при старте
 quick/deep. Scout и investigator могут повторить поиск через `search_context_memory`
@@ -399,13 +399,16 @@ Autopilot не отменяет эти ограничения.
 │   ├── evidence.py        # Evidence Bundle и цепочка расследования
 │   ├── progress.py        # статус, лимиты и suggestion-действия
 │   ├── llm.py             # LLM и Pydantic-схемы ответов
+│   ├── execution_audit.py # фактические model inputs вне checkpoints
+│   ├── control_overrides.py # run-scoped prompt overrides
+│   ├── step_mode.py       # opt-in пауза перед tool calls
 │   ├── state.py           # общие Evidence/Case/Memory Channels
 │   ├── tools.py           # MCP tools, Evidence и findings
 │   ├── skills/            # registry, контракты и playbooks
 │   └── prompts/           # системные промпты
-├── logicore-mcp/          # MCP-сервер и пагинация Mars API
+├── logicore-mcp/          # MCP-сервер, пагинация Mars API и handoff README
 ├── agent-mcp/             # Асинхронный MCP-интерфейс расследований
-├── agui-agent/            # Изолированный AG-UI endpoint поверх графа
+├── agui-agent/            # AG-UI и control API поверх Aegra
 ├── copilotkit-demo/       # Рабочий стол аналитика и CopilotKit-чат
 ├── agent-evaluator/       # Фоновая оценка runs по Phoenix
 ├── anomaly-relay/         # webhook LogiCore

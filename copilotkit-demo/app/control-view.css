@@ -1,0 +1,32 @@
+.control-view { display: grid; gap: 13px; }
+.control-summary { display: grid; grid-template-columns: minmax(180px, 1.2fr) minmax(120px, .6fr) minmax(180px, 1fr) auto; gap: 12px; align-items: center; padding: 12px 14px; border: 1px solid var(--border); border-radius: 10px; background: var(--panel); }
+.control-summary > div > span { display: block; margin-bottom: 4px; color: var(--muted); font-size: 10px; }
+.control-summary strong { display: block; overflow: hidden; font: 11px ui-monospace, monospace; text-overflow: ellipsis; white-space: nowrap; }
+.control-actions { display: flex; gap: 7px; }
+.control-notice { padding: 9px 12px; border: 1px solid #276853; border-radius: 8px; color: #8dd8b9; background: #10271f; font-size: 12px; }
+.control-tabs { display: flex; gap: 3px; overflow-x: auto; border-bottom: 1px solid var(--border); }
+.control-tabs button { padding: 9px 13px; border: 0; border-bottom: 2px solid transparent; color: var(--muted); background: transparent; cursor: pointer; white-space: nowrap; }
+.control-tabs button.active { border-color: var(--accent); color: var(--accent); }
+.run-facts p { color: var(--muted); font-size: 12px; line-height: 1.55; }
+.run-facts strong { color: var(--text); }
+.edit-items { display: grid; gap: 10px; margin-bottom: 12px; }
+.edit-item { display: grid; gap: 8px; padding: 11px; border: 1px solid var(--border); border-radius: 8px; background: #0d1624; }
+.edit-item > div { display: flex; justify-content: space-between; }
+.edit-item > div span { color: var(--muted); font-size: 11px; }
+.control-view label { display: grid; gap: 5px; margin-bottom: 10px; color: var(--muted); font-size: 11px; }
+.control-view input, .control-view textarea, .control-view select { width: 100%; }
+.prompt-editor, .task-editor { font: 11px/1.55 ui-monospace, monospace; }
+.checkpoint-list { display: grid; gap: 8px; }
+.checkpoint-card { padding: 10px 12px; border: 1px solid var(--border); border-radius: 8px; background: #0d1624; }
+.checkpoint-card > div { display: flex; flex-wrap: wrap; gap: 7px; justify-content: space-between; }
+.checkpoint-card p { margin: 6px 0; color: var(--muted); font-size: 11px; }
+.checkpoint-card small { display: block; overflow: hidden; margin-bottom: 8px; color: var(--muted); font: 10px ui-monospace, monospace; text-overflow: ellipsis; }
+.checkpoint-card time { color: var(--muted); font-size: 10px; }
+.manual-tool-form { display: grid; gap: 10px; }
+.tool-schema { padding: 9px 11px; border: 1px solid var(--border); border-radius: 7px; }
+.tool-schema p { color: var(--muted); font-size: 11px; }
+.tool-schema pre { overflow: auto; max-height: 260px; font-size: 10px; white-space: pre-wrap; }
+.manual-tool-result { padding: 10px 12px; border: 1px solid #276853; border-radius: 8px; background: #10271f; }
+.manual-tool-result > div { display: flex; justify-content: space-between; gap: 10px; }
+.manual-tool-result p, .manual-tool-result small { color: #a8cbbb; font-size: 11px; }
+@media (max-width: 1200px) { .control-summary { grid-template-columns: 1fr 1fr; } }

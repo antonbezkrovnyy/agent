@@ -3,6 +3,8 @@
 from langchain_core.messages import HumanMessage, SystemMessage
 
 import llm as llm_mod
+from execution_audit import audit_messages
+from control_overrides import with_prompt_override
 from config import Settings
 from contracts import InvestigationPlan, InvestigationScope, WorkItem
 from observability import trace_config
@@ -111,6 +113,8 @@ def node_planner(state: State) -> dict:
             )),
             HumanMessage(content="Сформируй InvestigationPlan по текущей задаче."),
         ]
+        messages = with_prompt_override(state, "planner", messages)
+        audit_messages("planner", state, messages)
         try:
             response = llm_mod.planner_llm.invoke(messages, config=trace_config("planner", state))
             plan = response if isinstance(response, InvestigationPlan) else InvestigationPlan.model_validate(response)

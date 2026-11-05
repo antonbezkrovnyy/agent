@@ -8,11 +8,10 @@ time_from — БЕЗ дефолта: попадает в required inputSchema, �
 обязан заполнить поле (TD-0023).
 """
 
-import json
 from collections.abc import Callable
-from typing import Annotated, Any
+from typing import Annotated, Literal
 
-from pydantic import AfterValidator, BeforeValidator, Field
+from pydantic import AfterValidator, BaseModel, Field
 
 
 def _non_empty_time_from(value: str) -> str:
@@ -24,27 +23,12 @@ def _non_empty_time_from(value: str) -> str:
     return value
 
 
-def _parse_filter(value: Any) -> Any:
-    """F-D2 (ses_fc33): хост может сериализовать JsonLogic-объект в строку —
-    разворачиваем до валидации типа, чтобы ответ остался русским текстом
-    конверта, а не сырой pydantic-ошибкой."""
-    if isinstance(value, str):
-        try:
-            parsed = json.loads(value)
-        except json.JSONDecodeError as exc:
-            raise ValueError(
-                "filter — JsonLogic-дерево как объект, не строка: "
-                '{"==": [{"var": "action"}, "login"]}. '
-                f"Передана строка, JSON не распарсился: {exc.msg}."
-            ) from exc
-        if not isinstance(parsed, dict):
-            raise ValueError(
-                "filter — JsonLogic-дерево как объект: "
-                '{"==": [{"var": "action"}, "login"]}. '
-                "Строка распарсилась, но это не объект."
-            )
-        return parsed
-    return value
+def _non_empty_iql(value: str | None) -> str | None:
+    if value is None:
+        return None
+    if not value.strip():
+        raise ValueError("iql должен быть непустой строкой, например \"action = 'login'\".")
+    return value.strip()
 
 
 def _search_limit(value: int) -> int:
@@ -128,8 +112,8 @@ TIME_TO_PARAM = Annotated[
 ]
 
 FILTER_PARAM = Annotated[
-    dict[str, Any] | None,
-    BeforeValidator(_parse_filter),
+    str | None,
+    AfterValidator(_non_empty_iql),
 ]
 
 FIELD_PARAM = Annotated[
@@ -206,11 +190,8 @@ COLUMNS_PARAM = Annotated[
     Field(
         description=(
             "Своя проекция выборки: до 20 имён из logicore://schema/fields, дубликаты "
-            "схлопываются. По умолчанию — серверная проекция. message допустим, усекается "
-            "до 1000 символов (message_truncated: true); при contains-фильтре по message "
-            "строка несёт match_context — снипет вхождения подстроки из полного message "
-            "— почему строка сматчилась, видно и за пределами усечения (потолок 8 "
-            "снипетов, свыше — match_context_truncated: true)."
+            "схлопываются. По умолчанию — серверная проекция. message допустим и усекается "
+            "до 1000 символов (message_truncated: true); полный текст — через get_event."
         ),
         json_schema_extra={"maxItems": 20},
     ),
@@ -237,5 +218,51 @@ ORDER_PARAM = Annotated[
             'Порядок строк по timestamp: "desc" (дефолт) — свежие сверху, "asc" — старейшие '
             "сверху. Свежесть потока: первая строка при desc — самое новое событие окна."
         )
+    ),
+]
+
+
+
+class GroupFilter(BaseModel):
+    column: str = Field(min_length=1, description="Поле из logicore://schema/fields.")
+    value: str | list[str] | None = Field(
+        default=None,
+        description="Значение поля, список значений или null для IS NULL.",
+    )
+
+
+class OrderItem(BaseModel):
+    column: str = Field(min_length=1, description="Поле сортировки из logicore://schema/fields.")
+    action: Literal["ASC", "DESC"] = Field(description="Направление сортировки: ASC или DESC.")
+
+
+GROUPS_PARAM = Annotated[
+    list[GroupFilter] | None,
+    Field(
+        description=(
+            "Дополнительные равенства MARS data.query.groups, объединяются по AND. "
+            "Это не GROUP BY. Обычно условие проще записать прямо в iql."
+        )
+    ),
+]
+
+ORDER_BY_PARAM = Annotated[
+    list[OrderItem] | None,
+    Field(
+        description=(
+            "Полная сортировка MARS: [{column, action: ASC|DESC}], применяется по порядку. "
+            "Если задано, заменяет простой order. Без него — timestamp + uuid."
+        )
+    ),
+]
+
+QUERY_LIMIT_PARAM = Annotated[
+    int | None,
+    Field(
+        description=(
+            "Общий потолок строк MARS data.query.limit, от 1. Это НЕ размер страницы: "
+            "достижение потолка означает неполный результат и complete=false."
+        ),
+        json_schema_extra={"minimum": 1},
     ),
 ]

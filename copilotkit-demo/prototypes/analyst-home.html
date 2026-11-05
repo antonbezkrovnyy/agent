@@ -1,0 +1,324 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>LogiCore — Рабочий стол аналитика</title>
+  <style>
+    :root {
+      --bg: #f3f5f8;
+      --surface: #ffffff;
+      --surface-soft: #f8fafc;
+      --ink: #17202c;
+      --muted: #667386;
+      --line: #dfe4eb;
+      --nav: #111c2e;
+      --nav-muted: #9aa8bb;
+      --accent: #166b5b;
+      --accent-soft: #e6f3ef;
+      --blue: #2b5f96;
+      --blue-soft: #eaf1f8;
+      --amber: #945b09;
+      --amber-soft: #fff4db;
+      --red: #a13939;
+      --red-soft: #fdecec;
+      --shadow: 0 2px 10px rgba(20, 32, 48, .05);
+    }
+    * { box-sizing: border-box; }
+    body { margin: 0; color: var(--ink); background: var(--bg); font: 13px/1.45 Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+    button, input, select { font: inherit; }
+    button { cursor: pointer; }
+    button:focus-visible, input:focus-visible, select:focus-visible, a:focus-visible { outline: 3px solid rgba(22,107,91,.25); outline-offset: 2px; }
+    .app { display: grid; grid-template-columns: 218px minmax(0, 1fr); min-height: 100vh; }
+    .sidebar { position: sticky; top: 0; height: 100vh; padding: 22px 14px; color: #fff; background: var(--nav); }
+    .brand { display: flex; align-items: center; gap: 10px; padding: 0 10px 24px; }
+    .brand-mark { display: grid; place-items: center; width: 31px; height: 31px; border: 1px solid #4b657f; border-radius: 7px; color: #7ee0c5; font: 700 13px ui-monospace, monospace; }
+    .brand strong { display: block; font-size: 15px; letter-spacing: .2px; }
+    .brand small { display: block; margin-top: 2px; color: var(--nav-muted); font-size: 10px; }
+    .nav-title { margin: 18px 10px 7px; color: #73849a; font-size: 10px; font-weight: 700; letter-spacing: .8px; text-transform: uppercase; }
+    .nav button { display: flex; align-items: center; justify-content: space-between; width: 100%; padding: 9px 10px; border: 0; border-radius: 6px; color: var(--nav-muted); background: transparent; text-align: left; }
+    .nav button:hover, .nav button.active { color: #fff; background: #203047; }
+    .nav button.active { box-shadow: inset 2px 0 #65d3b6; }
+    .nav .count { min-width: 22px; padding: 1px 5px; border-radius: 4px; color: #b8c4d3; background: #2a3a51; font-size: 10px; text-align: center; }
+    .sidebar-foot { position: absolute; bottom: 20px; left: 24px; right: 24px; color: #718299; font-size: 10px; }
+    main { min-width: 0; }
+    .topbar { position: sticky; top: 0; z-index: 5; display: flex; align-items: center; gap: 14px; min-height: 64px; padding: 12px 26px; border-bottom: 1px solid var(--line); background: rgba(255,255,255,.96); }
+    .topbar h1 { margin: 0; font-size: 19px; letter-spacing: -.3px; }
+    .topbar .date { color: var(--muted); font-size: 11px; }
+    .global-search { position: relative; flex: 1; max-width: 460px; margin-left: auto; }
+    .global-search input { width: 100%; height: 36px; padding: 0 12px 0 34px; border: 1px solid var(--line); border-radius: 7px; color: var(--ink); background: var(--surface-soft); }
+    .global-search::before { content: "⌕"; position: absolute; left: 11px; top: 5px; color: var(--muted); font-size: 19px; }
+    .btn { min-height: 34px; padding: 7px 12px; border: 1px solid var(--line); border-radius: 6px; color: var(--ink); background: #fff; font-weight: 600; font-size: 12px; }
+    .btn:hover { background: var(--surface-soft); }
+    .btn-primary { border-color: var(--accent); color: #fff; background: var(--accent); }
+    .btn-primary:hover { background: #11584b; }
+    .btn-small { min-height: 28px; padding: 4px 8px; font-size: 11px; }
+    .btn-link { padding: 0; border: 0; color: var(--blue); background: transparent; font-weight: 600; }
+    .content { max-width: 1660px; margin: 0 auto; padding: 22px 26px 36px; }
+    .system-strip { display: flex; align-items: center; gap: 12px; margin-bottom: 18px; padding: 10px 13px; border: 1px solid #cfe1da; border-radius: 8px; background: #f0f8f5; }
+    .status-dot { flex: 0 0 auto; width: 8px; height: 8px; border-radius: 50%; background: #208269; }
+    .system-strip strong { color: #165c4e; font-size: 12px; }
+    .system-services { display: flex; flex-wrap: wrap; gap: 5px; }
+    .service { padding: 2px 7px; border: 1px solid #d4e4dd; border-radius: 4px; color: #3f665c; background: #fff; font-size: 10px; }
+    .service.warn { border-color: #ead6a7; color: var(--amber); background: #fffaf0; }
+    .system-time { margin-left: auto; color: var(--muted); font-size: 10px; white-space: nowrap; }
+    .workspace { display: grid; grid-template-columns: minmax(0, 1fr) 320px; gap: 18px; align-items: start; }
+    .panel { margin-bottom: 18px; border: 1px solid var(--line); border-radius: 9px; background: var(--surface); box-shadow: var(--shadow); }
+    .panel-head { display: flex; align-items: center; gap: 12px; min-height: 52px; padding: 12px 15px; border-bottom: 1px solid var(--line); }
+    .panel-head h2 { margin: 0; font-size: 14px; }
+    .panel-head .meta { color: var(--muted); font-size: 11px; }
+    .panel-head .actions { display: flex; gap: 8px; margin-left: auto; }
+    .filters { display: flex; gap: 5px; padding: 10px 15px; border-bottom: 1px solid var(--line); }
+    .filter { padding: 4px 8px; border: 1px solid transparent; border-radius: 5px; color: var(--muted); background: transparent; font-size: 11px; }
+    .filter.active { border-color: #bcd5cd; color: var(--accent); background: var(--accent-soft); font-weight: 700; }
+    table { width: 100%; border-collapse: collapse; }
+    th { padding: 8px 12px; color: var(--muted); background: var(--surface-soft); font-size: 10px; font-weight: 700; letter-spacing: .3px; text-align: left; text-transform: uppercase; }
+    td { padding: 11px 12px; border-top: 1px solid #edf0f4; vertical-align: middle; }
+    tbody tr { cursor: pointer; }
+    tbody tr:hover { background: #f5f9f8; }
+    .case-id { margin-bottom: 3px; color: var(--muted); font: 10px ui-monospace, monospace; }
+    .case-title { max-width: 440px; font-weight: 650; }
+    .case-summary { margin-top: 3px; color: var(--muted); font-size: 11px; }
+    .badge { display: inline-flex; align-items: center; padding: 3px 7px; border-radius: 4px; font-size: 10px; font-weight: 700; white-space: nowrap; }
+    .badge-critical { color: var(--red); background: var(--red-soft); }
+    .badge-high { color: #a34c28; background: #fff0e8; }
+    .badge-medium { color: var(--amber); background: var(--amber-soft); }
+    .badge-low { color: var(--blue); background: var(--blue-soft); }
+    .badge-active { color: var(--accent); background: var(--accent-soft); }
+    .badge-paused { color: var(--amber); background: var(--amber-soft); }
+    .badge-review { color: var(--blue); background: var(--blue-soft); }
+    .badge-neutral { color: var(--muted); background: #edf0f4; }
+    .cell-muted { color: var(--muted); font-size: 11px; }
+    .run-list, .report-list, .memory-list, .chat-list { margin: 0; padding: 0; list-style: none; }
+    .run-item, .report-item, .memory-item, .chat-item { padding: 12px 14px; border-bottom: 1px solid #edf0f4; }
+    .run-item:last-child, .report-item:last-child, .memory-item:last-child, .chat-item:last-child { border-bottom: 0; }
+    .item-top { display: flex; align-items: flex-start; justify-content: space-between; gap: 8px; }
+    .item-title { font-weight: 650; }
+    .item-text { margin: 4px 0 0; color: var(--muted); font-size: 11px; }
+    .item-meta { margin-top: 7px; color: var(--muted); font-size: 10px; }
+    .item-actions { display: flex; gap: 7px; margin-top: 9px; }
+    .run-stage { margin: 8px 0 6px; color: var(--blue); font-size: 11px; }
+    .run-bar { height: 3px; margin-top: 9px; background: #e6ebf0; }
+    .run-bar span { display: block; height: 100%; background: var(--blue); }
+    .memory-type { color: var(--accent); font-size: 10px; font-weight: 700; text-transform: uppercase; }
+    .memory-type.observed { color: var(--amber); }
+    .memory-source { margin-top: 6px; color: var(--muted); font-size: 10px; }
+    .section-note { margin: 0; padding: 11px 14px; color: var(--muted); background: var(--surface-soft); font-size: 10px; }
+    .chat-unread { width: 6px; height: 6px; margin-top: 6px; border-radius: 50%; background: var(--accent); }
+    .empty { padding: 24px; color: var(--muted); text-align: center; }
+    .drawer-backdrop { position: fixed; inset: 0; z-index: 20; display: none; background: rgba(10,18,28,.28); }
+    .drawer-backdrop.open { display: block; }
+    .drawer { position: absolute; top: 0; right: 0; width: min(520px, 94vw); height: 100%; overflow-y: auto; padding: 22px; background: var(--surface); box-shadow: -10px 0 30px rgba(20,30,45,.15); }
+    .drawer-head { display: flex; justify-content: space-between; gap: 16px; padding-bottom: 16px; border-bottom: 1px solid var(--line); }
+    .drawer h2 { margin: 7px 0 0; font-size: 20px; line-height: 1.3; }
+    .drawer h3 { margin: 22px 0 9px; font-size: 13px; }
+    .drawer-close { width: 30px; height: 30px; border: 1px solid var(--line); border-radius: 6px; background: #fff; }
+    .fact-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin-top: 15px; }
+    .fact { padding: 10px; border: 1px solid var(--line); border-radius: 6px; background: var(--surface-soft); }
+    .fact strong { display: block; font-size: 17px; }
+    .fact span { color: var(--muted); font-size: 10px; }
+    .evidence-row { padding: 10px 0; border-bottom: 1px solid #edf0f4; }
+    .evidence-row strong { display: block; }
+    .evidence-row small { color: var(--muted); }
+    .drawer-actions { display: flex; gap: 8px; margin-top: 20px; }
+    .toast { position: fixed; right: 22px; bottom: 22px; z-index: 30; display: none; max-width: 360px; padding: 11px 14px; border: 1px solid #bcd5cd; border-radius: 7px; color: #165c4e; background: #f0f8f5; box-shadow: var(--shadow); }
+    .toast.show { display: block; }
+    @media (max-width: 1200px) {
+      .workspace { grid-template-columns: 1fr; }
+      .side-panels { display: grid; grid-template-columns: 1fr 1fr; gap: 18px; }
+      .side-panels .panel { margin-bottom: 0; }
+    }
+    @media (max-width: 850px) {
+      .app { grid-template-columns: 70px minmax(0, 1fr); }
+      .brand { justify-content: center; padding-inline: 0; }
+      .brand > div:last-child, .nav-title, .nav button span:first-child, .nav .count, .sidebar-foot { display: none; }
+      .nav button { justify-content: center; height: 36px; }
+      .nav button::after { content: attr(data-short); color: var(--nav-muted); font-size: 10px; }
+      .topbar { padding-inline: 16px; }
+      .topbar .date { display: none; }
+      .content { padding: 16px; }
+      .side-panels { grid-template-columns: 1fr; }
+      .case-summary, .optional-col { display: none; }
+    }
+    @media (max-width: 600px) {
+      .app { display: block; }
+      .sidebar { display: none; }
+      .topbar { flex-wrap: wrap; gap: 8px; }
+      .global-search { order: 3; flex-basis: 100%; max-width: none; }
+      .system-time { display: none; }
+      th:nth-child(4), td:nth-child(4) { display: none; }
+      .filters { overflow-x: auto; }
+    }
+  </style>
+</head>
+<body>
+  <div class="app">
+    <aside class="sidebar">
+      <div class="brand"><div class="brand-mark">LC</div><div><strong>LogiCore</strong><small>Security Operations</small></div></div>
+      <div class="nav-title">Рабочее место</div>
+      <nav class="nav" aria-label="Основная навигация">
+        <button class="active" data-short="Д"><span>Рабочий стол</span><span class="count">4</span></button>
+        <button data-short="Д"><span>Дела</span><span class="count">12</span></button>
+        <button data-short="С"><span>События и поиск</span></button>
+        <button data-short="Ч"><span>Чаты</span><span class="count">6</span></button>
+        <button data-short="О"><span>Отчёты</span><span class="count">18</span></button>
+        <button data-short="П"><span>Память агента</span></button>
+      </nav>
+      <div class="nav-title">Система</div>
+      <nav class="nav" aria-label="Системная навигация">
+        <button data-short="С"><span>Состояние служб</span></button>
+        <button data-short="О"><span>Отладка агента</span></button>
+      </nav>
+      <div class="sidebar-foot">Локальная среда · anonymous</div>
+    </aside>
+
+    <main>
+      <header class="topbar">
+        <div><h1>Рабочий стол аналитика</h1><span class="date">Среда, 4 ноября · 12:44 UTC</span></div>
+        <label class="global-search"><input id="globalSearch" type="search" placeholder="Дело, IP, хост, учётная запись или событие" aria-label="Глобальный поиск"></label>
+        <button class="btn btn-primary" id="newCase">Новое расследование</button>
+      </header>
+
+      <div class="content">
+        <section class="system-strip" aria-label="Состояние служб">
+          <span class="status-dot"></span><strong>Основные функции доступны</strong>
+          <div class="system-services"><span class="service">Aegra</span><span class="service">LogiCore MCP</span><span class="service">LLM</span><span class="service">PostgreSQL</span><span class="service">S3</span><span class="service warn" title="Необязательный компонент">Phoenix: задержка</span></div>
+          <span class="system-time">проверено 12:44:32 UTC</span>
+        </section>
+
+        <div class="workspace">
+          <div>
+            <section class="panel" id="cases">
+              <div class="panel-head"><h2>Открытые дела</h2><span class="meta">4 требуют внимания</span><div class="actions"><button class="btn-link">Все дела →</button></div></div>
+              <div class="filters" role="group" aria-label="Фильтр дел">
+                <button class="filter active" data-filter="all">Все · 4</button><button class="filter" data-filter="attention">Требуют внимания · 2</button><button class="filter" data-filter="active">Активные · 2</button><button class="filter" data-filter="paused">На паузе · 1</button>
+              </div>
+              <div style="overflow-x:auto">
+                <table>
+                  <thead><tr><th>Дело</th><th>Серьёзность</th><th>Статус</th><th class="optional-col">Evidence</th><th>Обновлено</th></tr></thead>
+                  <tbody id="caseRows">
+                    <tr data-status="attention active" data-case="INC-2026-0142" data-title="Множественные неудачные входы на WS-17" data-severity="Высокая" data-summary="Возможный password spraying: 47 неудачных входов за 18 минут. Затронуты WS-17 и учётная запись ivanov. Проверяется распространение на другие хосты." data-evidence="37" data-entities="IP 185.22.41.16 · WS-17 · ivanov" data-time="12:42">
+                      <td><div class="case-id">INC-2026-0142</div><div class="case-title">Множественные неудачные входы на WS-17</div><div class="case-summary">Проверяется распространение на другие хосты</div></td><td><span class="badge badge-high">Высокая</span></td><td><span class="badge badge-active">Расследуется</span></td><td class="optional-col">37 · 4 сущности</td><td class="cell-muted">12:42</td>
+                    </tr>
+                    <tr data-status="attention paused" data-case="INC-2026-0141" data-title="Первый запуск PowerShell на SRV-DB-02" data-severity="Критичная" data-summary="PowerShell запущен из нестандартной директории на производственном сервере БД. Run на паузе перед проверкой связанных процессов. Две гипотезы остаются открытыми." data-evidence="84" data-entities="SRV-DB-02 · powershell.exe · svc_backup · 10.20.8.14" data-time="12:31">
+                      <td><div class="case-id">INC-2026-0141</div><div class="case-title">Первый запуск PowerShell на SRV-DB-02</div><div class="case-summary">Run на паузе · требуется решение аналитика</div></td><td><span class="badge badge-critical">Критичная</span></td><td><span class="badge badge-paused">На паузе</span></td><td class="optional-col">84 · 7 сущностей</td><td class="cell-muted">12:31</td>
+                    </tr>
+                    <tr data-status="active" data-case="INC-2026-0140" data-title="Рост DNS-запросов к редкому домену" data-severity="Средняя" data-summary="Редкий домен запрашивается с трёх хостов с одинаковой периодичностью. Агент сравнивает активность с базовой линией за предыдущие сутки." data-evidence="21" data-entities="cdn-metrics-sync.net · WS-11 · WS-19 · SRV-PRINT-01" data-time="12:18">
+                      <td><div class="case-id">INC-2026-0140</div><div class="case-title">Рост DNS-запросов к редкому домену</div><div class="case-summary">Сравнение с базовой линией за 24 часа</div></td><td><span class="badge badge-medium">Средняя</span></td><td><span class="badge badge-active">Расследуется</span></td><td class="optional-col">21 · 4 сущности</td><td class="cell-muted">12:18</td>
+                    </tr>
+                    <tr data-status="review" data-case="INC-2026-0138" data-title="Необычный объём исходящего трафика филиала" data-severity="Средняя" data-summary="Объём исходящего трафика вырос в 3,2 раза. Подтверждённых вредоносных событий нет. Черновик отчёта готов к проверке аналитиком." data-evidence="29" data-entities="BRANCH-GW-02 · 10.30.0.0/24" data-time="11:58">
+                      <td><div class="case-id">INC-2026-0138</div><div class="case-title">Необычный объём исходящего трафика филиала</div><div class="case-summary">Черновик отчёта готов к проверке</div></td><td><span class="badge badge-medium">Средняя</span></td><td><span class="badge badge-review">Проверка вывода</span></td><td class="optional-col">29 · 2 сущности</td><td class="cell-muted">11:58</td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+              <div class="empty" id="caseEmpty" hidden>Нет дел по выбранному фильтру или запросу.</div>
+            </section>
+
+            <section class="panel">
+              <div class="panel-head"><h2>Недавние чаты</h2><span class="meta">Возврат к контексту без повторного запуска</span><div class="actions"><button class="btn-link">Все чаты →</button></div></div>
+              <ul class="chat-list">
+                <li class="chat-item"><div class="item-top"><div><div class="item-title">Проверка 185.22.41.16 на других хостах</div><div class="item-text">INC-2026-0142 · «Нашёл 2 дополнительных хоста, проверяю успешные входы…»</div></div><span class="chat-unread" title="Есть новые события"></span></div><div class="item-meta">Агент работает · 12:43</div></li>
+                <li class="chat-item"><div class="item-top"><div><div class="item-title">Хронология svc_backup</div><div class="item-text">INC-2026-0137 · «Хронология собрана, 16 событий добавлены в Evidence»</div></div></div><div class="item-meta">Ответ готов · 12:18</div></li>
+                <li class="chat-item"><div class="item-top"><div><div class="item-title">Что ты помнишь о SRV-DB-02?</div><div class="item-text">Обычный диалог · 4 факта и 2 похожих дела</div></div></div><div class="item-meta">Без новых запросов к LogiCore · 11:06</div></li>
+              </ul>
+            </section>
+          </div>
+
+          <aside class="side-panels">
+            <div>
+              <section class="panel">
+                <div class="panel-head"><h2>Сейчас выполняется</h2><span class="meta">2 run</span></div>
+                <ul class="run-list">
+                  <li class="run-item"><div class="item-top"><div class="item-title">INC-2026-0142</div><span class="badge badge-active">Scout</span></div><div class="run-stage">Проверка успешных входов с 185.22.41.16</div><div class="item-text">4 вызова · 01:24 · последний: search_events</div><div class="run-bar"><span style="width:64%"></span></div><div class="item-actions"><button class="btn btn-small pause-run">Пауза</button><button class="btn btn-small">К делу</button></div></li>
+                  <li class="run-item"><div class="item-top"><div class="item-title">INC-2026-0140</div><span class="badge badge-active">Investigator</span></div><div class="run-stage">Сравнение DNS-активности с базовой линией</div><div class="item-text">7 вызовов · 03:18 · последний: timeline</div><div class="run-bar"><span style="width:42%"></span></div><div class="item-actions"><button class="btn btn-small pause-run">Пауза</button><button class="btn btn-small">К делу</button></div></li>
+                </ul>
+              </section>
+
+              <section class="panel">
+                <div class="panel-head"><h2>Отчёты</h2><div class="actions"><button class="btn-link">Все →</button></div></div>
+                <ul class="report-list">
+                  <li class="report-item"><div class="item-top"><div class="item-title">Подозрительная аутентификация в филиале</div><span class="badge badge-active">Готов</span></div><div class="item-text">INC-2026-0136 · версия 3 · 14 Evidence</div><div class="item-meta">Сегодня, 12:02 · Markdown + ZIP</div><div class="item-actions"><button class="btn-link report-open">Читать</button><button class="btn-link">Скачать</button></div></li>
+                  <li class="report-item"><div class="item-top"><div class="item-title">Первый запуск PowerShell на SRV-DB-02</div><span class="badge badge-review">Черновик</span></div><div class="item-text">INC-2026-0141 · версия 1 · 84 Evidence</div><div class="item-meta">Сегодня, 11:47 · требуется вывод</div><div class="item-actions"><button class="btn-link report-open">Продолжить</button></div></li>
+                  <li class="report-item"><div class="item-top"><div class="item-title">Обзор новых сущностей за сутки</div><span class="badge badge-neutral">Устарел</span></div><div class="item-text">INC-2026-0134 · появились новые Evidence</div><div class="item-meta">Вчера, 18:26 · версия 2</div><div class="item-actions"><button class="btn-link report-open">Открыть</button></div></li>
+                </ul>
+              </section>
+            </div>
+
+            <div>
+              <section class="panel">
+                <div class="panel-head"><h2>Память агента</h2><div class="actions"><button class="btn-link">Все факты →</button></div></div>
+                <ul class="memory-list">
+                  <li class="memory-item"><div class="memory-type">Подтверждено</div><div class="item-text">SRV-DB-02 — производственный сервер базы данных. Изменения на нём требуют повышенного приоритета.</div><div class="memory-source">INC-2026-0098 · 12 Evidence · обновлено 28 окт.</div></li>
+                  <li class="memory-item"><div class="memory-type observed">Наблюдение · осталось 18 ч</div><div class="item-text">185.22.41.16 уже участвовал в неудачных попытках входа на других хостах.</div><div class="memory-source">INC-2026-0127 · требуется перепроверка</div></li>
+                  <li class="memory-item"><div class="memory-type">Подтверждено</div><div class="item-text">svc_backup предназначен только для SRV-BACKUP-01 и не используется для интерактивных входов.</div><div class="memory-source">INC-2026-0104 · 6 Evidence · обновлено 1 нояб.</div></li>
+                </ul>
+                <p class="section-note">Память — контекст для новых проверок, а не свежие Evidence текущего дела.</p>
+              </section>
+            </div>
+          </aside>
+        </div>
+      </div>
+    </main>
+  </div>
+
+  <div class="drawer-backdrop" id="drawerBackdrop" role="dialog" aria-modal="true" aria-labelledby="drawerTitle">
+    <aside class="drawer">
+      <div class="drawer-head"><div><span class="badge badge-high" id="drawerSeverity">Высокая</span><h2 id="drawerTitle">Дело</h2><div class="item-meta" id="drawerId">INC</div></div><button class="drawer-close" id="drawerClose" aria-label="Закрыть карточку дела">×</button></div>
+      <div class="fact-grid"><div class="fact"><strong id="drawerEvidence">0</strong><span>Evidence</span></div><div class="fact"><strong>2</strong><span>открытые гипотезы</span></div><div class="fact"><strong id="drawerTime">—</strong><span>последняя активность</span></div></div>
+      <h3>Текущий вывод</h3><p id="drawerSummary"></p>
+      <h3>Затронутые сущности</h3><p class="item-text" id="drawerEntities"></p>
+      <h3>Последние доказательства</h3>
+      <div class="evidence-row"><strong>search_events · 47 записей</strong><small>Неудачные входы · окно 12:12–12:30 UTC · Evidence #E-184</small></div>
+      <div class="evidence-row"><strong>top_values · 4 хоста</strong><small>Тот же источник · окно 12:12–12:30 UTC · Evidence #E-191</small></div>
+      <div class="evidence-row"><strong>timeline · 3 всплеска</strong><small>Интервал 5 минут · Evidence #E-193</small></div>
+      <div class="drawer-actions"><button class="btn btn-primary demo-action">Открыть дело</button><button class="btn demo-action">Продолжить чат</button><button class="btn demo-action">Отчёт</button></div>
+    </aside>
+  </div>
+  <div class="toast" id="toast" role="status">Действие доступно в рабочем приложении. Это визуальный прототип.</div>
+
+  <script>
+    const backdrop = document.getElementById('drawerBackdrop');
+    const toast = document.getElementById('toast');
+    const showToast = () => { toast.classList.add('show'); setTimeout(() => toast.classList.remove('show'), 2600); };
+    const openCase = (row) => {
+      document.getElementById('drawerTitle').textContent = row.dataset.title;
+      document.getElementById('drawerId').textContent = row.dataset.case + ' · детальный просмотр';
+      document.getElementById('drawerSeverity').textContent = row.dataset.severity;
+      document.getElementById('drawerSummary').textContent = row.dataset.summary;
+      document.getElementById('drawerEntities').textContent = row.dataset.entities;
+      document.getElementById('drawerEvidence').textContent = row.dataset.evidence;
+      document.getElementById('drawerTime').textContent = row.dataset.time;
+      backdrop.classList.add('open');
+      document.getElementById('drawerClose').focus();
+    };
+    document.querySelectorAll('#caseRows tr').forEach(row => row.addEventListener('click', () => openCase(row)));
+    document.getElementById('drawerClose').addEventListener('click', () => backdrop.classList.remove('open'));
+    backdrop.addEventListener('click', event => { if (event.target === backdrop) backdrop.classList.remove('open'); });
+    document.addEventListener('keydown', event => { if (event.key === 'Escape') backdrop.classList.remove('open'); });
+
+    let activeFilter = 'all';
+    const filterCases = () => {
+      const query = document.getElementById('globalSearch').value.trim().toLowerCase();
+      let visible = 0;
+      document.querySelectorAll('#caseRows tr').forEach(row => {
+        const filterMatch = activeFilter === 'all' || row.dataset.status.includes(activeFilter) || (activeFilter === 'active' && row.dataset.status.includes('active'));
+        const searchMatch = !query || (row.textContent + ' ' + row.dataset.entities).toLowerCase().includes(query);
+        const show = filterMatch && searchMatch;
+        row.hidden = !show;
+        if (show) visible++;
+      });
+      document.getElementById('caseEmpty').hidden = visible > 0;
+    };
+    document.querySelectorAll('.filter').forEach(button => button.addEventListener('click', () => {
+      document.querySelectorAll('.filter').forEach(item => item.classList.remove('active'));
+      button.classList.add('active');
+      activeFilter = button.dataset.filter;
+      filterCases();
+    }));
+    document.getElementById('globalSearch').addEventListener('input', filterCases);
+    document.querySelectorAll('.pause-run').forEach(button => button.addEventListener('click', () => { button.textContent = 'Пауза запрошена'; button.disabled = true; }));
+    document.querySelectorAll('.demo-action, .report-open, #newCase').forEach(button => button.addEventListener('click', showToast));
+  </script>
+</body>
+</html>

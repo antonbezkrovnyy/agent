@@ -35,6 +35,9 @@ def entry(state: State) -> dict:
             "critic": {},
             "rework": 0,
             "investigation_scope": {},
+            "control_overrides": {
+                "_step": (state.get("control_overrides") or {}).get("_step") or {},
+            },
             "investigation_plan": {},
             "work_items": Overwrite([]),
             "active_work_item": {},

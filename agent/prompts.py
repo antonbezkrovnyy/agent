@@ -4,10 +4,10 @@
 сюда подмешиваются только данные (отчёт, подсказки, замечания критика).
 """
 
-import json
 from pathlib import Path
 
 from config import Settings
+from contracts import json_dumps
 from evidence import evidence_overview_block, full_evidence_block
 
 PROMPTS_DIR = Path(__file__).with_name("prompts")
@@ -74,7 +74,7 @@ def work_item_block(state: dict) -> str:
         "с claims и handoff именно для этого item. Acceptance — критерий остановки, а не список "
         "всех возможных проверок. Replan разрешён только при acceptance_failed, conclusion_invalid "
         "или missing_critical_evidence; новую самостоятельную аномалию не разбирай в этом item:\n"
-        + json.dumps({
+        + json_dumps({
             key: value for key, value in item.items()
             if key in ("id", "goal", "acceptance", "priority", "estimated_cost", "depends_on", "required", "requested_window", "attempt")
         }, ensure_ascii=False)
@@ -96,7 +96,7 @@ def work_items_block(state: dict) -> str:
         "result": item["result"],
         "critic": item.get("critic") or {},
     } for item in completed]
-    return "Компактные handoff завершённых work items. Используй их вместо повторного анализа всей истории:\n" + json.dumps(
+    return "Компактные handoff завершённых work items. Используй их вместо повторного анализа всей истории:\n" + json_dumps(
         handoff, ensure_ascii=False
     )
 
@@ -108,7 +108,7 @@ def skill_block(state: dict) -> str:
     return (
         "Активный версионируемый skill. Следуй strategy и stop_rules, используй "
         "только allowed_tools и верни structured skill_run с теми же id/version:\n"
-        + json.dumps(skill, ensure_ascii=False)
+        + json_dumps(skill, ensure_ascii=False)
     )
 
 
@@ -121,7 +121,7 @@ def evidence_block(state: dict, *, full: bool = False, evidence_ids=None) -> str
 def structured_block(title: str, value: dict | None) -> str:
     if not value:
         return ""
-    return f"{title}:\n{json.dumps(value, ensure_ascii=False)}"
+    return f"{title}:\n{json_dumps(value, ensure_ascii=False, default=lambda value: value.isoformat() if hasattr(value, 'isoformat') else str(value))}"
 
 
 def inv_summary_block(inv_summary: str) -> str:
@@ -152,7 +152,7 @@ def intent_hint_block(state: dict) -> str:
     )
     candidates = state.get("memory_candidates") or []
     if candidates:
-        text += "\nПрошлые случаи из долговременной памяти (memory_candidates):\n" + json.dumps(
+        text += "\nПрошлые случаи из долговременной памяти (memory_candidates):\n" + json_dumps(
             candidates, ensure_ascii=False
         )
     if state.get("memory_error"):
@@ -174,7 +174,7 @@ def memory_block(state: dict) -> str:
             "Релевантная Context Memory. Это организационный контекст и гипотезы для проверки, "
             "а не свежие Evidence текущего расследования. При влиянии на вывод перепроверь через LogiCore. "
             "Для поиска по новым сущностям используй search_context_memory:\n"
-            + json.dumps(facts, ensure_ascii=False)
+            + json_dumps(facts, ensure_ascii=False)
         )
     cases = state.get("similar_cases") or []
     if cases:
@@ -182,7 +182,7 @@ def memory_block(state: dict) -> str:
             "Похожие прошлые дела. Это компактные карточки для построения гипотез, "
             "а не continuation и не Evidence текущего дела. Не загружай их state; "
             "проверяй выводы свежими запросами. При новых сущностях используй search_similar_cases:\n"
-            + json.dumps(cases, ensure_ascii=False)
+            + json_dumps(cases, ensure_ascii=False)
         )
     if state.get("memory_error"):
         parts.append(state["memory_error"] + " Текущая работа продолжается в state треда.")

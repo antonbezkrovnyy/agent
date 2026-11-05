@@ -24,6 +24,9 @@ from artifact_store import artifact_url
 from config import Settings
 from observability import trace_config
 from evidence import chain_block
+from execution_audit import audit_messages
+from control_overrides import effective_prompt, with_prompt_override
+from step_mode import ToolStepMiddleware
 from prompts import (
     compose,
     context_block,
@@ -57,13 +60,21 @@ def _middleware(role: str, prompt):
         ),
         prompt,
         normalize_tool_result,
+        ToolStepMiddleware(role),
         ToolCallLimitMiddleware(run_limit=TOOL_LIMITS[role], exit_behavior="end"),
     ]
 
 
+def _audited_prompt(role: str, request: ModelRequest, prompt: str) -> str:
+    prompt = effective_prompt(request.state, role, prompt)
+    audit_messages(role, request.state, [SystemMessage(content=prompt), *request.messages], request.tools)
+    return prompt
+
+
 @dynamic_prompt
 def _scout_prompt(request: ModelRequest) -> str:
-    return system_prompt(compose("base", "scout"), context_block(request.state))
+    prompt = system_prompt(compose("base", "scout"), context_block(request.state))
+    return _audited_prompt("scout", request, prompt)
 
 
 @dynamic_prompt
@@ -80,7 +91,7 @@ def _investigator_prompt(request: ModelRequest) -> str:
         memory_block(state),
         critic_feedback_block(state),
     ]
-    return system_prompt(compose("base", "investigator"), *blocks)
+    return _audited_prompt("investigator", request, system_prompt(compose("base", "investigator"), *blocks))
 
 
 @dynamic_prompt
@@ -95,7 +106,7 @@ def _reporter_prompt(request: ModelRequest) -> str:
         blocks.append(last_report_block(state["last_report"]))
     blocks.append(memory_block(state))
     blocks.append(critic_feedback_block(state))
-    return system_prompt(compose("base", "reporter"), *blocks)
+    return _audited_prompt("reporter", request, system_prompt(compose("base", "reporter"), *blocks))
 
 
 _agents: dict = {}
@@ -199,6 +210,7 @@ def _agent_input(state: State, work_key: str) -> dict:
         "scout_result": state.get("scout_result") or {},
         "active_skill": state.get("active_skill") or {},
         "investigation_scope": state.get("investigation_scope") or {},
+        "control_overrides": state.get("control_overrides") or {},
         "active_work_item": state.get("active_work_item") or {},
         "skill_runs": list(state.get("skill_runs") or []),
         "anchors": list(state.get("anchors") or []),
@@ -472,7 +484,8 @@ async def node_scout(state: State) -> dict:
 def node_chat(state: State) -> dict:
     """Чат-агент: простой вопрос без инструментов."""
     system = system_prompt(compose("base", "chat"), scout_block(state))
-    convo = [SystemMessage(content=system), *_agent_convo_messages(state)]
+    convo = with_prompt_override(state, "chat", [SystemMessage(content=system), *_agent_convo_messages(state)])
+    audit_messages("chat", state, convo)
     response = llm_mod.llm.invoke(convo, config=trace_config("chat", state))
     update = _agent_final(state, response, "chat")
     update["progress"] = done_progress()

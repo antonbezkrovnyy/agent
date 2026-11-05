@@ -35,9 +35,12 @@
 - `agent/tools.py` — MCP tools, Evidence и findings; файлы создаются через artifacts.py.
 - `agent/skills/` — Pydantic-контракты, registry и playbooks; исполнение через
   существующий `create_agent`, без отдельного графа skills.
-- `agui-agent/`, `copilotkit-demo/` — изолированная AG-UI-песочница поверх того же
-  пакета `agent/` (in-process, свои треды, `InMemorySaver`); не меняет поведение
-  основного стека и не дублирует его состояние.
+- `agent/execution_audit.py` — фактические model inputs вне checkpoints;
+  `control_overrides.py` и `step_mode.py` — opt-in ручное управление без смены автопилота.
+- `agui-agent/` — AG-UI-адаптер и валидированный control API над общими Aegra
+  threads/runs, без собственного графа и `InMemorySaver`.
+- `copilotkit-demo/` — CopilotKit-рабочий стол поверх тех же Aegra checkpoints;
+  дерево, prompts, topology, Evidence и ручное управление.
 
 Не возвращать эти области в один большой `agents.py`. Новый субграф оправдан только
 самостоятельными input/output, retry или concurrency-семантикой, а не размером файла.
@@ -98,8 +101,11 @@
   превышение depth/branches и непроверенные anchors явно попадают в `NOT_CHECKED`.
 - Явные `time_from/time_to` tool call не перезаписываются контекстом. Смена окна
   выполняется через `update_window` и не создаёт новое расследование.
-- Подтверждений действий, approval-интерраптов и slash-команд нет. Явная новая
-  тема автоматически архивируется перед очисткой; `uncertain` продолжает текущий случай.
+- Обязательных подтверждений действий, approval-интерраптов и slash-команд нет.
+  Ручные pause/resume и tool-step interrupts допустимы только по явному opt-in.
+  State edits проходят валидацию; откат создаёт ветку checkpoint, ручные MCP-вызовы
+  read-only и создают Evidence. Явная новая тема архивируется перед очисткой;
+  `uncertain` продолжает текущий случай.
 - Полная выгрузка использует универсальный `extract_data`; не добавлять
   ping-specific или другие одноразовые дубликаты этого инструмента.
 - Пользовательского бюджета времени нет. Не возвращать `deadline_at`,

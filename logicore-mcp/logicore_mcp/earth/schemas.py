@@ -82,15 +82,25 @@ def build_events_request(
     page: int = 1,
     per_page: int = 20,
     order: str = "desc",
+    groups: list[dict[str, Any]] | None = None,
+    query_limit: int | None = None,
+    order_by: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
-    """Тело POST /api/v1/events, mode: IQL — маппинг TD-0002; проекция (TD-0007); порядок (TD-0025)."""
+    """Тело POST /events с нативными параметрами IQL MARS."""
     query: dict[str, Any] = {
         "columns": list(columns),
         "timestamp": {"fromTime": format_utc(time_from), "toTime": format_utc(time_to)},
-        "order": [{"column": "timestamp", "action": order.upper()}],
+        "order": order_by or [
+            {"column": "timestamp", "action": order.upper()},
+            {"column": "uuid", "action": order.upper()},
+        ],
     }
     if filters is not None:
         query["filters"] = filters
+    if groups is not None:
+        query["groups"] = groups
+    if query_limit is not None:
+        query["limit"] = query_limit
     return {
         "mode": "IQL",
         "data": {
@@ -108,14 +118,20 @@ def build_count_request(
     time_from: datetime,
     time_to: datetime,
     tenant_ids: list[int],
+    groups: list[dict[str, Any]] | None = None,
+    query_limit: int | None = None,
 ) -> dict[str, Any]:
-    """Тело POST /api/v1/events/count — число событий окна под фильтром (TD-0017)."""
+    """Тело POST /events/count с нативными параметрами IQL MARS."""
     query: dict[str, Any] = {
         "columns": ["uuid"],
         "timestamp": {"fromTime": format_utc(time_from), "toTime": format_utc(time_to)},
     }
     if filters is not None:
         query["filters"] = filters
+    if groups is not None:
+        query["groups"] = groups
+    if query_limit is not None:
+        query["limit"] = query_limit
     return {
         "mode": "IQL",
         "data": {"query": query, "tenantIds": tenant_ids, "timezone": "UTC"},
@@ -128,11 +144,14 @@ def build_timeline_request(
     time_from: datetime,
     time_to: datetime,
     tenant_ids: list[int],
+    groups: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     """Тело POST /mars/api/v1/events/timeline — EventsTimelineRequest, SSE-поток (TD-0018, Mars API)."""
     query: dict[str, Any] = {"timestamp": {"fromTime": format_utc(time_from), "toTime": format_utc(time_to)}}
     if filters is not None:
         query["filters"] = filters
+    if groups is not None:
+        query["groups"] = groups
     return {
         "data": {"query": query, "tenantIds": tenant_ids, "timezone": "UTC"},
     }

@@ -7,6 +7,7 @@
 пока не готова первая.
 """
 
+from datetime import UTC, datetime
 from typing import Any
 
 EventRow = dict[str, Any]
@@ -50,33 +51,39 @@ def merge_group_rows(
 
 
 def merge_timeline_responses(parts: list[dict[str, Any]]) -> dict[str, Any]:
-    """Слияние timeline-частей с ребакетизацией на крупную сетку (TD-0029 п. 5).
-
-    Сетка — минимальная гранулярность среди частей (спуск делит окно, Earth
-    отвечает крупными бакетами для больших кусков): значения суммируются в
-    соответствующий крупный бакет. Потолок 8 дней не двигается (TD-0018).
-    """
+    """Объединяет SSE-части и ребакетизирует их по самой крупной сетке."""
     if not parts:
         raise ValueError("merge_timeline_responses: нет частей")
-    granularities = [int(part.get("granularity_seconds") or 0) for part in parts]
-    granularities = [g for g in granularities if g > 0]
-    if not granularities:
-        return parts[0]
-    coarse = max(granularities)
-    acc: dict[int, int] = {}
-    total = 0
+
+    def point(value: Any) -> datetime:
+        text = str(value)
+        try:
+            return datetime.strptime(text, "%Y-%m-%d %H:%M:%S").replace(tzinfo=UTC)
+        except ValueError:
+            return datetime.fromisoformat(text.replace("Z", "+00:00"))
+
+    parsed: list[tuple[datetime, datetime, int]] = []
     for part in parts:
-        total += int(part.get("total") or 0)
-        for bucket in part.get("timeline", {}).get("buckets", []):
-            start = int(bucket.get("from") or 0)
-            value = int(bucket.get("value") or 0)
-            acc.setdefault(start // coarse * coarse, 0)
-            acc[start // coarse * coarse] += value
-    buckets = [{"from": start, "to": start + coarse, "value": value} for start, value in sorted(acc.items())]
+        for bucket in part.get("data") or []:
+            parsed.append((point(bucket.get("from")), point(bucket.get("to")), int(bucket.get("value") or 0)))
+    if not parsed:
+        return {"status": "finished" if all(part.get("status") == "finished" for part in parts) else "partial", "data": []}
+    coarse = max(max(int((end - start).total_seconds()) + 1, 1) for start, end, _ in parsed)
+    acc: dict[int, int] = {}
+    for start, _, value in parsed:
+        epoch = int(start.timestamp())
+        acc[epoch // coarse * coarse] = acc.get(epoch // coarse * coarse, 0) + value
+    buckets = [
+        {
+            "from": datetime.fromtimestamp(start, UTC).strftime("%Y-%m-%d %H:%M:%S"),
+            "to": datetime.fromtimestamp(start + coarse - 1, UTC).strftime("%Y-%m-%d %H:%M:%S"),
+            "value": value,
+        }
+        for start, value in sorted(acc.items())
+    ]
     return {
-        "granularity_seconds": coarse,
-        "total": total,
-        "timeline": {"buckets": buckets},
+        "status": "finished" if all(part.get("status") == "finished" for part in parts) else "partial",
+        "data": buckets,
     }
 
 

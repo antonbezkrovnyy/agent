@@ -82,6 +82,7 @@ class CaseChannels(TypedDict):
     scout_result: dict
     active_skill: dict
     investigation_scope: dict
+    control_overrides: dict
     skill_runs: Annotated[list[dict], operator.add]
     anchors: list[dict]
     visited_anchors: list[str]
