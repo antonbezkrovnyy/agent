@@ -50,7 +50,10 @@ Mars API, Aegra предоставляет API и checkpoints, Phoenix соби�
 - Read-only обзор памяти по запросу «что ты помнишь?»: текущее дело, активные
   факты с TTL и последние случаи; инструмент `inspect_memory` доступен и другим ролям.
 - Журнал гипотез `open/supported/rejected` с историей, Evidence ID и отображением
-  в детерминированной цепочке отчёта.
+  в детерминированной цепочке отчёта; чтение через `list_hypotheses`/`get_hypothesis`.
+- Native streaming runtime с pre/post-узлами: soft timeout переводит Scout, Investigator
+  и Reporter в finalize без investigative tools. До 10 попыток structured response;
+  завершённые Evidence, findings, гипотезы, окна и артефакты сохраняются даже при fallback.
 - Pydantic-контракты Evidence/Finding, расширенные Scout/Intent/Reporting и
   структурированные `issues` критиков с `suggested_action`.
 - Модели по ролям через env; `model` и фактическая `duration_ms` в `skill_runs`.
@@ -74,7 +77,8 @@ Mars API, Aegra предоставляет API и checkpoints, Phoenix соби�
 - Структурированные ответы агентов и критиков с текстовым fallback. Сбой критика
   обозначается как `critic_unavailable`, а не маскируется под `ok`.
 - Continuation с сохранением `context.id`, `base_window`, `focus_window`,
-  `window_history`, `depth_history`, Evidence и findings.
+  `window_history`, `depth_history`, Evidence и findings. Повторный work item получает
+  явный handoff; идентичные успешные MCP-запросы переиспользуют Evidence без дубликатов.
 - Полный автопилот без подтверждений, resume и slash-команд. Явная новая тема
   автоматически архивирует прежний отчёт; неоднозначная — продолжает текущий случай.
 - Детерминированный `extract_data`: серверная пагинация, таблица и Markdown-файл
@@ -94,6 +98,8 @@ Multiuser/OIDC намеренно не реализуется. Текущий an
 
 | Сервис | Порт | Назначение |
 |---|---:|---|
+| `litellm` | 4000 | OpenAI-совместимый proxy и `logicore-*` aliases для LLM/embeddings |
+| `litellm-db` | только Docker-сеть | Настройки, ключи и модели LiteLLM UI, persistent PostgreSQL |
 | `aegra` | 2026 | LangGraph/Aegra API, workers и checkpoints |
 | `agent-chat-ui` | 3000 | Веб-чат на Next.js |
 | `agui-agent` | 2027 | AG-UI адаптер и control API поверх Aegra runs, без второго графа |
@@ -155,16 +161,21 @@ docker compose up -d --build
 
 Основные переменные:
 
-- `LLM_BASE_URL`, `LLM_TOKEN`, `LLM_MODEL` — OpenAI-совместимый провайдер;
-- `LLM_MODEL_INTENT/SCOUT/INVESTIGATOR/REPORTER/CRITIC/MEMORY/EVALUATOR/PLANNER` — необязательные модели по ролям;
+- `LLM_BASE_URL`, `LLM_TOKEN`, `LLM_MODEL` — upstream OpenAI-совместимого провайдера;
+- `LITELLM_MASTER_KEY` — авторизация локального proxy и UI (`admin`); Aegra и evaluator
+  получают `logicore-*` aliases из `litellm/config.yaml`, реальные модели задаются там же;
+- `LITELLM_AGENT_KEY` — отдельный Virtual Key Aegra/evaluator с доступом к `logicore-*`;
+- `LITELLM_POSTGRES_PASSWORD` — отдельная БД моделей, ключей и настроек LiteLLM UI;
+- `LLM_MODEL_INTENT/SCOUT/INVESTIGATOR/REPORTER/CRITIC/MEMORY/EVALUATOR/PLANNER` — модели по ролям только для запуска вне Docker;
 - `INVESTIGATION_PLANNER_ENABLED`, `PLANNER_MAX_ITEMS/PARALLEL/REVISIONS` — декомпозиция Deep;
 - `SCOPE_DISCOVERY_MAX_ITEMS=2`, `SCOPE_REQUIRED_MAX_ITEMS=2` — границы этапа;
 - `AGENT_PROMPT_VERSION` — версия промптов в Phoenix metadata и Experiments;
 - `EVALUATOR_ENABLED/POLL_SECONDS/THREAD_LIMIT/TRACE_ATTEMPTS` — фоновая оценка runs;
 - `EVALUATOR_TRACE_ATTRIBUTE_LIMIT`, `EVALUATOR_PHOENIX_ANNOTATIONS_ENABLED` — размер контекста и annotations;
 - `SUMMARIZATION_TRIGGER_TOKENS`, `SUMMARIZATION_KEEP_MESSAGES` — суммаризация истории;
-- `AGENT_TOOL_LIMIT_SCOUT/INVESTIGATOR/REPORTER`, `AGENT_TIMEOUT_SECONDS`,
-  `EXPORT_TIMEOUT_SECONDS`, `MAX_REWORK` — лимиты и таймауты;
+- `AGENT_TOOL_LIMIT_SCOUT/INVESTIGATOR/REPORTER`, `AGENT_FINALIZE_AFTER_SECONDS`,
+  `AGENT_FINALIZE_ATTEMPTS`, `AGENT_FINALIZE_ATTEMPT_TIMEOUT_SECONDS`,
+  `AGENT_TIMEOUT_SECONDS`, `EXPORT_TIMEOUT_SECONDS`, `MAX_REWORK` — лимиты и таймауты;
 - `CRITIC_MESSAGE_LIMIT`, `CRITIC_DIALOG_LIMIT`, `REPORT_INJECT_LIMIT` — размеры контекста;
 - `LOGIQ_URL`, `LOGIQ_USER`, `LOGIQ_PASSWORD`, `LOGIQ_TLS_VERIFY` — LogiCore;
 - `LOGIQ_API_TOKEN` — авторизация MCP streamable-http;
@@ -320,10 +331,13 @@ Quick и deep используют общие Evidence и handoff, но имею
 
 | Ограничение | Значение |
 |---|---:|
-| Tool calls скаута за один `ainvoke` | 10 |
-| Tool calls инвестигейтора за один `ainvoke` | 30 |
-| Tool calls репортёра за один `ainvoke` | 60 |
-| Таймаут одного вложенного `create_agent.ainvoke` | 600 с |
+| Tool calls скаута за один запуск роли | 10 |
+| Tool calls инвестигейтора за один запуск роли | 30 |
+| Tool calls репортёра за один запуск роли | 60 |
+| Soft timeout перед finalization | 480 с |
+| Попытки structured finalization | 10 |
+| Таймаут одной finalize-попытки | 30 с |
+| Общий hard timeout одной роли | 600 с |
 | Таймаут узла `export` | 120 с |
 | Возвраты на доработку за внешний run | 1 |
 | Work items / параллельные ветки | 5 / 2 |
@@ -346,8 +360,15 @@ Reporter после tool limit автоматически продолжают �
 доступно 1 продолжение (`AGENT_MAX_CONTINUATIONS`). Только после их исчерпания
 отдельный LLM-вызов без инструментов формирует результат с limitation; служебный
 текст middleware не становится ответом. Evidence читаются пакетно.
-Таймаут одного агента не ограничивает длительность всего run:
-прямые вызовы intent, chat и критиков отдельным таймаутом сейчас не покрыты.
+
+После soft timeout native runtime отключает investigative tools и переводит роль в
+`investigate → finalize`: разрешены только локальное чтение и фиксация результатов.
+Structured response получает до 10 попыток внутри общего hard deadline. Последний
+`fallback` не удаляет завершённые Evidence, findings, гипотезы, окна, артефакты и
+приватную историю. Повторный work item получает continuation-handoff; идентичный
+успешный MCP-запрос с теми же аргументами и окном переиспользует Evidence без дубликата.
+Таймаут одной роли не ограничивает длительность всего run: прямые вызовы intent, chat
+и критиков отдельным таймаутом сейчас не покрыты.
 
 ## Текущие ограничения и велосипеды
 

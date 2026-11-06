@@ -3,7 +3,7 @@
 from datetime import datetime
 from typing import Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 from langchain.chat_models import init_chat_model
 
@@ -62,7 +62,7 @@ class IntentDecision(BaseModel):
             "deep — причины, первое появление, гипотезы, pivot или расширение расследования"
         ),
     )
-    rationale: str = Field(description="Обоснование одним предложением")
+    rationale: str = Field(default="", description="Обоснование одним предложением")
     needs_new_data: bool = Field(
         default=False,
         description="true, если нужны новые запросы к журналу; false для беседы и работы с готовыми данными",
@@ -106,6 +106,11 @@ class IntentDecision(BaseModel):
     confidence: float = Field(default=1.0, ge=0, le=1, description="Уверенность классификатора от 0 до 1")
     escalation_reason: str = Field(default="", description="Почему выбран deep вместо quick; пусто для quick")
     window: WindowSpec = Field(default_factory=WindowSpec)
+
+    @field_validator("skill_id", "related_investigation_id", mode="before")
+    @classmethod
+    def empty_id_to_none(cls, value):
+        return value or None
 
 
 class WindowUpdate(BaseModel):

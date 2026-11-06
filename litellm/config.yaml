@@ -1,0 +1,59 @@
+model_list:
+  - model_name: logicore-default
+    litellm_params:
+      model: openai/agent
+      litellm_credential_name: jet
+
+  - model_name: logicore-intent
+    litellm_params:
+      model: openai/agent
+      litellm_credential_name: jet
+
+  - model_name: logicore-scout
+    litellm_params:
+      model: openai/agent-fast
+      litellm_credential_name: jet
+
+  - model_name: logicore-investigator
+    litellm_params:
+      model: openai/agent
+      litellm_credential_name: jet
+
+  - model_name: logicore-reporter
+    litellm_params:
+      model: openai/agent
+      litellm_credential_name: jet
+
+  - model_name: logicore-critic
+    litellm_params:
+      model: openai/agent
+      litellm_credential_name: jet
+
+  - model_name: logicore-memory
+    litellm_params:
+      model: openai/agent-fast
+      litellm_credential_name: jet
+
+  - model_name: logicore-planner
+    litellm_params:
+      model: openai/agent
+      litellm_credential_name: jet
+
+  - model_name: logicore-evaluator
+    litellm_params:
+      model: openai/agent
+      litellm_credential_name: jet
+
+  - model_name: logicore-embedding
+    litellm_params:
+      model: openai/bge-m3
+      api_base: os.environ/UPSTREAM_EMBEDDING_BASE_URL
+      api_key: os.environ/UPSTREAM_EMBEDDING_TOKEN
+
+litellm_settings:
+  num_retries: 3
+  retry_after: 2
+
+general_settings:
+  master_key: os.environ/LITELLM_MASTER_KEY
+  store_model_in_db: true

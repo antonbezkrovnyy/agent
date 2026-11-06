@@ -34,12 +34,17 @@ checkpoint namespace, модель, provider и токены. `agent/observabili
 - `agent_role` — scope, intent, planner, scout, investigator, reporter, critics, chat, memory;
 - `work_mode` — quick/deep;
 - `scope_mode` — discovery/targeted/alert;
-- `investigation_id`, `work_item_id`, `skill_id`;
+- `investigation_id`, `work_item_id`, `work_item_attempt`, `skill_id`;
+- `agent_phase` — `investigate`, `finalize` или `fallback`;
+- `continuation` и `termination_reason` — `done`, `soft_timeout`, `provider_error`,
+  `finalize_exhausted`, `hard_timeout` или `running`;
 - `prompt_version` из `AGENT_PROMPT_VERSION`.
 
 Tags: `role:<role>`, `mode:<mode>`, `scope:<scope>`. Metadata не содержит тексты
-пользователей, секреты или содержимое Evidence. Это позволяет фильтровать spans и
-сравнивать versions без передачи чувствительных данных.
+пользователей, секреты или содержимое Evidence. Входной `ToolRuntime` выводится как
+`ToolRuntime(<injected>)`: полный state, сообщения, Evidence и память не дублируются
+в observability-входе, а фактические аргументы инструмента сохраняются. Это позволяет
+фильтровать spans и сравнивать versions без передачи чувствительных данных.
 
 ## Метрики run и items
 
@@ -48,7 +53,9 @@ Tags: `role:<role>`, `mode:<mode>`, `scope:<scope>`. Metadata не содерж�
 - start/finish и длительность;
 - модель, prompt/completion/total tokens;
 - вызовы инструментов по именам и повторы одинаковых запросов;
-- число автоматических continuations.
+- число автоматических continuations;
+- `agent_phase`, `continuation` и `termination_reason`, чтобы отличать обычную работу,
+  finalization, fallback и повторный заход; завершённые до таймаута вызовы не обнуляются.
 
 Метрики попадают в `run_metrics`, work item, Case Record, `manifest.json` и ответ
 `investigation_result`. Evaluator добавляет долю unsupported claims, replan count,

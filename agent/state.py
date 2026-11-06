@@ -105,6 +105,9 @@ class AgentWorkState(AgentState, EvidenceChannels, CaseChannels, MemoryChannels)
     active_work_item: dict
     rework: int
     run_tool_call_count: dict
+    agent_phase: str
+    continuation: bool
+    termination_reason: str
     progress: Annotated[dict, merge_progress]
 
 

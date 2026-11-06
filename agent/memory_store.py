@@ -11,8 +11,8 @@ from memory_models import CaseRecord, ContextFact
 
 
 def safe_text(value: str) -> str:
-    """Заменить lone surrogates, которые PostgreSQL не может закодировать в UTF-8."""
-    return value.encode("utf-8", errors="replace").decode("utf-8")
+    """Заменить lone surrogates и NUL, которые PostgreSQL не может закодировать в UTF-8."""
+    return value.replace("\x00", " ").encode("utf-8", errors="replace").decode("utf-8")
 
 
 def safe_json(value):

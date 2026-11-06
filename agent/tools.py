@@ -27,6 +27,13 @@ from mcp_client import get_mcp_tools
 from progress import TOOL_LIMITS, simple_progress
 from reporting import post_report
 
+
+def _injected_runtime_repr(_):
+    return "ToolRuntime(<injected>)"
+
+
+ToolRuntime.__repr__ = _injected_runtime_repr
+
 mcp_tools = get_mcp_tools()
 _MCP_TOOLS_BY_NAME = {item.name: item for item in mcp_tools}
 _MCP_TOOL_NAMES = set(_MCP_TOOLS_BY_NAME)
@@ -94,12 +101,42 @@ def build_mcp_evidence(name: str, args: dict, data: dict, evidence_id: str, inve
     ).model_dump()
 
 
+def _emit_tool_update(request, result):
+    update = result.update if isinstance(result, Command) else {"messages": [result]}
+    try:
+        from langgraph.config import get_stream_writer
+
+        get_stream_writer()({
+            "agent_runtime_event": True,
+            "event_id": request.tool_call["id"],
+            "update": update,
+        })
+    except RuntimeError:
+        pass
+
+
+def _reusable_evidence(state: dict, name: str, args: dict) -> dict | None:
+    item = state.get("active_work_item") or {}
+    if not item.get("id") or not (item.get("attempt") or 0):
+        return None
+    signature = json.dumps(args, ensure_ascii=False, sort_keys=True, default=str)
+    for evidence in reversed(state.get("evidence") or []):
+        if evidence.get("tool") != name or evidence.get("status") != "ok":
+            continue
+        candidate = json.dumps(evidence.get("arguments") or {}, ensure_ascii=False, sort_keys=True, default=str)
+        if candidate == signature:
+            return evidence
+    return None
+
+
 @wrap_tool_call
 async def normalize_tool_result(request, handler):
     """Зафиксировать окно, нормализовать content и сохранить Evidence."""
     name = request.tool_call["name"]
     if name not in _MCP_TOOL_NAMES:
-        return _with_progress(request, await handler(request))
+        result = _with_progress(request, await handler(request))
+        _emit_tool_update(request, result)
+        return result
 
     args = dict(request.tool_call.get("args") or {})
     context = request.state.get("context") or {}
@@ -112,6 +149,22 @@ async def normalize_tool_result(request, handler):
         if not args.get("time_to") and default_to:
             args["time_to"] = default_to
         request = request.override(tool_call={**request.tool_call, "args": args})
+
+    reusable = _reusable_evidence(request.state, name, args)
+    if reusable is not None:
+        data = reusable.get("result") or {}
+        message = ToolMessage(
+            content=json_dumps({
+                "evidence_id": reusable["id"],
+                "reused": True,
+                **data,
+            }, ensure_ascii=False),
+            tool_call_id=request.tool_call["id"],
+            name=name,
+        )
+        result = _with_progress(request, Command(update={"messages": [message]}))
+        _emit_tool_update(request, result)
+        return result
 
     try:
         result = await handler(request)
@@ -139,7 +192,9 @@ async def normalize_tool_result(request, handler):
     message = message.model_copy(update={
         "content": json_dumps({"evidence_id": evidence_id, **data}, ensure_ascii=False)
     })
-    return _with_progress(request, Command(update={"messages": [message], "evidence": [evidence]}))
+    result = _with_progress(request, Command(update={"messages": [message], "evidence": [evidence]}))
+    _emit_tool_update(request, result)
+    return result
 
 
 @tool
@@ -529,6 +584,35 @@ def get_finding(index: int, runtime: ToolRuntime = None) -> str:
 
 
 @tool
+def list_hypotheses(runtime: ToolRuntime = None) -> str:
+    """Показать компактный журнал гипотез текущего расследования."""
+    state = runtime.state if runtime else {}
+    items = [{
+        "id": item.get("id"),
+        "text": item.get("text"),
+        "status": item.get("status"),
+        "reason": item.get("reason"),
+        "evidence_ids": item.get("evidence_ids") or [],
+    } for item in state.get("hypotheses") or []]
+    return json_dumps({"ok": True, "hypotheses": items}, ensure_ascii=False)
+
+
+@tool
+def get_hypothesis(hypothesis_id: str, runtime: ToolRuntime = None) -> str:
+    """Прочитать гипотезу и полную историю её изменений по ID."""
+    state = runtime.state if runtime else {}
+    hypotheses = state.get("hypotheses") or []
+    record = next((item for item in hypotheses if item.get("id") == hypothesis_id), None)
+    if record is None:
+        return json_dumps({
+            "ok": False,
+            "error": "Гипотеза не найдена",
+            "available": [item.get("id") for item in hypotheses],
+        }, ensure_ascii=False)
+    return json_dumps({"ok": True, "hypothesis": record}, ensure_ascii=False)
+
+
+@tool
 def inspect_memory(query: str = "", limit: int = 5, runtime: ToolRuntime = None) -> str:
     """Показать read-only обзор памяти: текущее дело, факты и последние случаи.
 
@@ -623,6 +707,8 @@ investigator_tools = list(mcp_tools or []) + [
     get_evidence,
     get_evidence_batch,
     update_window,
+    list_hypotheses,
+    get_hypothesis,
     update_hypothesis,
     inspect_memory,
     search_context_memory,

@@ -9,7 +9,13 @@ import asyncio
 from datetime import UTC, datetime
 
 from langchain.agents import create_agent
-from langchain.agents.middleware import ModelRequest, SummarizationMiddleware, ToolCallLimitMiddleware, dynamic_prompt
+from langchain.agents.middleware import (
+    ModelRequest,
+    SummarizationMiddleware,
+    ToolCallLimitMiddleware,
+    dynamic_prompt,
+    wrap_model_call,
+)
 from langchain_core.messages import (
     AIMessage,
     BaseMessage,
@@ -51,6 +57,42 @@ from tools import investigator_tools, normalize_tool_result, reporter_tools, sco
 settings = Settings()
 
 
+_FINALIZE_TOOLS = {
+    "scout": {"log_finding", "ScoutResult"},
+    "investigator": {
+        "log_finding",
+        "list_findings",
+        "get_finding",
+        "get_evidence",
+        "get_evidence_batch",
+        "list_hypotheses",
+        "get_hypothesis",
+        "update_hypothesis",
+        "InvestigationResult",
+    },
+    "reporter": {
+        "list_findings",
+        "get_finding",
+        "get_evidence_batch",
+        "save_report",
+        "send_report",
+        "ReporterResult",
+    },
+}
+
+
+def _finalize_tool_filter(role: str):
+    @wrap_model_call
+    async def middleware(request, handler):
+        if request.state.get("agent_phase") != "finalize":
+            return await handler(request)
+        allowed = _FINALIZE_TOOLS[role]
+        tools = [item for item in request.tools if getattr(item, "name", "") in allowed]
+        return await handler(request.override(tools=tools))
+
+    return middleware
+
+
 def _middleware(role: str, prompt):
     return [
         SummarizationMiddleware(
@@ -59,6 +101,7 @@ def _middleware(role: str, prompt):
             keep=("messages", settings.summarization_keep_messages),
         ),
         prompt,
+        _finalize_tool_filter(role),
         normalize_tool_result,
         ToolStepMiddleware(role),
         ToolCallLimitMiddleware(run_limit=TOOL_LIMITS[role], exit_behavior="end"),
@@ -67,6 +110,12 @@ def _middleware(role: str, prompt):
 
 def _audited_prompt(role: str, request: ModelRequest, prompt: str) -> str:
     prompt = effective_prompt(request.state, role, prompt)
+    if request.state.get("agent_phase") == "finalize":
+        prompt += (
+            "\n\nТехническая фаза завершения. Не запрашивай новые данные. "
+            "Используй только разрешённые инструменты чтения и фиксации результатов, "
+            "затем верни structured response с ограничениями и NOT_CHECKED."
+        )
     audit_messages(role, request.state, [SystemMessage(content=prompt), *request.messages], request.tools)
     return prompt
 
@@ -79,10 +128,13 @@ def _scout_prompt(request: ModelRequest) -> str:
 
 @dynamic_prompt
 def _investigator_prompt(request: ModelRequest) -> str:
+    from prompts import continuation_block
+
     state = request.state
     blocks = [
         scope_block(state),
         work_item_block(state),
+        continuation_block(state),
         context_block(state),
         scout_block(state),
         skill_block(state),
@@ -199,11 +251,24 @@ def _agent_convo_messages(state: State) -> list[BaseMessage]:
 
 
 def _agent_input(state: State, work_key: str) -> dict:
+    item = state.get("active_work_item") or {}
+    continuation = bool(item.get("id") and (item.get("attempt") or 0)) or (
+        work_key == INV_MSGS and state.get("transition") in ("continue", "uncertain")
+    )
+    control = [HumanMessage(content=(
+        f"Продолжи {item.get('id') or 'текущее расследование'} с сохранённого состояния. "
+        "Не начинай базовую разведку заново, используй прежние Evidence и находки, "
+        "выполни только оставшуюся часть acceptance."
+    ))] if continuation else []
     return {
         "messages": [
             *_agent_convo_messages(state),
             *(state.get(work_key) or []),
+            *control,
         ],
+        "agent_phase": "investigate",
+        "continuation": continuation,
+        "termination_reason": "",
         "callback_url": state.get("callback_url") or "",
         "artifacts": list(state.get("artifacts") or []),
         "findings": list(state.get("findings") or []),
@@ -331,25 +396,223 @@ async def _finalize_limited(agent: str, result: dict, schema):
     return result
 
 
-def _timeout_result(schema, messages: list[BaseMessage]) -> dict:
-    note = "Технический таймаут: этап остановлен из-за слишком долгого ответа."
+def _timeout_result(schema, state: dict, reason: str = "hard_timeout") -> dict:
+    note = (
+        "Временная ошибка LLM-провайдера: этап завершён по сохранённым данным."
+        if reason == "provider_error"
+        else "Технический таймаут: этап остановлен из-за слишком долгого ответа."
+    )
     if schema is llm_mod.ScoutResult:
         structured = llm_mod.ScoutResult(note=note)
     elif schema is llm_mod.InvestigationResult:
-        structured = llm_mod.InvestigationResult(summary=note, limitations=[note])
+        structured = llm_mod.InvestigationResult(status="partial", summary=note, limitations=[note])
     else:
         structured = llm_mod.ReporterResult(answer=note, limitations=[note])
     return {
-        "messages": [*messages, AIMessage(content=note)],
+        **state,
+        "messages": [*(state.get("messages") or []), AIMessage(content=note)],
         "structured_response": structured,
+        "agent_phase": "fallback",
+        "termination_reason": reason,
     }
 
 
+def _prepare_agent_runtime(state: dict) -> dict:
+    return {
+        "agent_phase": state.get("agent_phase") or "investigate",
+        "continuation": bool(state.get("continuation")),
+        "termination_reason": state.get("termination_reason") or "",
+    }
+
+
+def _complete_agent_runtime(state: dict) -> dict:
+    if state.get("structured_response") is not None and not state.get("termination_reason"):
+        return {"termination_reason": "done"}
+    return {}
+
+
+def _native_agent_runtime(agent):
+    from langgraph.graph import END, START, StateGraph
+
+    builder = StateGraph(AgentWorkState)
+    builder.add_node("prepare_agent", _prepare_agent_runtime)
+    builder.add_node("agent", agent)
+    builder.add_node("complete_agent", _complete_agent_runtime)
+    builder.add_edge(START, "prepare_agent")
+    builder.add_edge("prepare_agent", "agent")
+    builder.add_edge("agent", "complete_agent")
+    builder.add_edge("complete_agent", END)
+    return builder.compile()
+
+
+def _restore_stream_state(latest: dict, events: dict) -> dict:
+    from subgraph import apply_delta
+
+    result = latest
+    for event_id, update in events.items():
+        applied = any(
+            getattr(message, "tool_call_id", None) == event_id
+            for message in result.get("messages") or []
+        )
+        if not applied:
+            result = apply_delta(result, update)
+    result = dict(result)
+    evidence = {}
+    for item in result.get("evidence") or []:
+        evidence[item.get("id")] = item
+    result["evidence"] = list(evidence.values())
+    artifacts = {}
+    for item in result.get("artifacts") or []:
+        identity = (
+            item.get("key"),
+            item.get("filename"),
+            item.get("bytes"),
+            item.get("data_url"),
+        )
+        artifacts[identity] = item
+    result["artifacts"] = list(artifacts.values())
+    findings = {}
+    for item in result.get("findings") or []:
+        identity = (
+            item.get("timestamp"),
+            item.get("claim"),
+            tuple(item.get("evidence_ids") or []),
+            item.get("next_action"),
+        )
+        findings[identity] = item
+    result["findings"] = list(findings.values())
+    return result
+
+
+def _prefer_stream_state(latest: dict, candidate: dict) -> dict:
+    latest_messages = latest.get("messages") or []
+    candidate_messages = candidate.get("messages") or []
+    if len(candidate_messages) > len(latest_messages):
+        return candidate
+    if len(candidate_messages) < len(latest_messages):
+        return latest
+    if candidate.get("structured_response") is not None:
+        return candidate
+    if latest.get("structured_response") is None:
+        return candidate
+    return latest
+
+
+def _transient_model_error(exc: Exception) -> bool:
+    from openai import APIError
+
+    if not isinstance(exc, APIError):
+        return False
+    status = getattr(exc, "status_code", None)
+    return status is None or status == 429 or status >= 500
+
+
+async def _stream_agent(agent: str, agent_input: dict, deadline: float) -> tuple[dict, bool]:
+    import time
+
+    from openai import APIError
+    from langgraph.graph.state import CompiledStateGraph
+
+    runtime = _agents[agent]
+    native = isinstance(runtime, CompiledStateGraph)
+    if native:
+        runtime = _native_agent_runtime(runtime)
+    latest = agent_input
+    events = {}
+
+    async def consume():
+        nonlocal latest
+        config = trace_config(agent, latest)
+        if native:
+            stream = runtime.astream(
+                agent_input,
+                config=config,
+                stream_mode=["values", "custom"],
+                subgraphs=True,
+            )
+            async for _, mode, payload in stream:
+                if mode == "values" and isinstance(payload, dict):
+                    latest = _prefer_stream_state(latest, payload)
+                elif mode == "custom" and isinstance(payload, dict) and payload.get("agent_runtime_event"):
+                    events[payload["event_id"]] = payload["update"]
+        elif hasattr(runtime, "astream"):
+            stream = runtime.astream(agent_input, config=config, stream_mode=["values", "custom"])
+            async for mode, payload in stream:
+                if mode == "values" and isinstance(payload, dict):
+                    latest = _prefer_stream_state(latest, payload)
+                elif mode == "custom" and isinstance(payload, dict) and payload.get("agent_runtime_event"):
+                    events[payload["event_id"]] = payload["update"]
+        else:
+            latest = await runtime.ainvoke(agent_input, config=config)
+
+    remaining = max(0.001, deadline - time.monotonic())
+    try:
+        await asyncio.wait_for(consume(), timeout=remaining)
+    except TimeoutError:
+        return _restore_stream_state(latest, events), True
+    except APIError as exc:
+        if not _transient_model_error(exc):
+            raise
+        latest = {**latest, "termination_reason": "provider_error"}
+        return _restore_stream_state(latest, events), True
+    return _restore_stream_state(latest, events), False
+
+
+def _finalize_instruction(agent: str, attempt: int) -> HumanMessage:
+    action = "Преобразуй собранные данные в требуемый structured response." if not attempt else (
+        "Предыдущий ответ не завершил structured response. Исправь его без продолжения исследования."
+    )
+    return HumanMessage(content=(
+        f"Техническая фаза завершения роли {agent}. Новые данные не запрашивай, "
+        "investigative tools недоступны. Зафиксируй выводы, ограничения и NOT_CHECKED "
+        f"только по уже собранным Evidence и находкам. {action}"
+    ))
+
+
+async def _finalize_agent(
+    agent: str,
+    result: dict,
+    schema,
+    hard_deadline: float,
+) -> tuple[dict, int]:
+    import time
+
+    calls = 0
+    reason = result.get("termination_reason") or "soft_timeout"
+    for attempt in range(settings.agent_finalize_attempts):
+        now = time.monotonic()
+        if now >= hard_deadline:
+            break
+        result = {
+            **result,
+            "messages": [*(result.get("messages") or []), _finalize_instruction(agent, attempt)],
+            "run_tool_call_count": {},
+            "agent_phase": "finalize",
+            "termination_reason": reason,
+        }
+        deadline = min(hard_deadline, now + settings.agent_finalize_attempt_timeout_seconds)
+        result, _ = await _stream_agent(agent, result, deadline)
+        calls += (result.get("run_tool_call_count") or {}).get("__all__", 0)
+        if result.get("structured_response") is not None:
+            try:
+                _structured_response(result, schema)
+                return result, calls
+            except RuntimeError:
+                pass
+    fallback_reason = "provider_error" if reason == "provider_error" else "finalize_exhausted"
+    return _timeout_result(schema, result, fallback_reason), calls
+
+
 async def _run_agent(agent: str, state: State, work_key: str) -> tuple[dict, list[BaseMessage], dict]:
-    """Выполнить роль с учётом tool limit и допустимых для неё продолжений."""
+    """Выполнить роль с учётом tool limit, finalization и допустимых продолжений."""
+    import time
+
     from metrics import summarize_agent_run
 
     started_at = datetime.now(UTC)
+    monotonic_start = time.monotonic()
+    soft_deadline = monotonic_start + min(settings.agent_finalize_after_seconds, settings.agent_timeout_seconds)
+    hard_deadline = monotonic_start + settings.agent_timeout_seconds
     original_input = _agent_input(state, work_key)
     agent_input = original_input
     stage_text = {
@@ -366,19 +629,19 @@ async def _run_agent(agent: str, state: State, work_key: str) -> tuple[dict, lis
     schema = _agent_schema(agent)
     total_calls = 0
     segments_used = 0
+    finalized = False
     max_continuations = 0 if agent == "scout" else settings.agent_max_continuations
     for segment in range(max_continuations + 1):
         segments_used = segment + 1
         limited = False
         for attempt in range(2):
-            try:
-                result = await asyncio.wait_for(
-                    _agents[agent].ainvoke(agent_input, config=trace_config(agent, agent_input)),
-                    timeout=settings.agent_timeout_seconds,
-                )
-            except TimeoutError:
-                result = _timeout_result(schema, agent_input["messages"])
+            result, timed_out = await _stream_agent(agent, agent_input, soft_deadline)
             total_calls += (result.get("run_tool_call_count") or {}).get("__all__", 0)
+            if timed_out:
+                result, finalize_calls = await _finalize_agent(agent, result, schema, hard_deadline)
+                total_calls += finalize_calls
+                finalized = True
+                break
             limited = result.get("structured_response") is None and _limit_reached(result, agent)
             if limited and segment < max_continuations:
                 break
@@ -391,11 +654,13 @@ async def _run_agent(agent: str, state: State, work_key: str) -> tuple[dict, lis
                 new_messages = result["messages"][len(agent_input["messages"]):]
                 if attempt == 1 or new_messages:
                     raise
-        if not limited or segment == max_continuations:
+        if finalized or not limited or segment == max_continuations:
             break
         agent_input = {
             **result,
             "run_tool_call_count": {},
+            "agent_phase": "investigate",
+            "continuation": True,
             "messages": [
                 *(result.get("messages") or []),
                 HumanMessage(content=(
@@ -439,6 +704,9 @@ async def _run_agent(agent: str, state: State, work_key: str) -> tuple[dict, lis
         work_item_id=item.get("id") or "",
         attempt=(item.get("attempt") or 0) + 1 if item.get("id") else 0,
         scope_mode=(state.get("investigation_scope") or {}).get("mode") or "",
+        agent_phase=result.get("agent_phase") or "investigate",
+        continuation=bool(result.get("continuation")),
+        termination_reason=result.get("termination_reason") or "done",
         started_at=started_at.isoformat(timespec="milliseconds"),
         finished_at=finished_at.isoformat(timespec="milliseconds"),
         duration_ms=max(0, int((finished_at - started_at).total_seconds() * 1000)),

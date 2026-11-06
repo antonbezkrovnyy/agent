@@ -1,3 +1,4 @@
+import json
 from types import SimpleNamespace
 
 from conftest import FakeAgent, FakeStructured, ai, build_graph, intent, invoke, tc
@@ -5,7 +6,7 @@ from critics import _deterministic_issues
 from evidence import chain_markdown, investigation_chain
 from export import _export_source
 from state import merge_hypotheses
-from tools import update_hypothesis
+from tools import get_hypothesis, list_hypotheses, update_hypothesis
 
 
 def runtime(state):
@@ -122,3 +123,25 @@ def test_hypothesis_tool_crosses_subgraph_delta(patch_llm):
     assert len(result["hypotheses"]) == 1
     assert result["hypotheses"][0]["status"] == "open"
     assert result["hypotheses"][0]["text"] == "Сбой связан с deploy"
+
+
+def test_list_and_get_hypothesis_read_local_state():
+    state = {"hypotheses": [{
+        "id": "hyp-1",
+        "text": "Сбой связан с deploy",
+        "status": "open",
+        "reason": "Нужна проверка",
+        "evidence_ids": [],
+        "history": [{"status": "open", "reason": "Нужна проверка"}],
+    }]}
+    tool_runtime = runtime(state)
+
+    listed = json.loads(list_hypotheses.func(runtime=tool_runtime))
+    fetched = json.loads(get_hypothesis.func("hyp-1", runtime=tool_runtime))
+    missing = json.loads(get_hypothesis.func("missing", runtime=tool_runtime))
+
+    assert listed["hypotheses"][0]["id"] == "hyp-1"
+    assert "history" not in listed["hypotheses"][0]
+    assert fetched["hypothesis"]["history"][0]["status"] == "open"
+    assert missing["ok"] is False
+    assert missing["available"] == ["hyp-1"]

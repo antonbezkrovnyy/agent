@@ -52,3 +52,23 @@ def test_intent_fallback_does_not_guess_skills_from_keywords():
     assert result["work_mode"] == "deep"
     assert result["skill_id"] is None
     assert result["related_investigation_id"] is None
+
+
+def test_intent_accepts_missing_rationale_and_empty_ids():
+    decision = IntentDecision.model_validate({
+        "intent": "complex",
+        "work_mode": "quick",
+        "needs_new_data": True,
+        "new_investigation": "new",
+        "window_requested": True,
+        "window": {"last_minutes": 1440},
+        "skill_id": "",
+        "related_investigation_id": "",
+        "confidence": 0.95,
+        "escalation_reason": "",
+    })
+
+    assert decision.rationale == ""
+    assert decision.skill_id is None
+    assert decision.related_investigation_id is None
+    assert decision.window.last_minutes == 1440

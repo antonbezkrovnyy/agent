@@ -30,6 +30,8 @@
 - `agent/progress.py` — публичный статус run, лимиты и suggestion-действия.
 - `agent/observability.py` — OpenInference role/scope/item metadata и prompt version.
 - `agent/llm.py` — Pydantic-схемы ответов и LLM.
+- `litellm/config.yaml` — стабильные `logicore-*` aliases upstream-моделей для Aegra,
+  evaluator и embeddings; секреты остаются в `.env` или LiteLLM credential store.
 - `agent/state.py` — общие Evidence/Case/Memory Channels и поля supervisor;
   не переносить сюда бизнес-логику и не дублировать общие каналы в двух схемах.
 - `agent/tools.py` — MCP tools, Evidence и findings; файлы создаются через artifacts.py.
@@ -56,6 +58,8 @@
 - Каждый MCP-результат нормализуется через `EvidenceRecord` и сохраняется с
   фактическими аргументами и окном; findings используют `FindingRecord`. IQL приходит
   из MCP и должен совпадать с выполненным запросом, агент не генерирует его повторно.
+  Runtime стримит native `create_agent` и события завершённых tools: технический таймаут
+  не отбрасывает Evidence, findings, гипотезы, окна, артефакты и приватную историю.
 - Аналитический отчёт прикрепляется как Markdown плюс ZIP с `report.md`, `queries.md`,
   `evidence.jsonl`, `events.csv` и `manifest.json`. Пакет строится детерминированно.
 - `memory_operations` фиксирует исходное/фактическое действие и исход каждой записи;
@@ -77,7 +81,8 @@
 - Цепочка расследования строится детерминированно из state. LLM не добавляет в
   неё несуществующие действия и факты.
 - Гипотезы меняются только через `update_hypothesis`: `open` допускает отсутствие
-  Evidence, `supported/rejected` требуют валидные ID. История сохраняется в state,
+  Evidence, `supported/rejected` требуют валидные ID. Чтение выполняется через
+  `list_hypotheses`/`get_hypothesis`. История сохраняется в state,
   Case Store и отчёте; open не попадает в долговременную Context Memory.
 - Для ответов агентов используются схемы из `llm.py`, а не самодельный parser,
   если доступен structured output. Intent классифицируется LLM; keyword-списки
@@ -89,7 +94,9 @@
 - Windowed tools определяются по JSON Schema (`time_from/time_to`), а не по
   hardcoded списку имён.
 - Continuation сохраняет `context.id`, base/focus/history окон, `depth_history`,
-  Evidence, findings и гипотезы.
+  Evidence, findings и гипотезы. Повторный work item получает явный handoff и не
+  начинает базовую разведку заново; идентичный успешный MCP-вызов с теми же фактическими
+  аргументами и окном переиспользует Evidence без нового запроса и дубликата.
 - Дела сохраняются только в собственную таблицу `agent_memory.investigations`, не
   в Aegra checkpoints. Восстановление в новом треде требует контрольного запроса.
 - Context Memory хранит атомарные факты с provenance и сроком актуальности в
@@ -124,8 +131,10 @@
 ## Лимиты
 
 Текущие `run_limit`: scout 10, investigator 30, reporter 60. Значения и остальные
-лимиты задаются в `agent/config.py` через env и сбрасываются на каждый новый
-`ainvoke`. Технические таймауты: агент 600 с, export 120 с.
+лимиты задаются в `agent/config.py` через env и сбрасываются на каждый новый запуск
+роли. Технические таймауты: soft 480 с, hard 600 с на роль, export 120 с. После soft
+Scout/Investigator/Reporter теряют investigative tools и получают до 10 попыток
+structured finalization внутри общего hard deadline; fallback сохраняет partial state.
 
 При изменении лимитов обновлять тест `tests/test_tool_limit.py`, `README.md` и
 `docs/DEV.md`. Не описывать tool limit как общий лимит чата: это неверно. У Scout 10

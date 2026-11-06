@@ -351,7 +351,9 @@ flowchart LR
 обновляется без дублирования. История переходов сохраняется.
 
 Гипотезы попадают в `investigation_chain`, отдельный раздел Markdown-отчёта и Case
-Store. Открытая гипотеза не становится долговременным фактом Context Memory.
+Store. Investigator читает их через `list_hypotheses` и полную историю по ID через
+`get_hypothesis`; оба инструмента доступны во время finalization. Открытая гипотеза
+не становится долговременным фактом Context Memory.
 
 ### 8.4. Проверка критиками
 
@@ -568,7 +570,9 @@ Scope содержит `mode=discovery/targeted/alert`, `objective`, `included`,
 
 `run_metrics` содержит записи по ролям и items: модель, timestamps, длительность,
 prompt/completion/total tokens, tool calls по именам, повторные запросы и число
-continuations. Те же метрики вкладываются в `manifest.json` и возвращаются через MCP.
+continuations. `agent_phase`, `continuation` и `termination_reason` различают обычную
+работу, finalization и fallback; завершённые до таймаута вызовы сохраняются в метриках.
+Те же метрики вкладываются в `manifest.json` и возвращаются через MCP.
 
 ## 11. Инструменты
 
@@ -614,6 +618,7 @@ Evidence сохраняет фактический `iql`, а не переген
 | `get_evidence_batch` | Прочитать до 50 полных Evidence одним вызовом |
 | `log_finding`, `list_findings`, `get_finding` | Вести журнал находок |
 | `update_window` | Изменить окно текущего дела |
+| `list_hypotheses`, `get_hypothesis` | Прочитать компактный журнал или полную историю гипотезы |
 | `update_hypothesis` | Создать или пересмотреть гипотезу |
 | `inspect_memory` | Показать текущее дело, активные факты и последние случаи без записи |
 | `search_context_memory` | Найти факты по новой сущности или симптому |
@@ -753,7 +758,29 @@ Next.js поднимется на том же порту 3001 с hot reload; п�
 
 ## 13. LLM и embeddings
 
-Модели назначаются по ролям через env:
+В Docker Aegra и evaluator работают через LiteLLM proxy `http://litellm:4000/v1`.
+Стабильные aliases из `litellm/config.yaml`: `logicore-default`, `logicore-intent`,
+`logicore-scout`, `logicore-investigator`, `logicore-reporter`, `logicore-critic`,
+`logicore-memory`, `logicore-planner`, `logicore-evaluator` и `logicore-embedding`.
+`LITELLM_MASTER_KEY` авторизует клиентов proxy. Вне Docker доступен
+`http://localhost:4000/v1`; liveliness — `GET /health/liveliness`.
+
+Фактические upstream-модели задаются прямо в `litellm/config.yaml` через
+`litellm_params.model` каждого alias. Текущий credential `jet` хранится в БД LiteLLM:
+Scout/Memory используют `agent-fast`, Intent/Investigator/Reporter/Critic/Planner/
+Evaluator и default — `agent`. Публичный upstream GPTLab:
+`https://gpt-api.jet.su/api/v1`; `agent-heavy` предназначен для long context.
+Секреты в YAML не записываются. Для embeddings отдельные
+`AGENT_MEMORY_EMBEDDING_BASE_URL/TOKEN` имеют приоритет над основным upstream.
+
+Отдельный `litellm-db` хранит настройки, ключи и модели, добавленные через UI.
+`store_model_in_db=true`, `LITELLM_POSTGRES_PASSWORD` задаёт пароль этой БД.
+UI доступен по `http://localhost:4000/ui`: пользователь `admin`, пароль —
+`LITELLM_MASTER_KEY`. YAML aliases остаются в файле, модели из UI добавляются в БД.
+Aegra и evaluator авторизуются отдельным Virtual Key `logicore-agent` через
+`LITELLM_AGENT_KEY`; административный master key им не нужен.
+
+При запуске агента вне Docker модели по-прежнему назначаются через env:
 
 | Настройка | Роль | Пустое значение |
 |---|---|---|
@@ -765,9 +792,10 @@ Next.js поднимется на том же порту 3001 с hot reload; п�
 | `LLM_MODEL_CRITIC` | Оба критика | Используется `LLM_MODEL` |
 | `LLM_MODEL_MEMORY` | Консолидация Context Memory | Используется `LLM_MODEL` |
 | `LLM_MODEL_PLANNER` | Декомпозиция Deep и replan | Используется `LLM_MODEL` |
+| `LLM_MODEL_EVALUATOR` | Независимая оценка run | Используется `LLM_MODEL` |
 
-В `agent/config.py` базовым значением является `qwen3.7-flash`, но фактическая
-модель развёртывания задаётся через `.env`.
+В `agent/config.py` базовым значением является `qwen3.7-flash`, но при запуске
+вне Docker фактическая модель задаётся через `.env`. В Docker она задаётся в LiteLLM.
 
 Для Context Memory и похожих дел по умолчанию используется `bge-m3` с размерностью
 1024. `AGENT_MEMORY_EMBEDDING_BASE_URL/TOKEN` позволяют задать отдельный
@@ -783,11 +811,14 @@ Structured output строится через function calling с fallback на 
 
 | Ограничение | Default и область | Что происходит |
 |---|---|---|
-| Scout tool calls | 10 на `create_agent.ainvoke` | Tool-цикл завершается |
-| Investigator tool calls | 30 на `create_agent.ainvoke` | Tool-цикл завершается |
-| Reporter tool calls | 60 на `create_agent.ainvoke` | Tool-цикл завершается |
+| Scout tool calls | 10 на запуск роли | Tool-цикл завершается |
+| Investigator tool calls | 30 на запуск роли | Tool-цикл завершается |
+| Reporter tool calls | 60 на запуск роли | Tool-цикл завершается |
 | `MAX_REWORK` | 1 на внешний run | Дальше возвращается текущий результат |
-| Agent timeout | 600 с на `create_agent.ainvoke` | Схемный результат с limitation |
+| Agent soft timeout | 480 с на запуск роли | Investigative tools отключаются, начинается finalization |
+| Finalize attempts | 10 внутри общего дедлайна | Первая и до девяти исправляющих попыток |
+| Finalize attempt timeout | 30 с на model call | Переход к следующей попытке или fallback |
+| Agent hard timeout | 600 с на запуск роли | `partial/failed` поверх сохранённого state |
 | Export timeout | 120 с | Evidence error и ответ об ошибке |
 | Summarization | 230000 tokens / 20 messages | История сокращается middleware |
 | Critic context | 2000 message / 8000 dialog chars | Вход ограничивается |
@@ -801,25 +832,56 @@ Structured output строится через function calling с fallback на 
 | Memory dedup | 0.90 | Insert становится update |
 | Observed TTL | 24 часа | Наблюдение перестаёт извлекаться |
 
-Tool limit принадлежит одному `ainvoke`. У Scout 10 выполненных вызовов на запуск,
+Tool limit принадлежит одному запуску роли. У Scout 10 выполненных вызовов,
 continuation нет: после лимита сразу создаётся fallback с limitation. Investigator и
 Reporter автоматически получают до `AGENT_MAX_CONTINUATIONS=1` продолжения на work item;
 перед каждым сбрасывается только `run_tool_call_count`, а handoff и Evidence сохраняются.
 Новое сообщение и rework тоже начинают новый вызов. Таймер счётчик не сбрасывает.
 Текст middleware не считается ответом.
 
-### 14.2. Что не является общим дедлайном
+### 14.2. Partial state, finalization и continuation
+
+Compiled `create_agent` подключён через нативный `add_node` с pre/post-узлами. Runtime
+использует `astream(stream_mode="values")` и domain-события завершённых инструментов.
+Последний snapshot и события после него восстанавливаются идемпотентно: даже отмена
+во время следующего model call или параллельного tool-шага не удаляет уже полученные
+Evidence, findings, гипотезы, окна, артефакты и приватные сообщения. Транзиентные
+`APIError` (429/5xx/connection closed) переводят роль в finalization с
+`termination_reason=provider_error`; после исчерпания попыток возвращается partial state.
+
+LiteLLM выполняет до трёх повторов одного deployment с паузой 2 секунды
+(`litellm_settings.num_retries/retry_after`). Это retry только сетевых и временных
+сбоев, а не автоматический fallback между моделями GPTLab.
+
+После soft timeout работа переходит `investigate → finalize`. Middleware удаляет
+investigative tools из model request: Scout оставляет `log_finding`; Investigator —
+чтение findings/Evidence/гипотез и их фиксацию; Reporter — чтение результатов и
+`save_report`/`send_report`. LogiCore MCP, `extract_data` и смена окна запрещены.
+Structured response получает до 10 попыток внутри общего hard deadline. Последний
+`fallback` формируется без LLM и сохраняет partial state; findings автоматически не
+становятся подтверждёнными claims.
+
+Повторный work item получает прежние приватные сообщения, Evidence, findings,
+гипотезы, окна, замечания критика и невыполненный acceptance. Явный handoff запрещает
+повторную базовую разведку. Идентичный успешный MCP-вызов на retry с теми же
+фактическими аргументами и окном возвращает сохранённый Evidence без нового запроса
+и дубликата. Ошибки не кэшируются; первая попытка и новый пользовательский run
+выполняют запросы обычно.
+
+### 14.3. Что не является общим дедлайном
 
 `AGENT_TIMEOUT_SECONDS` не ограничивает весь чат. Прямые вызовы Intent, chat и
 критиков отдельным agent timeout не покрыты, поэтому полный run может быть длиннее
 600 секунд. Пользовательского бюджета времени нет.
 
-### 14.3. Деградация
+### 14.4. Деградация
 
 - Tool error или partial фиксируется в Evidence и должен попасть в limitations.
 - `NOT_CHECKED` явно перечисляет непроверенные ветки.
 - Сбой критика даёт `critic_unavailable`, но не останавливает run.
 - Сбой памяти оставляет работу в state треда и заполняет `memory_error`.
+  `safe_json` заменяет lone surrogates и NUL перед записью Case Store, Context Facts
+  и execution events, поэтому сырой текст LogiCore не вызывает `UntranslatableCharacter`.
 - Сбой embeddings не мешает сохранить дело, но исключает его из vector search.
 - Ошибка consolidation после сохранения дела не удаляет само дело.
 - Отсутствие structured response превращается в явную limitation, а не скрытый parser.

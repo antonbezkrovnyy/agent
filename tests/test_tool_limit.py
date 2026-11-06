@@ -54,7 +54,11 @@ def test_rework_and_new_message_reset_limit(patch_llm, monkeypatch):
 
     assert first["rework"] == 1
     assert first["tool_usage"]["investigator"] == 31
-    assert len(first["evidence"]) == 60
+    assert len(first["evidence"]) == 30
+    assert sum(
+        '"reused": true' in message.content
+        for message in first["inv_msgs"] if hasattr(message, "content")
+    ) == 30
 
     agent2 = FakeAgent({
         "Ты — инвестигейтор": [

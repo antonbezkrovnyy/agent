@@ -71,6 +71,9 @@ class Settings(BaseSettings):
     agent_memory_embedding_token: str = ""
 
     # Технические таймауты от зависаний; пользователь не управляет ими
+    agent_finalize_after_seconds: int = 480
+    agent_finalize_attempts: int = 10
+    agent_finalize_attempt_timeout_seconds: int = 30
     agent_timeout_seconds: int = 600
     export_timeout_seconds: int = 120
 

@@ -19,6 +19,10 @@ def trace_config(role: str, state: dict) -> dict:
         "prompt_version": settings.agent_prompt_version,
         "investigation_id": str(context.get("id") or ""),
         "work_item_id": str(item.get("id") or ""),
+        "work_item_attempt": (item.get("attempt") or 0) + 1 if item.get("id") else 0,
+        "agent_phase": state.get("agent_phase") or "investigate",
+        "continuation": bool(state.get("continuation")),
+        "termination_reason": state.get("termination_reason") or "running",
         "skill_id": str(skill.get("id") or ""),
     }
     return {

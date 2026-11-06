@@ -81,6 +81,29 @@ def work_item_block(state: dict) -> str:
     )
 
 
+def continuation_block(state: dict) -> str:
+    item = state.get("active_work_item") or {}
+    if not item.get("id") or not (item.get("attempt") or 0):
+        return ""
+    payload = {
+        "work_item_id": item.get("id"),
+        "attempt": item.get("attempt"),
+        "acceptance": item.get("acceptance") or item.get("goal"),
+        "previous_result": item.get("result") or {},
+        "critic": state.get("critic") or item.get("critic") or {},
+        "evidence_count": len(state.get("evidence") or []),
+        "finding_count": len(state.get("findings") or []),
+        "hypotheses": state.get("hypotheses") or [],
+        "window": state.get("context") or {},
+    }
+    return (
+        "Continuation того же work item. Не начинай базовую разведку заново и не повторяй "
+        "завершённые проверки. Используй прежние сообщения, Evidence, findings и гипотезы; "
+        "выполни только оставшуюся часть acceptance. Если данных достаточно, сразу верни "
+        "structured response:\n" + json_dumps(payload, ensure_ascii=False)
+    )
+
+
 def work_items_block(state: dict) -> str:
     items = state.get("work_items") or []
     completed = [item for item in items if item.get("status") == "done" and item.get("result")]

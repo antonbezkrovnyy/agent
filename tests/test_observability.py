@@ -1,3 +1,5 @@
+from langgraph.prebuilt import ToolRuntime
+
 from observability import settings, trace_config
 
 
@@ -21,6 +23,10 @@ def test_trace_config_contains_only_observability_fields():
         "prompt_version": settings.agent_prompt_version,
         "investigation_id": "case-1",
         "work_item_id": "duplicates",
+        "work_item_attempt": 1,
+        "agent_phase": "investigate",
+        "continuation": False,
+        "termination_reason": "running",
         "skill_id": "event_drilldown",
     }
     assert "secret-user-payload" not in str(config)
@@ -31,3 +37,9 @@ def test_trace_config_handles_empty_state():
     assert config["tags"] == ["role:chat", "mode:unknown", "scope:unknown"]
     assert config["metadata"]["investigation_id"] == ""
     assert config["metadata"]["work_item_id"] == ""
+
+
+def test_tool_runtime_repr_does_not_expose_injected_state():
+    runtime = object.__new__(ToolRuntime)
+
+    assert repr(runtime) == "ToolRuntime(<injected>)"

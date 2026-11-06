@@ -14,6 +14,7 @@ node_modules/
 *.log
 .artifacts/
 .kimi-code/
+.px/
 
 # ОС
 .DS_Store

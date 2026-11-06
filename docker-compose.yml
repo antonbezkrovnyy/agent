@@ -75,6 +75,52 @@ services:
       timeout: 5s
       retries: 10
 
+  litellm-db:
+    image: pgvector/pgvector:pg18
+    restart: unless-stopped
+    environment:
+      - POSTGRES_USER=litellm
+      - POSTGRES_PASSWORD=${LITELLM_POSTGRES_PASSWORD:-litellm_password}
+      - POSTGRES_DB=litellm_db
+    volumes:
+      - litellm_postgres_data:/var/lib/postgresql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U litellm -d litellm_db"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  litellm:
+    image: ghcr.io/berriai/litellm:main-latest
+    restart: unless-stopped
+    entrypoint: ""
+    ports:
+      - "4000:4000"
+    env_file:
+      - ./.env
+    environment:
+      - LITELLM_MASTER_KEY=${LITELLM_MASTER_KEY:-litellm-local-key}
+      - LITELLM_LOG=INFO
+      - DATABASE_URL=postgresql://litellm:${LITELLM_POSTGRES_PASSWORD:-litellm_password}@litellm-db:5432/litellm_db
+      - DIRECT_URL=postgresql://litellm:${LITELLM_POSTGRES_PASSWORD:-litellm_password}@litellm-db:5432/litellm_db
+    volumes:
+      - ./litellm/config.yaml:/app/config.yaml:ro
+    command: >
+      sh -c '
+      export UPSTREAM_EMBEDDING_BASE_URL=$${AGENT_MEMORY_EMBEDDING_BASE_URL:-$${LLM_BASE_URL}};
+      export UPSTREAM_EMBEDDING_TOKEN=$${AGENT_MEMORY_EMBEDDING_TOKEN:-$${LLM_TOKEN}};
+      exec litellm --config /app/config.yaml --host 0.0.0.0 --port 4000
+      '
+    depends_on:
+      litellm-db:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:4000/health/liveliness', timeout=3)"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 40s
+
   aegra:
     build:
       context: https://github.com/aegra/aegra.git
@@ -93,6 +139,19 @@ services:
       - ARTIFACT_S3_PUBLIC_ENDPOINT=${ARTIFACT_S3_PUBLIC_ENDPOINT:-http://localhost:8333}
       - ARTIFACT_S3_ACCESS_KEY=${ARTIFACT_S3_ACCESS_KEY:-agent}
       - ARTIFACT_S3_SECRET_KEY=${ARTIFACT_S3_SECRET_KEY:-agent-local-secret}
+      - LLM_BASE_URL=http://litellm:4000/v1
+      - LLM_TOKEN=${LITELLM_AGENT_KEY:-litellm-local-key}
+      - LLM_MODEL=logicore-default
+      - LLM_MODEL_INTENT=logicore-intent
+      - LLM_MODEL_SCOUT=logicore-scout
+      - LLM_MODEL_INVESTIGATOR=logicore-investigator
+      - LLM_MODEL_REPORTER=logicore-reporter
+      - LLM_MODEL_CRITIC=logicore-critic
+      - LLM_MODEL_MEMORY=logicore-memory
+      - LLM_MODEL_PLANNER=logicore-planner
+      - AGENT_MEMORY_EMBEDDING_MODEL=logicore-embedding
+      - AGENT_MEMORY_EMBEDDING_BASE_URL=
+      - AGENT_MEMORY_EMBEDDING_TOKEN=
       - PYTHONPATH=/app/src:/app/custom_agent
       - REDIS_BROKER_ENABLED=true
       - REDIS_URL=redis://redis:6379/0
@@ -105,6 +164,8 @@ services:
       - PHOENIX_COLLECTOR_ENDPOINT=http://phoenix:6006/v1/traces
       - PHOENIX_ENDPOINT=http://phoenix:6006
     depends_on:
+      litellm:
+        condition: service_healthy
       postgres:
         condition: service_healthy
       agent-memory-db:
@@ -187,7 +248,13 @@ services:
       - PHOENIX_PROJECT=logicore-agent
       - PHOENIX_PUBLIC_URL=${PHOENIX_PUBLIC_URL:-http://localhost:6006}
       - AGENT_MEMORY_DATABASE_URL=postgresql://agent_memory:${AGENT_MEMORY_POSTGRES_PASSWORD:-agent_memory_password}@agent-memory-db:5432/agent_memory_db
+      - LLM_BASE_URL=http://litellm:4000/v1
+      - LLM_TOKEN=${LITELLM_AGENT_KEY:-litellm-local-key}
+      - LLM_MODEL=logicore-default
+      - LLM_MODEL_EVALUATOR=logicore-evaluator
     depends_on:
+      litellm:
+        condition: service_healthy
       aegra:
         condition: service_healthy
       agent-memory-db:
@@ -284,6 +351,7 @@ services:
         condition: service_healthy
 volumes:
   postgres_data:
+  litellm_postgres_data:
   agent_memory_data:
   redis_data:
   seaweedfs_data:

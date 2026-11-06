@@ -10,6 +10,14 @@ def test_lone_surrogates_are_replaced_before_postgresql():
     assert safe_json({"statement": value})["statement"] == safe_text(value)
 
 
+def test_nul_bytes_are_replaced_before_postgresql():
+    value = "find\x00.\x00!\x00-executable"
+
+    assert safe_text(value) == "find . ! -executable"
+    assert safe_json({"top_value": value})["top_value"] == safe_text(value)
+    assert "\x00" not in safe_text(value)
+
+
 def test_fact_is_sanitized_at_store_boundary():
     class Cursor:
         params = None
