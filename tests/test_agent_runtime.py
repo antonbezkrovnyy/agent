@@ -279,3 +279,73 @@ def test_provider_connection_error_preserves_partial_state(patch_llm, monkeypatc
     ]
     assert result["evidence"] == state["evidence"]
     assert result["findings"] == state["findings"]
+
+
+def test_first_attempt_reuses_identical_mcp_evidence(patch_llm):
+    agent = FakeAgent({
+        "Ты — инвестигейтор": [
+            ai(calls=[tc("count_events", {})]),
+            ai(calls=[tc("count_events", {})]),
+            structured_result("Готово"),
+        ],
+        "Ты — репортёр": [ai("Готово")],
+    })
+    patch_llm(agent, FakeStructured(intent(mode="deep")))
+
+    result = invoke(build_graph(), "проверь повтор", thread_id="runtime-first-reuse")
+
+    assert len(result["evidence"]) == 1
+    assert result["work_items"][0]["attempt"] == 1
+    assert sum(
+        '"reused": true' in message.content
+        for message in result["inv_msgs"] if isinstance(message, ToolMessage)
+    ) == 1
+
+
+def test_singleflight_shares_only_identical_calls_and_preserves_pages():
+    from tools import normalize_tool_result
+
+    class Request:
+        def __init__(self, call_id, args):
+            self.tool_call = {"name": "search_events", "args": args, "id": call_id}
+            self.state = {
+                "context": {"id": "case-singleflight"},
+                "evidence": [],
+                "progress": {},
+                "run_tool_call_count": {},
+            }
+
+        def override(self, tool_call):
+            self.tool_call = tool_call
+            return self
+
+    calls = []
+
+    async def handler(request):
+        page = request.tool_call["args"]["page"]
+        calls.append(page)
+        await asyncio.sleep(0.02)
+        return ToolMessage(
+            content=json.dumps({"ok": True, "complete": True, "page": page, "events": []}),
+            tool_call_id=request.tool_call["id"],
+            name="search_events",
+        )
+
+    async def run():
+        same = await asyncio.gather(
+            normalize_tool_result.awrap_tool_call(Request("same-1", {"page": 1}), handler),
+            normalize_tool_result.awrap_tool_call(Request("same-2", {"page": 1}), handler),
+        )
+        pages = await asyncio.gather(
+            normalize_tool_result.awrap_tool_call(Request("page-1", {"page": 1}), handler),
+            normalize_tool_result.awrap_tool_call(Request("page-2", {"page": 2}), handler),
+        )
+        return same, pages
+
+    same, pages = asyncio.run(run())
+
+    assert calls == [1, 1, 2]
+    assert same[0].update["evidence"][0]["id"] == "same-1"
+    assert same[1].update["evidence"][0]["id"] == "same-1"
+    assert '"reused": true' in same[1].update["messages"][0].content
+    assert [item.update["evidence"][0]["id"] for item in pages] == ["page-1", "page-2"]

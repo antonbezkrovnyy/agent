@@ -68,12 +68,15 @@ def build_search_response(
     order: Any = "desc",
     page: int = 1,
     per_page: int | None = None,
+    next_page_rows: int | None = None,
 ) -> dict[str, Any]:
-    """Конверт search_events с пагинацией по фактическому размеру страницы."""
+    """Конверт search_events: has_more подтверждается строками следующей страницы."""
     check_response_schema(meta_schema, requested_columns)
     total = resolve_total(len(rows), meta_total)
-    has_more = per_page is not None and len(rows) >= per_page
-    truncated = len(rows) < total or has_more
+    has_more = False
+    if per_page is not None and len(rows) >= per_page:
+        has_more = next_page_rows > 0 if next_page_rows is not None else None
+    truncated = len(rows) < total or has_more is not False
     response: dict[str, Any] = {
         "ok": True,
         "filter_applied": filter_applied,

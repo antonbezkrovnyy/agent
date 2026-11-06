@@ -8,10 +8,12 @@ from logicore_mcp.domain.filters import FieldSchema
 from logicore_mcp.domain.projection import build_search_response
 from logicore_mcp.earth.schemas import EventsResponse
 from logicore_mcp.mcp.extract import extract_data_flow
+from logicore_mcp.mcp.flows import search_events_flow
 
 COLUMNS = ("uuid", "timestamp", "message")
 SCHEMA = {
     "uuid": FieldSchema(name="uuid", type="String"),
+    "timestamp": FieldSchema(name="timestamp", type="DateTime"),
     "message": FieldSchema(name="message", type="String"),
     "action": FieldSchema(name="action", type="String"),
 }
@@ -25,9 +27,10 @@ def rows(count):
 
 
 class FakeClient:
-    def __init__(self, data, repeat_first=False):
+    def __init__(self, data, repeat_first=False, page_size=100):
         self.data = data
         self.repeat_first = repeat_first
+        self.page_size = page_size
         self.pages = []
         self.requests = []
 
@@ -43,7 +46,7 @@ class FakeClient:
         page = 1 if self.repeat_first else query["pagination"]["page"]
         per_page = query["pagination"]["perPage"]
         self.pages.append(page)
-        start = (page - 1) * 100
+        start = (page - 1) * self.page_size
         columns = query["query"]["columns"]
         data = [
             {key: value for key, value in row.items() if key in columns}
@@ -135,6 +138,7 @@ def test_search_response_exposes_next_page():
         filter_applied=None,
         page=2,
         per_page=2,
+        next_page_rows=1,
     )
 
     assert result["has_more"] is True
@@ -188,3 +192,68 @@ def test_extract_forwards_native_options_and_marks_query_limit():
     assert client.requests[0]["data"]["query"]["groups"] == groups
     assert client.requests[0]["data"]["query"]["order"] == order_by
     assert client.requests[0]["data"]["query"]["limit"] == 150
+
+
+def search(client, limit=13, page=1):
+    client.page_size = limit
+    return asyncio.run(search_events_flow(
+        client,
+        time_from="2026-10-31T07:00:00Z",
+        time_to="2026-10-31T08:00:00Z",
+        filter="importance = 'high'",
+        page=page,
+        limit=limit,
+        schema=SCHEMA,
+        columns=COLUMNS,
+        default_columns=COLUMNS,
+    ))
+
+
+def test_search_events_empty_next_page_is_definitively_complete():
+    client = FakeClient(rows(13))
+
+    result = search(client)
+
+    assert result["has_more"] is False
+    assert result["next_page"] is None
+    assert result["truncated"] is False
+    assert result["total"] == 13
+    assert client.pages == [1, 2]
+
+
+def test_search_events_nonempty_next_page_confirms_continuation():
+    client = FakeClient(rows(26))
+
+    result = search(client)
+
+    assert result["has_more"] is True
+    assert result["next_page"] == 2
+    assert result["truncated"] is True
+    assert client.pages == [1, 2]
+
+
+def test_search_events_partial_page_does_not_need_lookahead():
+    client = FakeClient(rows(12))
+
+    result = search(client)
+
+    assert result["has_more"] is False
+    assert result["next_page"] is None
+    assert result["truncated"] is False
+    assert result["total"] == 12
+    assert client.pages == [1]
+
+
+def test_search_events_lookahead_failure_is_explicitly_unknown():
+    class FailingNextPageClient(FakeClient):
+        async def search_events(self, request):
+            if request["data"]["pagination"]["page"] == 2:
+                raise RuntimeError("next page unavailable")
+            return await super().search_events(request)
+
+    result = search(FailingNextPageClient(rows(13)))
+
+    assert result["has_more"] is None
+    assert result["next_page"] is None
+    assert result["truncated"] is True
+    assert "next page unavailable" in result["pagination_error"]

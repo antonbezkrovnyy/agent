@@ -9,6 +9,9 @@ from state import State
 
 def build_reporting_graph(settings):
     def after_reporter(state: State) -> str:
+        verification = (state.get("report_result") or {}).get("verification") or {}
+        if verification.get("status") == "update_failed":
+            return END
         if settings.critic_enabled and state.get("report_result"):
             return "critic_report"
         return END

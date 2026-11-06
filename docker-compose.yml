@@ -189,6 +189,10 @@ services:
     volumes:
       - ./agent:/app/custom_agent:ro
       - ./aegra.json:/app/aegra.json:ro
+      - ./README.md:/app/README.md:ro
+      - ./AGENTS.md:/app/AGENTS.md:ro
+      - ./docs:/app/docs:ro
+      - ./logicore-mcp/README.md:/app/logicore-mcp/README.md:ro
 
   # MCP-сервер Логикора: streamable-http + bearer-токен (ADR-0010), доступен только в Docker-сети
   logicore-mcp:

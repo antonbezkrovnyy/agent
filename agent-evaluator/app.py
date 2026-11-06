@@ -155,7 +155,7 @@ async def evaluate_run(thread_id: str, run_id: str) -> EvaluationRecord | None:
         )
     if settings.evaluator_phoenix_annotations_enabled and record.trace_id:
         try:
-            await asyncio.to_thread(phoenix.annotate, record)
+            await asyncio.to_thread(phoenix.annotate, record, state)
             record.metrics["phoenix_annotation"] = "saved"
         except Exception as exc:
             record.metrics["phoenix_annotation"] = "error"

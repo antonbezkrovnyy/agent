@@ -104,6 +104,20 @@ class EvaluationStore:
                     (datetime.now(UTC), run_id),
                 )
 
+    def list_traced(self, limit: int = 100) -> list[tuple[str, str, str]]:
+        """Оценённые runs с trace: (run_id, thread_id, trace_id), новые первыми."""
+        self._setup()
+        with psycopg.connect(self.database_url) as connection:
+            with connection.cursor() as cursor:
+                cursor.execute("""
+                    SELECT run_id, thread_id, trace_id
+                    FROM agent_memory.run_evaluations
+                    WHERE trace_id <> ''
+                    ORDER BY created_at DESC
+                    LIMIT %s
+                """, (limit,))
+                return [(row[0], row[1], row[2]) for row in cursor.fetchall()]
+
     def summary(self) -> dict:
         self._setup()
         with psycopg.connect(self.database_url) as connection:

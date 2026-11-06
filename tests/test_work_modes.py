@@ -100,6 +100,8 @@ def test_quick_escalation_preserves_investigation(patch_llm):
     assert result["depth_history"][-1]["from"] == "quick"
     assert result["depth_history"][-1]["to"] == "deep"
     assert len(result["evidence"]) == 1
+    scout_message = next(message for message in result["messages"] if message.name == "scout")
+    assert "- **Следующий этап:** глубокое расследование" in scout_message.content
 
 
 def test_update_window_controls_following_queries(patch_llm):

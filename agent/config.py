@@ -52,7 +52,7 @@ class Settings(BaseSettings):
     planner_max_revisions: int = 2
     scope_discovery_max_items: int = 2
     scope_required_max_items: int = 2
-    agent_prompt_version: str = "2026-11-03"
+    agent_prompt_version: str = "2026-11-06.3"
 
     # Отдельные Case Store и Context Memory, не БД Aegra checkpoints
     agent_memory_database_url: str = ""

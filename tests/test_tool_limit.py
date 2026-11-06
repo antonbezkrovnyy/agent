@@ -14,7 +14,11 @@ def test_tool_limit_moves_workflow_forward(patch_llm):
 
     result = invoke(build_graph(), "проверь события")
 
-    assert len(result["evidence"]) == 10
+    assert len(result["evidence"]) == 1
+    assert sum(
+        '"reused": true' in message.content
+        for message in result["scout_msgs"] if hasattr(message, "content")
+    ) == 9
     scout_metrics = next(item for item in result["run_metrics"] if item["agent"] == "scout")
     assert scout_metrics["segments"] == 1
     public_answers = [
@@ -54,11 +58,11 @@ def test_rework_and_new_message_reset_limit(patch_llm, monkeypatch):
 
     assert first["rework"] == 1
     assert first["tool_usage"]["investigator"] == 31
-    assert len(first["evidence"]) == 30
+    assert len(first["evidence"]) == 1
     assert sum(
         '"reused": true' in message.content
         for message in first["inv_msgs"] if hasattr(message, "content")
-    ) == 30
+    ) == 59
 
     agent2 = FakeAgent({
         "Ты — инвестигейтор": [
@@ -70,7 +74,8 @@ def test_rework_and_new_message_reset_limit(patch_llm, monkeypatch):
     second = invoke(graph, "второй запрос", thread_id="turn-limit")
 
     assert second["tool_usage"]["investigator"] == 31
-    assert len(second["evidence"]) - len(first["evidence"]) == 30
+    assert len(second["evidence"]) - len(first["evidence"]) == 1
+    assert second["evidence"][-1]["run_id"] != first["evidence"][0]["run_id"]
 
 
 def test_limit_finalizer_returns_schema_without_raw_middleware(monkeypatch):

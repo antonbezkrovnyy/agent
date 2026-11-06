@@ -199,6 +199,16 @@ def node_intent(state: State) -> dict:
         "depth_history": history,
         "transition": transition,
     }
+    if decision.get("needs_new_data"):
+        update.update({
+            "inv_result": {},
+            "investigation_scope": {},
+            "investigation_plan": {},
+            "work_items": Overwrite([]),
+            "active_work_item": Overwrite({}),
+            "run_metrics": Overwrite([]),
+            "independent_verification": {"status": "not_performed"},
+        })
     if decision.get("needs_new_data") or transition == "new" or mode == "quick":
         skill = get_skill(decision.get("skill_id")) if mode == "deep" else None
         update["active_skill"] = {
@@ -247,11 +257,16 @@ def node_archive(state: State) -> dict:
             "visited_anchors": [],
             "last_report": {},
             "inv_summary": "",
+            "inv_result": {},
             "memory_operations": Overwrite([]),
             "investigation_scope": {},
             "investigation_plan": {},
             "work_items": Overwrite([]),
-            "active_work_item": {},
+            "active_work_item": Overwrite({}),
+            "run_metrics": Overwrite([]),
+            "independent_verification": {"status": "not_performed"},
+            "time_axes": {},
+            "time_semantics": "",
             "replan_requested": False,
         })
         update["progress"] = _work_progress({**state, **update}, state["intent"])

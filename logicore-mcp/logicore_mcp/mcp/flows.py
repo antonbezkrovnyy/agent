@@ -301,6 +301,28 @@ async def search_events_flow(
             groups=groups,
         )
 
+    next_page_rows = None
+    pagination_error = None
+    if query_limit is None and len(response.data) >= limit:
+        next_request = build_events_request(
+            filters=iql,
+            time_from=start,
+            time_to=end,
+            tenant_ids=tenant_ids,
+            columns=columns_tuple,
+            page=page + 1,
+            per_page=limit,
+            order=order,
+            groups=list(groups) if groups is not None else None,
+            order_by=list(order_by) if order_by is not None else None,
+            query_limit=query_limit,
+        )
+        try:
+            next_response, _ = unwrap(await client.search_events(next_request))
+            next_page_rows = len(next_response.data)
+        except Exception as exc:
+            pagination_error = f"{type(exc).__name__}: {exc}"
+
     envelope = build_search_response(
         rows=truncate_message_rows(response.data),
         meta_total=response.meta.total,
@@ -312,7 +334,10 @@ async def search_events_flow(
         order=order_by or order,
         page=page,
         per_page=limit,
+        next_page_rows=next_page_rows,
     )
+    if pagination_error:
+        envelope["pagination_error"] = pagination_error
     if groups is not None:
         envelope["groups"] = list(groups)
     if query_limit is not None:

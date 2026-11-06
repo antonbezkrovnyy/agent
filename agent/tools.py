@@ -79,10 +79,18 @@ def _with_progress(request, result):
     return result
 
 
-def build_mcp_evidence(name: str, args: dict, data: dict, evidence_id: str, investigation_id: str | None) -> dict:
+def build_mcp_evidence(
+    name: str,
+    args: dict,
+    data: dict,
+    evidence_id: str,
+    investigation_id: str | None,
+    run_id: str | None = None,
+) -> dict:
     return EvidenceRecord(
         id=evidence_id,
         investigation_id=investigation_id,
+        run_id=run_id,
         step_id=evidence_id,
         tool=name,
         arguments=args,
@@ -116,12 +124,10 @@ def _emit_tool_update(request, result):
 
 
 def _reusable_evidence(state: dict, name: str, args: dict) -> dict | None:
-    item = state.get("active_work_item") or {}
-    if not item.get("id") or not (item.get("attempt") or 0):
-        return None
     signature = json.dumps(args, ensure_ascii=False, sort_keys=True, default=str)
+    run_id = state.get("mcp_reuse_run_id") or None
     for evidence in reversed(state.get("evidence") or []):
-        if evidence.get("tool") != name or evidence.get("status") != "ok":
+        if evidence.get("run_id") != run_id or evidence.get("tool") != name or evidence.get("status") != "ok":
             continue
         candidate = json.dumps(evidence.get("arguments") or {}, ensure_ascii=False, sort_keys=True, default=str)
         if candidate == signature:
@@ -129,9 +135,32 @@ def _reusable_evidence(state: dict, name: str, args: dict) -> dict | None:
     return None
 
 
+def _reused_mcp_result(request, evidence: dict, *, include_evidence: bool = False):
+    name = request.tool_call["name"]
+    data = evidence.get("result") or {}
+    message = ToolMessage(
+        content=json_dumps({
+            "evidence_id": evidence["id"],
+            "reused": True,
+            **data,
+        }, ensure_ascii=False),
+        tool_call_id=request.tool_call["id"],
+        name=name,
+    )
+    update = {"messages": [message]}
+    if include_evidence:
+        update["evidence"] = [evidence]
+    result = _with_progress(request, Command(update=update))
+    _emit_tool_update(request, result)
+    return result
+
+
+_INFLIGHT_MCP = {}
+
+
 @wrap_tool_call
 async def normalize_tool_result(request, handler):
-    """Зафиксировать окно, нормализовать content и сохранить Evidence."""
+    """Зафиксировать окно и Evidence; идентичные вызовы выполнять один раз."""
     name = request.tool_call["name"]
     if name not in _MCP_TOOL_NAMES:
         result = _with_progress(request, await handler(request))
@@ -152,49 +181,60 @@ async def normalize_tool_result(request, handler):
 
     reusable = _reusable_evidence(request.state, name, args)
     if reusable is not None:
-        data = reusable.get("result") or {}
-        message = ToolMessage(
-            content=json_dumps({
-                "evidence_id": reusable["id"],
-                "reused": True,
-                **data,
-            }, ensure_ascii=False),
-            tool_call_id=request.tool_call["id"],
-            name=name,
-        )
-        result = _with_progress(request, Command(update={"messages": [message]}))
+        return _reused_mcp_result(request, reusable)
+
+    import asyncio
+
+    investigation_id = context.get("id")
+    run_id = request.state.get("mcp_reuse_run_id") or None
+    flight_key = json.dumps(
+        [investigation_id, run_id, name, args], ensure_ascii=False, sort_keys=True, default=str,
+    ) if investigation_id else None
+    if flight_key and (pending := _INFLIGHT_MCP.get(flight_key)) is not None:
+        evidence = await asyncio.shield(pending)
+        return _reused_mcp_result(request, evidence, include_evidence=True)
+
+    future = asyncio.get_running_loop().create_future() if flight_key else None
+    if flight_key:
+        _INFLIGHT_MCP[flight_key] = future
+    try:
+        try:
+            result = await handler(request)
+            text = result.text or json_dumps(result.content, ensure_ascii=False)
+            try:
+                data = json.loads(text)
+            except (TypeError, json.JSONDecodeError):
+                data = {"text": text}
+            if not isinstance(data, dict):
+                data = {"result": data}
+            message = result.model_copy(update={"content": text})
+        except Exception as exc:
+            data = {"ok": False, "error": f"{type(exc).__name__}: {exc}"}
+            text = json_dumps(data, ensure_ascii=False)
+            message = ToolMessage(
+                content=text,
+                tool_call_id=request.tool_call["id"],
+                name=name,
+                status="error",
+            )
+
+        evidence_id = request.tool_call["id"]
+        evidence = build_mcp_evidence(name, args, data, evidence_id, investigation_id, run_id)
+        if future is not None and not future.done():
+            future.set_result(evidence)
+        message = message.model_copy(update={
+            "content": json_dumps({"evidence_id": evidence_id, **data}, ensure_ascii=False)
+        })
+        result = _with_progress(request, Command(update={"messages": [message], "evidence": [evidence]}))
         _emit_tool_update(request, result)
         return result
-
-    try:
-        result = await handler(request)
-        text = result.text or json_dumps(result.content, ensure_ascii=False)
-        try:
-            data = json.loads(text)
-        except (TypeError, json.JSONDecodeError):
-            data = {"text": text}
-        if not isinstance(data, dict):
-            data = {"result": data}
-        message = result.model_copy(update={"content": text})
-    except Exception as exc:
-        data = {"ok": False, "error": f"{type(exc).__name__}: {exc}"}
-        text = json_dumps(data, ensure_ascii=False)
-        message = ToolMessage(
-            content=text,
-            tool_call_id=request.tool_call["id"],
-            name=name,
-            status="error",
-        )
-
-    evidence_id = request.tool_call["id"]
-    investigation_id = (request.state.get("context") or {}).get("id")
-    evidence = build_mcp_evidence(name, args, data, evidence_id, investigation_id)
-    message = message.model_copy(update={
-        "content": json_dumps({"evidence_id": evidence_id, **data}, ensure_ascii=False)
-    })
-    result = _with_progress(request, Command(update={"messages": [message], "evidence": [evidence]}))
-    _emit_tool_update(request, result)
-    return result
+    except BaseException as exc:
+        if future is not None and not future.done():
+            future.set_exception(exc)
+        raise
+    finally:
+        if flight_key and _INFLIGHT_MCP.get(flight_key) is future:
+            _INFLIGHT_MCP.pop(flight_key, None)
 
 
 @tool
@@ -372,11 +412,12 @@ def log_finding(
         evidence_ids=evidence_ids,
         next_action=next_action,
     ).model_dump()
+    evidence_lines = "\n".join(f"  - `{item}`" for item in evidence_ids) or "  - нет"
     notification = AIMessage(
         content=(
-            f"Находка: {claim}\n"
-            f"Evidence: {', '.join(evidence_ids) or 'нет'}.\n"
-            f"Следующий шаг: {next_action or 'уточнение не требуется'}"
+            f"**Находка:** {claim}\n"
+            f"- **Evidence:**\n{evidence_lines}\n"
+            f"- **Следующий шаг:** {next_action or 'уточнение не требуется'}"
         ),
         name="finding",
     )
@@ -476,6 +517,7 @@ def save_report(
     """
     state = runtime.state if runtime else {}
     last_report, artifacts = create_report_artifacts(title, markdown, state, filename)
+    last_report["revision"] = int((state.get("last_report") or {}).get("revision") or 0) + 1
     result = {
         "ok": True,
         "filename": last_report["filename"],
@@ -511,6 +553,7 @@ async def send_report(
     """
     state = runtime.state if runtime else {}
     last_report, artifacts = create_report_artifacts(title, markdown, state)
+    last_report["revision"] = int((state.get("last_report") or {}).get("revision") or 0) + 1
     fname = last_report["filename"]
     markdown = last_report["markdown"]
     target = (callback_url or "").strip() or str(state.get("callback_url") or "").strip()

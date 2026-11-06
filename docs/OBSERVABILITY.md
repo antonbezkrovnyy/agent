@@ -83,6 +83,32 @@ Evaluator проверяет runtime errors, unsupported claims, missing data, s
 `EVALUATOR_PHOENIX_ANNOTATIONS_ENABLED=false` отключает только запись annotation,
 не саму оценку. Ошибка annotation фиксируется в metrics и не отменяет отчёт.
 
+Все аннотации пишутся с `identifier=run-v1` и покрывают два контура:
+
+- `logicore_agent_quality` — вердикт LLM-оценки: `pass` / `warn` / `fail` со score
+  0..1 (при fail score принудительно ≤0.49, при warn ≤0.79). В UI «pass %» —
+  доля trace-аннотаций с label `pass` в текущем фильтре, «mean score» — среднее
+  поля score по этому же фильтру; высокое значение при пустом фильтре говорит
+  только о том, что в выборку попали лёгкие успешные run'ы (например, чаты).
+- Run-summary (детерминированно из state, `agent-evaluator/phoenix_client.py`):
+  `run_type` (chat / quick / deep / continuation), `scope_mode` (none / targeted /
+  discovery / alert), `plan_execution` (score = done/total work items, в explanation
+  replans и scope creep), `claims_support` (score = 1 − доля unsupported claims),
+  `hypothesis_coverage` (score = supported / решённые гипотезы), `critic_review`
+  (label = verdict критиков). Для чата пишутся только `run_type` и `scope_mode`.
+  Контуры разведены: quality — суждение о качестве, run-summary — классификация
+  и счётчики; агрегаты по ним не смешиваются.
+
+Каждое измерение зарегистрировано как annotation config в проекте (CATEGORICAL для
+`logicore_agent_quality`, `run_type`, `scope_mode`, `critic_review`; CONTINUOUS 0..1
+для `plan_execution`, `claims_support`, `hypothesis_coverage`), поэтому labels
+видны в UI выпадающим списком и агрегируются стабильно. Для уже оценённых runs
+run-summary аннотации дозаписываются без повторной оценки:
+
+```bash
+docker compose exec agent-evaluator python backfill_annotations.py --limit 50
+```
+
 `GET /health` evaluator возвращает число оценок, опубликованных результатов и
 `missing_traces` — runs, для которых trace не появился после всех попыток.
 

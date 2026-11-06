@@ -58,6 +58,7 @@ def _user_requests_block(state: State) -> str:
 
 
 def _critic_messages(state: State, prompt: str, extra_block: str) -> list[BaseMessage]:
+    evidence_ids = None if prompt == "critic_report" else claim_evidence_ids(state) or None
     parts = [
         compose("base", prompt),
         _intent_block(state),
@@ -67,7 +68,7 @@ def _critic_messages(state: State, prompt: str, extra_block: str) -> list[BaseMe
             "scope": state.get("investigation_scope") or {},
             "item": state.get("active_work_item") or {},
         }),
-        evidence_block(state, full=True, evidence_ids=claim_evidence_ids(state) or None),
+        evidence_block(state, full=True, evidence_ids=evidence_ids),
         _findings_block(state),
         structured_block("Журнал гипотез", {"items": state.get("hypotheses") or []}),
         extra_block,
@@ -76,6 +77,183 @@ def _critic_messages(state: State, prompt: str, extra_block: str) -> list[BaseMe
         SystemMessage(content=system_prompt(*parts)),
         HumanMessage(content="Проверь работу по критериям из системного промпта."),
     ]
+
+
+def _report_texts(state: State) -> list[str]:
+    texts = []
+    for result_key, text_key in (("inv_result", "summary"), ("report_result", "answer")):
+        result = state.get(result_key) or {}
+        texts.append(str(result.get(text_key) or ""))
+        texts.extend(str(claim.get("text") or "") for claim in result.get("claims") or [])
+    texts.append(str((state.get("last_report") or {}).get("markdown") or ""))
+    return texts
+
+
+def _arithmetic_issues(state: State) -> list[CriticIssue]:
+    import re
+
+    number = r"(?:\d{1,3}(?:[ \u00a0]\d{3})+|\d+)"
+    pattern = re.compile(
+        rf"(?<!\d)({number}(?:\s*\+\s*{number})+)\s*=\s*(?:\*\*)?\s*[~≈]?\s*({number})"
+    )
+    issues = []
+    for text in _report_texts(state):
+        for match in pattern.finditer(text):
+            terms = [
+                int(term.replace(" ", "").replace("\u00a0", ""))
+                for term in match.group(1).split("+")
+            ]
+            actual = int(match.group(2).replace(" ", "").replace("\u00a0", ""))
+            expected = sum(terms)
+            before = text[:match.start()].rstrip()
+            after = text[match.end():].lstrip()
+            if before.endswith("+") or after.startswith("+"):
+                continue
+            if actual != expected:
+                expression = " + ".join(str(term) for term in terms)
+                issues.append(CriticIssue(
+                    claim=f"{expression} = {actual}",
+                    reason=f"Явная сумма не сходится: {expression} = {expected}, в отчёте {actual}.",
+                    suggested_action="rework_report",
+                ))
+    return issues
+
+
+def _timeline_issues(state: State) -> list[CriticIssue]:
+    issues = []
+    for record in state.get("evidence") or []:
+        if record.get("tool") != "timeline":
+            continue
+        timeline = (record.get("result") or {}).get("timeline") or {}
+        buckets = timeline.get("buckets") or []
+        total = timeline.get("total")
+        if total is None:
+            continue
+        computed = sum(int(bucket.get("value") or 0) for bucket in buckets)
+        if int(total) != computed:
+            issues.append(CriticIssue(
+                evidence_ids=[record["id"]],
+                reason=f"Timeline.total={total} не совпадает с суммой бакетов {computed}.",
+                suggested_action="rework_report",
+            ))
+    return issues
+
+
+def _markdown_reference_issues(state: State) -> list[CriticIssue]:
+    import re
+
+    records = {item.get("id") for item in state.get("evidence") or []}
+    pattern = re.compile(r"\bcall-[0-9a-fA-F]{8}(?:-[0-9a-fA-F]{4}){3}-[0-9a-fA-F]{12}\b")
+    texts = [
+        str((state.get("report_result") or {}).get("answer") or ""),
+        str((state.get("last_report") or {}).get("markdown") or ""),
+    ]
+    referenced = set(pattern.findall("\n".join(texts)))
+    unknown = sorted(referenced - records)
+    if not unknown:
+        return []
+    return [CriticIssue(
+        claim="Markdown содержит ссылки на отсутствующие Evidence ID.",
+        evidence_ids=unknown,
+        reason="Evidence ID из отчёта отсутствует в state расследования.",
+        suggested_action="rework_report",
+    )]
+
+
+def _partial_sample_issues(state: State) -> list[CriticIssue]:
+    records = {item.get("id"): item for item in state.get("evidence") or []}
+    markers = ("выборк", "partial", "неполн", "частич", "пример", "ограничен", "не доказан")
+    issues = []
+    for result_key in ("inv_result", "report_result"):
+        for claim in (state.get(result_key) or {}).get("claims") or []:
+            text = str(claim.get("text") or "")
+            partial_ids = [
+                item for item in claim.get("evidence_ids") or []
+                if item in records
+                and records[item].get("tool") == "search_events"
+                and records[item].get("status") == "partial"
+            ]
+            if partial_ids and not any(marker in text.lower() for marker in markers):
+                issues.append(CriticIssue(
+                    claim=text,
+                    evidence_ids=partial_ids,
+                    reason="Claim по partial-выборке search_events не содержит локальной оговорки о выборке.",
+                    suggested_action="rework_report",
+                ))
+    return issues
+
+
+def _completeness_issues(state: State) -> list[CriticIssue]:
+    records = {item.get("id"): item for item in state.get("evidence") or []}
+    categorical = ("ровно", "все ", "полный", "полная", "полные", "каждое", "каждый")
+    cautious = ("не полн", "не выполнялся", "не доказан", "ограничен", "частич", "partial")
+    issues = []
+    for result_key in ("inv_result", "report_result"):
+        for claim in (state.get(result_key) or {}).get("claims") or []:
+            text = str(claim.get("text") or "")
+            lowered = text.lower()
+            if not any(word in lowered for word in categorical) or any(word in lowered for word in cautious):
+                continue
+            incomplete = []
+            for item in claim.get("evidence_ids") or []:
+                if item not in records or records[item].get("tool") != "search_events":
+                    continue
+                result = records[item].get("result") or {}
+                if result.get("has_more") is True or result.get("complete") is False:
+                    incomplete.append((item, "has_more=true"))
+                elif result.get("has_more") is None and result.get("pagination_error"):
+                    incomplete.append((item, "has_more=null"))
+            if incomplete:
+                unknown = any(kind == "has_more=null" for _, kind in incomplete)
+                reason = (
+                    "has_more=null с pagination_error означает неизвестную полноту, а не доказанное продолжение или завершение."
+                    if unknown else
+                    "has_more=true подтверждает следующую страницу и не позволяет называть выборку полной, даже при совпадении count."
+                )
+                issues.append(CriticIssue(
+                    claim=text,
+                    evidence_ids=[item for item, _ in incomplete],
+                    reason=reason,
+                    suggested_action="rework_report",
+                ))
+    return issues
+
+
+def _distribution_issues(state: State) -> list[CriticIssue]:
+    import re
+
+    records = {item.get("id"): item for item in state.get("evidence") or []}
+    issues = []
+    for result_key in ("inv_result", "report_result"):
+        for claim in (state.get(result_key) or {}).get("claims") or []:
+            text = str(claim.get("text") or "")
+            if "%" not in text or not any(word in text.lower() for word in ("распредел", "доля", "доли")):
+                continue
+            for evidence_id in claim.get("evidence_ids") or []:
+                record = records.get(evidence_id) or {}
+                if record.get("tool") not in ("top_values", "top_values_batch"):
+                    continue
+                result = record.get("result") or {}
+                entries = result.get("fields") if isinstance(result.get("fields"), list) else [result]
+                for entry in entries:
+                    field = str(entry.get("field") or "")
+                    has_null = any(
+                        item.get("value") is None and (item.get("count") or 0) > 0
+                        for item in entry.get("top") or []
+                    )
+                    if not field or not has_null:
+                        continue
+                    for match in re.finditer(re.escape(field), text, re.IGNORECASE):
+                        local = text[max(0, match.start() - 30):match.end() + 220].lower()
+                        if not any(word in local for word in ("null", "остат", "прочие", "прочих")):
+                            issues.append(CriticIssue(
+                                claim=text,
+                                evidence_ids=[evidence_id],
+                                reason=f"Распределение {field} опускает null-группу или остаток из Evidence.",
+                                suggested_action="rework_report",
+                            ))
+                        break
+    return issues
 
 
 def _deterministic_issues(state: State) -> list[dict]:
@@ -131,6 +309,12 @@ def _deterministic_issues(state: State) -> list[dict]:
             reason="Partial/error Evidence использованы без явных limitations.",
             suggested_action="rework_report",
         ))
+    issues.extend(_markdown_reference_issues(state))
+    issues.extend(_arithmetic_issues(state))
+    issues.extend(_timeline_issues(state))
+    issues.extend(_partial_sample_issues(state))
+    issues.extend(_completeness_issues(state))
+    issues.extend(_distribution_issues(state))
     unique = {}
     for issue in issues:
         key = (issue.claim, tuple(issue.evidence_ids), issue.reason)
@@ -159,7 +343,7 @@ def _critic_run(state: State, prompt: str, model: Any, allowed_verdicts: tuple, 
                     issues.append(payload)
     except Exception as exc:
         feedback = f"Критик недоступен: {type(exc).__name__}."
-    if deterministic and verdict != "critic_unavailable":
+    if deterministic:
         if "rework_data" in allowed_verdicts and any(
             item["suggested_action"] == "rework_data" for item in deterministic
         ):
@@ -168,8 +352,9 @@ def _critic_run(state: State, prompt: str, model: Any, allowed_verdicts: tuple, 
             verdict = "rework_report"
         elif "rework_data" in allowed_verdicts:
             verdict = "rework_data"
-        if not feedback:
-            feedback = " ".join(item["reason"] for item in deterministic)
+        reasons = " ".join(dict.fromkeys(item["reason"] for item in deterministic))
+        if not feedback or feedback.startswith("Критик недоступен"):
+            feedback = f"{feedback} {reasons}".strip()
     rework = state.get("rework", 0) + (1 if verdict.startswith("rework_") else 0)
     return {"critic": {"verdict": verdict, "feedback": feedback, "issues": issues}, "rework": rework}
 
@@ -183,13 +368,11 @@ def node_critic_evidence(state: State) -> dict:
             {},
         )
     if active_item.get("id"):
-        item_result = active_item.get("result") or {}
-        if not item_result:
-            item_result = next(
-                (item.get("result") or {} for item in state.get("work_items") or []
-                 if item.get("id") == active_item["id"]),
-                {},
-            )
+        item_result = next(
+            (item.get("result") or {} for item in state.get("work_items") or []
+             if item.get("id") == active_item["id"] and item.get("result")),
+            {},
+        ) or active_item.get("result") or {}
         item_state = {
             **state,
             "inv_result": item_result,
@@ -252,8 +435,15 @@ def node_critic_report(state: State) -> dict:
         if verdict == "rework_data":
             update["replan_requested"] = True
     else:
-        text = "Готово"
-        if verdict == "critic_unavailable":
-            text = "Готово без проверки критика"
-        update["progress"] = done_progress(text)
+        from verification import finalize_verification
+
+        status = "consistent_with_evidence" if verdict == "ok" else "unverified" if verdict == "critic_unavailable" else "issues_open"
+        if status == "issues_open":
+            current = update.get("report_result") or state.get("report_result") or {}
+            note = f"Лимит доработок исчерпан; осталось замечание критика: {update['critic']['feedback']}"
+            update["report_result"] = {
+                **current,
+                "limitations": [*(current.get("limitations") or []), note],
+            }
+        update = finalize_verification(state, update, status)
     return update

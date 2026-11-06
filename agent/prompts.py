@@ -216,5 +216,10 @@ def critic_feedback_block(state: dict) -> str:
     """Замечания критика, если агента уже отправляли на доработку."""
     critic = state.get("critic") or {}
     if state.get("rework", 0) > 0 and critic.get("feedback"):
-        return f"Критик вернул работу на доработку. Замечания: {critic['feedback']}"
+        return (
+            f"Критик вернул работу на доработку. Замечания: {critic['feedback']}\n"
+            + structured_block("Незакрытые issues предыдущего критика", critic.get("issues") or [])
+            + "\nПри rework_report обнови полный Markdown и снова вызови save_report/send_report. "
+              "Ответ без изменённого файла считается неудачной доработкой, а не успехом."
+        )
     return ""

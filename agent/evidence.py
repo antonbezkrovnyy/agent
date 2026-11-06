@@ -81,9 +81,12 @@ def full_evidence_block(state: dict, evidence_ids: Iterable[str] | None = None) 
     bundle = evidence_bundle(state, evidence_ids)
     if not bundle["items"]:
         return "Доказательства: отсутствуют."
-    return "Фактические результаты инструментов (полный Evidence Bundle):\n" + json_dumps(
-        bundle, ensure_ascii=False
+    title = (
+        "Фактические результаты инструментов (полный Evidence Bundle)"
+        if evidence_ids is None else
+        "Фактические результаты инструментов (Evidence, связанные с claims/findings)"
     )
+    return title + ":\n" + json_dumps(bundle, ensure_ascii=False)
 
 
 def case_events(state: dict) -> list[dict]:
@@ -142,7 +145,7 @@ def investigation_chain(state: dict) -> dict:
     ]
     return {
         "investigation_id": context.get("id"),
-        "task": human_messages[-1] if human_messages else "",
+        "task": state.get("case_task") or (human_messages[-1] if human_messages else ""),
         "work_mode": state.get("work_mode"),
         "investigation_scope": state.get("investigation_scope") or {},
         "current_window": {

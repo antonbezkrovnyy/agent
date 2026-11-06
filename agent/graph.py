@@ -21,8 +21,11 @@ settings = Settings()
 
 def entry(state: State) -> dict:
     """Очистить run-scoped каналы, сохранив данные текущего случая."""
+    from uuid import uuid4
+
     if state["messages"] and isinstance(state["messages"][-1], HumanMessage):
         return {
+            "mcp_reuse_run_id": uuid4().hex,
             "artifacts": Overwrite([]),
             "scout_msgs": Overwrite([]),
             "inv_msgs": Overwrite([]),
@@ -30,20 +33,15 @@ def entry(state: State) -> dict:
             "intent": {},
             "scout_note": "",
             "scout_result": {},
-            "inv_result": {},
             "report_result": {},
             "critic": {},
-            "rework": 0,
-            "investigation_scope": {},
+            "rework": Overwrite(0),
             "control_overrides": {
                 "_step": (state.get("control_overrides") or {}).get("_step") or {},
             },
-            "investigation_plan": {},
-            "work_items": Overwrite([]),
-            "active_work_item": {},
+            "active_work_item": Overwrite({}),
             "replan_requested": False,
             "tool_usage": {},
-            "run_metrics": Overwrite([]),
             "progress": simple_progress("intent", "Определяю задачу"),
             "suggestions": [],
             "memory_candidates": [],

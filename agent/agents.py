@@ -252,17 +252,24 @@ def _agent_convo_messages(state: State) -> list[BaseMessage]:
 
 def _agent_input(state: State, work_key: str) -> dict:
     item = state.get("active_work_item") or {}
-    continuation = bool(item.get("id") and (item.get("attempt") or 0)) or (
-        work_key == INV_MSGS and state.get("transition") in ("continue", "uncertain")
+    continuation = work_key == INV_MSGS and (
+        bool(item.get("id") and (item.get("attempt") or 0))
+        or state.get("transition") in ("continue", "uncertain")
     )
     control = [HumanMessage(content=(
         f"Продолжи {item.get('id') or 'текущее расследование'} с сохранённого состояния. "
         "Не начинай базовую разведку заново, используй прежние Evidence и находки, "
         "выполни только оставшуюся часть acceptance."
     ))] if continuation else []
+    public_messages = _agent_convo_messages(state)
+    case_task = next(
+        (getattr(message, "text", message.content) for message in reversed(public_messages)
+         if isinstance(message, HumanMessage)),
+        "",
+    )
     return {
         "messages": [
-            *_agent_convo_messages(state),
+            *public_messages,
             *(state.get(work_key) or []),
             *control,
         ],
@@ -282,6 +289,19 @@ def _agent_input(state: State, work_key: str) -> dict:
         "scout_result": state.get("scout_result") or {},
         "active_skill": state.get("active_skill") or {},
         "investigation_scope": state.get("investigation_scope") or {},
+        "investigation_plan": state.get("investigation_plan") or {},
+        "work_items": list(state.get("work_items") or []),
+        "work_mode": state.get("work_mode") or "",
+        "depth_history": list(state.get("depth_history") or []),
+        "run_metrics": list(state.get("run_metrics") or []),
+        "case_task": case_task,
+        "mcp_reuse_run_id": state.get("mcp_reuse_run_id") or "",
+        "independent_verification": state.get("independent_verification") or {},
+        "tenant": state.get("tenant") or "",
+        "source_endpoint": state.get("source_endpoint") or "",
+        "schema_version": state.get("schema_version") or "",
+        "time_semantics": state.get("time_semantics") or "",
+        "time_axes": state.get("time_axes") or {},
         "control_overrides": state.get("control_overrides") or {},
         "active_work_item": state.get("active_work_item") or {},
         "skill_runs": list(state.get("skill_runs") or []),
@@ -747,9 +767,9 @@ async def node_scout(state: State) -> dict:
     summary = structured.get("answer_candidate") or structured["note"]
     coverage = structured.get("coverage") or {}
     if coverage.get("status") and coverage["status"] != "complete":
-        summary += f"\n\nПолнота данных: {coverage['status']}. {coverage.get('details') or ''}".rstrip()
+        summary += f"\n\n- **Полнота данных:** {coverage['status']}. {coverage.get('details') or ''}".rstrip()
     if needs_deep:
-        summary += f"\n\nПерехожу к глубокому расследованию: {escalation.get('reason') or 'нужны дополнительные проверки'}"
+        summary += f"\n\n- **Следующий этап:** глубокое расследование — {escalation.get('reason') or 'нужны дополнительные проверки'}"
     update["messages"] = [
         *_public_notifications(new_messages),
         AIMessage(content=summary, name="scout"),
@@ -769,8 +789,12 @@ async def node_scout(state: State) -> dict:
 
 def node_chat(state: State) -> dict:
     """Чат-агент: простой вопрос без инструментов."""
+    from documentation import documentation_block
+
     system = system_prompt(compose("base", "chat"), scout_block(state))
-    convo = with_prompt_override(state, "chat", [SystemMessage(content=system), *_agent_convo_messages(state)])
+    documentation = documentation_block()
+    messages = [SystemMessage(content=system), SystemMessage(content=documentation)]
+    convo = with_prompt_override(state, "chat", [*messages, *_agent_convo_messages(state)])
     audit_messages("chat", state, convo)
     response = llm_mod.llm.invoke(convo, config=trace_config("chat", state))
     update = _agent_final(state, response, "chat")
@@ -798,9 +822,8 @@ async def node_investigator(state: State) -> dict:
     if active_item.get("id"):
         item_context = update.pop("context", result.get("context") or state.get("context") or {})
         attempt = (active_item.get("attempt") or 0) + 1
-        update["active_work_item"] = {**active_item, "attempt": attempt}
-        update["work_items"] = [{
-            "id": active_item["id"],
+        completed_item = {
+            **active_item,
             "status": "critic_review" if settings.critic_enabled else "done",
             "attempt": attempt,
             "started_at": active_item.get("started_at") or datetime.now(UTC).isoformat(timespec="seconds"),
@@ -808,7 +831,9 @@ async def node_investigator(state: State) -> dict:
             "result": structured,
             "metrics": (update.get("run_metrics") or [{}])[-1],
             "context": item_context,
-        }]
+        }
+        update["active_work_item"] = completed_item
+        update["work_items"] = [completed_item]
         update["progress"] = simple_progress(
             "planner",
             f"Проверяю часть {active_item['id']}" if settings.critic_enabled else f"Часть {active_item['id']} готова",
@@ -835,6 +860,32 @@ async def node_reporter(state: State) -> dict:
             structured["limitations"].append(note)
     update[REP_MSGS] = new_messages[:-1]
     update["report_result"] = structured
+    previous_report = state.get("last_report") or {}
+    if (
+        state.get("rework", 0) > 0
+        and (state.get("critic") or {}).get("verdict") == "rework_report"
+        and previous_report
+    ):
+        from artifacts import strip_verification
+        from verification import finalize_verification
+
+        current_report = result.get("last_report") or {}
+        changed = (
+            int(current_report.get("revision") or 0) > int(previous_report.get("revision") or 0)
+            and strip_verification(current_report.get("markdown") or "")
+            != strip_verification(previous_report.get("markdown") or "")
+        )
+        if not changed:
+            detail = "Reporter не сохранил изменённый Markdown после rework_report; прежний файл не считается исправленным."
+            structured["answer"] = detail
+            update["report_result"] = structured
+            update["critic"] = {
+                **(state.get("critic") or {}),
+                "verdict": "update_failed",
+                "feedback": detail,
+            }
+            update["suggestions"] = []
+            return finalize_verification(state, update, "update_failed", detail)
     progress_state = {
         **state,
         "tool_usage": update["tool_usage"],

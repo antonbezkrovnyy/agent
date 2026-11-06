@@ -99,10 +99,28 @@ class MemoryChannels(TypedDict):
     similar_cases: list[dict]
 
 
-class AgentWorkState(AgentState, EvidenceChannels, CaseChannels, MemoryChannels):
+class ProvenanceChannels(TypedDict):
+    """Метаданные независимой проверки и происхождения данных."""
+
+    independent_verification: dict
+    tenant: str
+    source_endpoint: str
+    schema_version: str
+    time_semantics: str
+    time_axes: dict
+
+
+class AgentWorkState(AgentState, EvidenceChannels, CaseChannels, MemoryChannels, ProvenanceChannels):
     """Внутреннее состояние create_agent: messages и поля tools/промптов."""
 
     active_work_item: dict
+    mcp_reuse_run_id: str
+    work_mode: str
+    depth_history: list[dict]
+    investigation_plan: dict
+    work_items: list[dict]
+    run_metrics: list[dict]
+    case_task: str
     rework: int
     run_tool_call_count: dict
     agent_phase: str
@@ -111,11 +129,12 @@ class AgentWorkState(AgentState, EvidenceChannels, CaseChannels, MemoryChannels)
     progress: Annotated[dict, merge_progress]
 
 
-class State(MessagesState, EvidenceChannels, CaseChannels, MemoryChannels):
+class State(MessagesState, EvidenceChannels, CaseChannels, MemoryChannels, ProvenanceChannels):
     """Checkpoint supervisor; бизнес-логика в этой схеме не размещается."""
 
     report_result: dict
     intent: dict
+    mcp_reuse_run_id: str
     work_mode: str
     depth_history: list[dict]
     investigation_plan: dict

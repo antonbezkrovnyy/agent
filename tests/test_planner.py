@@ -87,6 +87,13 @@ def test_item_critic_retries_only_same_item(patch_llm):
     assert result_state["work_items"][0]["attempt"] == 2
     assert result_state["work_items"][0]["status"] == "done"
     assert result_state["inv_result"]["status"] == "done"
+    assert result_state["active_work_item"] == {}
+    assert "Теперь доказано" in critic.systems[1]
+    reporter_inputs = [
+        message for system, convo in zip(agent.systems, agent.convos)
+        if "Ты — репортёр" in system for message in convo
+    ]
+    assert not any("Продолжи baseline" in str(message.content) for message in reporter_inputs)
 
 
 def test_replan_adds_only_remaining_work(patch_llm):

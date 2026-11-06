@@ -19,6 +19,7 @@
 - `agent/memory_store.py` — предметная SQL-схема в отдельной `agent-memory-db`.
 - `agent/artifact_store.py` — S3-ключи и подписанные URL, без base64 в постоянном state.
 - `agent/artifacts.py` — единый сервис Markdown/ZIP и памяти отчёта.
+- `agent/verification.py` — статусы доверия, публикация открытых issues и update_failed.
 - `agent/metrics.py` — длительность, токены, tool calls и повторы по ролям/items.
 - `agent-mcp/app.py` — асинхронный MCP-адаптер над Aegra runs API, не второй движок.
 - `agent-mcp/investigation_mcp_types.py` — TypedDict для MCP structuredContent.
@@ -30,6 +31,7 @@
 - `agent/progress.py` — публичный статус run, лимиты и suggestion-действия.
 - `agent/observability.py` — OpenInference role/scope/item metadata и prompt version.
 - `agent/llm.py` — Pydantic-схемы ответов и LLM.
+- `agent/documentation.py` — полная проектная документация в system prompt Chat.
 - `litellm/config.yaml` — стабильные `logicore-*` aliases upstream-моделей для Aegra,
   evaluator и embeddings; секреты остаются в `.env` или LiteLLM credential store.
 - `agent/state.py` — общие Evidence/Case/Memory Channels и поля supervisor;
@@ -55,6 +57,9 @@
   `scout`/`finding`/`window`/`hypothesis`.
   Agent Chat UI использует `updates` и единый public reducer: merge по message ID,
   human только от root, разрешённые AI-роли; вложенные `values` не заменяют чат.
+- Пользовательские тексты оформляются в читаемый Markdown: короткие абзацы и пункты,
+  списки для находок/действий, компактные таблицы для метрик и сравнений. Evidence ID
+  не зашиваются в сплошной текст; указываются отдельно от основного повествования.
 - Каждый MCP-результат нормализуется через `EvidenceRecord` и сохраняется с
   фактическими аргументами и окном; findings используют `FindingRecord`. IQL приходит
   из MCP и должен совпадать с выполненным запросом, агент не генерирует его повторно.
@@ -62,6 +67,12 @@
   не отбрасывает Evidence, findings, гипотезы, окна, артефакты и приватную историю.
 - Аналитический отчёт прикрепляется как Markdown плюс ZIP с `report.md`, `queries.md`,
   `evidence.jsonl`, `events.csv` и `manifest.json`. Пакет строится детерминированно.
+  Раздел «Статус проверки и доверие» фиксирует `consistent_with_evidence/unverified/issues_open/update_failed`
+  и открытые issues; он всегда есть в файле, а в чат выводится при проблемном результате.
+  `consistent_with_evidence` означает только согласованность с пакетом, не независимую
+  истинность. Матрица claims различает подтверждение в архиве, вероятность, спорность и
+  неподтверждение; manifest содержит provenance и статус независимой проверки.
+  Rework без изменённого Markdown — `update_failed`, а не успех.
 - `memory_operations` фиксирует исходное/фактическое действие и исход каждой записи;
   журнал попадает в Case Store, отчёт и manifest. Не заменять его одним счётчиком.
 - S3 state содержит только object keys и метаданные; подписанные URL создаются при
@@ -69,8 +80,13 @@
   Ответы используют штатный `structuredContent` через TypedDict, не JSON в text content.
 - Evaluator работает только после успешного run, хранит оценки в `run_evaluations` и
   не меняет Evidence/отчёт. Не публиковать сообщение поверх более нового run.
-- Claims ссылаются только на существующие Evidence ID. Критик получает полные
-  записи по этим ID без скрытого усечения; Reporter читает их через batch-инструмент.
+- Claims ссылаются только на существующие Evidence ID. Critic Evidence получает полные
+  записи по claims/findings, Critic Report — весь Evidence Bundle для проверки Markdown;
+  Reporter читает записи через batch-инструмент. Явные суммы, timeline.total, null/остаток
+  и partial-claims проверяются детерминированно. `has_more=true` допустимо только после
+  непустой look-ahead-страницы; пустая — `false`, ошибка проверки — `null` с `pagination_error`.
+  Категоричная полнота разрешена только при `has_more=false`; `null` — неизвестность,
+  а не доказательство продолжения или завершения.
 - InvestigationScope строится structured LLM до Planner. Discovery ограничен двумя
   items; required — максимум двумя. Optional попадает только в отчёт/suggestions.
   Work item содержит acceptance/priority/estimated_cost. Replan разрешён только для
@@ -94,9 +110,13 @@
 - Windowed tools определяются по JSON Schema (`time_from/time_to`), а не по
   hardcoded списку имён.
 - Continuation сохраняет `context.id`, base/focus/history окон, `depth_history`,
-  Evidence, findings и гипотезы. Повторный work item получает явный handoff и не
-  начинает базовую разведку заново; идентичный успешный MCP-вызов с теми же фактическими
-  аргументами и окном переиспользует Evidence без нового запроса и дубликата.
+  Evidence, findings и гипотезы. Save-only и редактирование отчёта также сохраняют Scope,
+  план, work items, `inv_result` и завершённые метрики. Повторный work item получает явный
+  handoff только у Investigator и не начинает базовую разведку заново. Идентичный успешный
+  MCP-вызов с теми же фактическими аргументами и окном переиспользует Evidence на любой
+  попытке внутри того же run; одновременные одинаковые вызовы объединяются через singleflight.
+  `run_id`, разные страницы, фильтры и окна образуют разные ключи, поэтому новый run получает
+  свежие данные. `rework` и `active_work_item` сбрасываются явно.
 - Дела сохраняются только в собственную таблицу `agent_memory.investigations`, не
   в Aegra checkpoints. Восстановление в новом треде требует контрольного запроса.
 - Context Memory хранит атомарные факты с provenance и сроком актуальности в

@@ -24,6 +24,7 @@ def json_dumps(value, **kwargs):
 class EvidenceRecord(BaseModel):
     id: str
     investigation_id: str | None = None
+    run_id: str | None = None
     step_id: str
     tool: str
     arguments: dict = Field(default_factory=dict)

@@ -14,9 +14,11 @@ import zipfile
 import httpx
 from tenacity import retry, stop_after_attempt, wait_exponential
 
+from config import Settings
 from contracts import json_dumps
 from evidence import queries_markdown
 
+settings = Settings()
 _SAFE_SEGMENT = re.compile(r"[^A-Za-z0-9._-]+")
 
 
@@ -28,14 +30,21 @@ def slug(value: str, fallback: str) -> str:
     return segment or fallback
 
 
-def build_report(title: str, markdown: str, filename: str | None = None) -> tuple[str, str, int]:
+def build_report(
+    title: str,
+    markdown: str,
+    filename: str | None = None,
+    *,
+    saved_at: str | None = None,
+    exact_filename: bool = False,
+) -> tuple[str, str, int]:
     """Собирает (имя файла, data-URL отчёта, размер в байтах)."""
     name = slug(filename, "report") if filename else slug(title, "report")
     if not name.lower().endswith(".md"):
         name += ".md"
     stamp = datetime.datetime.now(datetime.UTC).strftime("%Y-%m-%dT%H-%M-%S")
-    fname = f"{stamp}-{name}"
-    now = datetime.datetime.now(datetime.UTC).isoformat(timespec="seconds")
+    fname = name if exact_filename and filename else f"{stamp}-{name}"
+    now = saved_at or datetime.datetime.now(datetime.UTC).isoformat(timespec="seconds")
     body = (
         "---\n"
         f"title: {json_dumps(title, ensure_ascii=False)}\n"
@@ -96,10 +105,18 @@ def memory_audit_markdown(operations: list[dict], error: str = "") -> str:
     return "\n".join(lines)
 
 
-def build_investigation_package(title: str, markdown: str, state: dict) -> tuple[str, str, int]:
+def build_investigation_package(
+    title: str,
+    markdown: str,
+    state: dict,
+    *,
+    saved_at: str | None = None,
+    filename: str | None = None,
+    verification: dict | None = None,
+) -> tuple[str, str, int]:
     """Сформировать ZIP с отчётом, запросами, Evidence и событиями."""
     evidence = list(state.get("evidence") or [])
-    now = datetime.datetime.now(datetime.UTC).isoformat(timespec="seconds")
+    now = saved_at or datetime.datetime.now(datetime.UTC).isoformat(timespec="seconds")
     report_body = (
         "---\n"
         f"title: {json_dumps(title, ensure_ascii=False)}\n"
@@ -127,6 +144,22 @@ def build_investigation_package(title: str, markdown: str, state: dict) -> tuple
         "memory_error": state.get("memory_error") or "",
         "investigation_scope": state.get("investigation_scope") or {},
         "run_metrics": list(state.get("run_metrics") or []),
+        "verification": verification or {"status": "not_reviewed"},
+        "provenance": {
+            "source": "aegra_checkpoint",
+            "signed": False,
+            "tenant": state.get("tenant") or "unknown",
+            "endpoint": state.get("source_endpoint") or "unknown",
+            "schema_version": state.get("schema_version") or "unknown",
+            "agent_prompt_version": settings.agent_prompt_version,
+            "time_semantics": state.get("time_semantics") or "not_validated",
+            "time_axes": state.get("time_axes") or {
+                "source_event_time": "not_normalized",
+                "receive_time": "not_normalized",
+                "ingest_time": "not_normalized",
+            },
+            "independent_verification": state.get("independent_verification") or {"status": "not_performed"},
+        },
         "files": [
             {
                 "path": name,
@@ -143,9 +176,10 @@ def build_investigation_package(title: str, markdown: str, state: dict) -> tuple
         for name, data in files.items():
             bundle.writestr(name, data)
     data = archive.getvalue()
-    name = slug(title, "investigation")
-    stamp = datetime.datetime.now(datetime.UTC).strftime("%Y-%m-%dT%H-%M-%S")
-    filename = f"{stamp}-{name}.zip"
+    if not filename:
+        name = slug(title, "investigation")
+        stamp = datetime.datetime.now(datetime.UTC).strftime("%Y-%m-%dT%H-%M-%S")
+        filename = f"{stamp}-{name}.zip"
     url = f"data:application/zip;base64,{base64.b64encode(data).decode('ascii')}#{filename}"
     return filename, url, len(data)
 

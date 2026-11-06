@@ -37,7 +37,13 @@ def state_delta(before: dict, after: dict) -> dict:
 def apply_delta(state: dict, update: dict) -> dict:
     result = dict(state)
     for key, value in update.items():
-        if key in _APPEND_KEYS:
+        if key == "evidence":
+            merged = {item.get("id"): dict(item) for item in state.get(key) or [] if item.get("id")}
+            for item in value:
+                if item.get("id"):
+                    merged[item["id"]] = dict(item)
+            result[key] = list(merged.values())
+        elif key in _APPEND_KEYS:
             result[key] = [*(state.get(key) or []), *value]
         elif key in _MESSAGE_KEYS:
             result[key] = add_messages(state.get(key) or [], value)
@@ -49,7 +55,9 @@ def apply_delta(state: dict, update: dict) -> dict:
             result[key] = merge_hypotheses(state.get(key) or [], value)
         elif key == "tool_usage":
             result[key] = merge_tool_usage(state.get(key) or {}, value)
-        elif key in ("progress", "active_work_item"):
+        elif key == "active_work_item":
+            result[key] = merge_progress(state.get(key) or {}, value) if value else {}
+        elif key == "progress":
             result[key] = merge_progress(state.get(key) or {}, value)
         else:
             result[key] = value

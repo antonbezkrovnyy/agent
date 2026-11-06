@@ -123,6 +123,15 @@ def test_critic_receives_full_claim_evidence():
     messages = _critic_messages(state_with_evidence(), "critic_evidence", "Проверка")
     system = messages[0].content
 
-    assert "полный Evidence Bundle" in system
+    assert "Evidence, связанные с claims/findings" in system
     assert "event-9" in system
     assert "unrelated" not in system
+
+
+def test_report_critic_receives_all_evidence_for_markdown_validation():
+    messages = _critic_messages(state_with_evidence(), "critic_report", "Проверка")
+    system = messages[0].content
+
+    assert "полный Evidence Bundle" in system
+    assert "event-9" in system
+    assert "unrelated" in system
