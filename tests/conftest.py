@@ -63,13 +63,23 @@ def extract_data(time_from: str, time_to: str | None = None, **kwargs) -> list[d
 
 
 @tool
+def field_lookup(fields: list[str]) -> list[dict]:
+    """Схема полей для analysis-датасетов."""
+    return json_blocks({
+        "ok": True,
+        "complete": True,
+        "fields": [{"field": name, "ok": True, "type": "String", "description": None} for name in fields],
+    })
+
+
+@tool
 def broken_tool(time_from: str, time_to: str | None = None) -> str:
     """Ошибка для проверки recovery."""
     raise ValueError("invalid test arguments")
 
 
 _mcp_stub = types.ModuleType("mcp_client")
-_mcp_stub.get_mcp_tools = lambda: [server_time, search_events, count_events, extract_data, broken_tool]
+_mcp_stub.get_mcp_tools = lambda: [server_time, search_events, count_events, extract_data, field_lookup, broken_tool]
 sys.modules["mcp_client"] = _mcp_stub
 
 import agents as agents_mod

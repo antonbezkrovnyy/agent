@@ -9,8 +9,10 @@
 Внешний узел переносит его в приватный канал, не открывая пользователю.
 """
 
+import asyncio
 import datetime
 import json
+import time
 from typing import Any
 
 from langchain.agents.middleware import wrap_tool_call
@@ -19,7 +21,7 @@ from langchain_core.tools import tool
 from langgraph.prebuilt import ToolRuntime
 from langgraph.types import Command
 
-from contracts import EvidenceRecord, FindingRecord, Hypothesis, HypothesisEvent, json_dumps
+from contracts import EvidenceRecord, FindingRecord, Hypothesis, HypothesisEvent, ToolCallRecord, json_dumps
 from artifacts import create_report_artifacts
 from evidence import evidence_record
 from llm import WindowUpdate
@@ -86,12 +88,14 @@ def build_mcp_evidence(
     evidence_id: str,
     investigation_id: str | None,
     run_id: str | None = None,
+    parent_call_id: str = "",
 ) -> dict:
     return EvidenceRecord(
         id=evidence_id,
         investigation_id=investigation_id,
         run_id=run_id,
         step_id=evidence_id,
+        parent_call_id=parent_call_id,
         tool=name,
         arguments=args,
         iql=data.get("iql"),
@@ -155,19 +159,129 @@ def _reused_mcp_result(request, evidence: dict, *, include_evidence: bool = Fals
     return result
 
 
+def _audit_result(result):
+    message = result if isinstance(result, ToolMessage) else None
+    if isinstance(result, Command):
+        message = next((
+            item for item in reversed(result.update.get("messages") or [])
+            if isinstance(item, ToolMessage)
+        ), None)
+    if message is None:
+        return result, "ok"
+    content = message.content
+    try:
+        payload = json.loads(content) if isinstance(content, str) else content
+    except (TypeError, json.JSONDecodeError):
+        payload = content
+    status = "error" if message.status == "error" else "ok"
+    if isinstance(payload, dict):
+        if payload.get("ok") is False:
+            status = "error"
+        elif payload.get("complete") is False:
+            status = "partial"
+    return payload, status
+
+
+def _tool_call_audit(
+    request,
+    requested: dict,
+    effective: dict,
+    started_at: datetime.datetime,
+    started_clock: float,
+    result,
+    *,
+    status: str | None = None,
+    evidence_id: str | None = None,
+    reused: bool = False,
+    reused_from: str | None = None,
+) -> dict:
+    payload, inferred_status = _audit_result(result)
+    if isinstance(payload, dict):
+        reused = reused or bool(payload.get("reused"))
+        evidence_id = evidence_id or payload.get("evidence_id")
+        reused_from = reused_from or payload.get("reused_from")
+    if reused and reused_from is None:
+        reused_from = evidence_id
+    state = request.state
+    context = state.get("context") or {}
+    progress = state.get("progress") or {}
+    item = state.get("active_work_item") or {}
+    return ToolCallRecord(
+        id=request.tool_call["id"],
+        investigation_id=context.get("id"),
+        run_id=state.get("mcp_reuse_run_id") or None,
+        role=progress.get("agent") or "",
+        work_item_id=item.get("id") or "",
+        tool=request.tool_call["name"],
+        arguments_requested=requested,
+        arguments_effective=effective,
+        started_at=started_at.isoformat(timespec="milliseconds"),
+        finished_at=datetime.datetime.now(datetime.UTC).isoformat(timespec="milliseconds"),
+        duration_ms=max(0, round((time.monotonic() - started_clock) * 1000)),
+        status=status or inferred_status,
+        result=payload,
+        evidence_id=evidence_id,
+        reused=reused,
+        reused_from=reused_from,
+        error=payload.get("error") if isinstance(payload, dict) else None,
+    ).model_dump()
+
+
+def _with_tool_audit(result, record: dict):
+    if isinstance(result, Command):
+        return Command(update={**result.update, "tool_calls": [record]})
+    if isinstance(result, ToolMessage):
+        return Command(update={"messages": [result], "tool_calls": [record]})
+    return result
+
+
+def _emit_cancelled_tool_call(request, requested, effective, started_at, started_clock, exc):
+    message = ToolMessage(
+        content=json_dumps({
+            "ok": False,
+            "error": f"{type(exc).__name__}: {exc}",
+            "cancelled": True,
+        }, ensure_ascii=False),
+        tool_call_id=request.tool_call["id"],
+        name=request.tool_call["name"],
+        status="error",
+    )
+    result = _with_progress(request, message)
+    record = _tool_call_audit(
+        request, requested, effective, started_at, started_clock, result,
+        status="cancelled",
+    )
+    _emit_tool_update(request, _with_tool_audit(result, record))
+
+
 _INFLIGHT_MCP = {}
 
 
 @wrap_tool_call
 async def normalize_tool_result(request, handler):
-    """Зафиксировать окно и Evidence; идентичные вызовы выполнять один раз."""
+    """Зафиксировать вызов, окно и Evidence; идентичные MCP-запросы выполнять один раз."""
     name = request.tool_call["name"]
+    requested = dict(request.tool_call.get("args") or {})
+    started_at = datetime.datetime.now(datetime.UTC)
+    started_clock = time.monotonic()
     if name not in _MCP_TOOL_NAMES:
-        result = _with_progress(request, await handler(request))
+        try:
+            result = _with_progress(request, await handler(request))
+        except asyncio.CancelledError as exc:
+            _emit_cancelled_tool_call(request, requested, requested, started_at, started_clock, exc)
+            raise
+        evidence_id = next((
+            item.get("id") for item in result.update.get("evidence") or []
+            if item.get("id")
+        ), None) if isinstance(result, Command) else None
+        result = _with_tool_audit(result, _tool_call_audit(
+            request, requested, requested, started_at, started_clock, result,
+            evidence_id=evidence_id,
+        ))
         _emit_tool_update(request, result)
         return result
 
-    args = dict(request.tool_call.get("args") or {})
+    args = dict(requested)
     context = request.state.get("context") or {}
     focus = context.get("focus_window") or {}
     default_from = focus.get("time_from") or context.get("time_from")
@@ -181,9 +295,11 @@ async def normalize_tool_result(request, handler):
 
     reusable = _reusable_evidence(request.state, name, args)
     if reusable is not None:
-        return _reused_mcp_result(request, reusable)
-
-    import asyncio
+        result = _reused_mcp_result(request, reusable)
+        return _with_tool_audit(result, _tool_call_audit(
+            request, requested, args, started_at, started_clock, result,
+            status=reusable.get("status"), evidence_id=reusable["id"], reused=True,
+        ))
 
     investigation_id = context.get("id")
     run_id = request.state.get("mcp_reuse_run_id") or None
@@ -192,7 +308,11 @@ async def normalize_tool_result(request, handler):
     ) if investigation_id else None
     if flight_key and (pending := _INFLIGHT_MCP.get(flight_key)) is not None:
         evidence = await asyncio.shield(pending)
-        return _reused_mcp_result(request, evidence, include_evidence=True)
+        result = _reused_mcp_result(request, evidence, include_evidence=True)
+        return _with_tool_audit(result, _tool_call_audit(
+            request, requested, args, started_at, started_clock, result,
+            status=evidence.get("status"), evidence_id=evidence["id"], reused=True,
+        ))
 
     future = asyncio.get_running_loop().create_future() if flight_key else None
     if flight_key:
@@ -226,11 +346,20 @@ async def normalize_tool_result(request, handler):
             "content": json_dumps({"evidence_id": evidence_id, **data}, ensure_ascii=False)
         })
         result = _with_progress(request, Command(update={"messages": [message], "evidence": [evidence]}))
+        result = _with_tool_audit(result, _tool_call_audit(
+            request, requested, args, started_at, started_clock, result,
+            status=_result_status(data), evidence_id=evidence_id,
+        ))
         _emit_tool_update(request, result)
         return result
     except BaseException as exc:
+        if isinstance(exc, asyncio.CancelledError):
+            _emit_cancelled_tool_call(request, requested, args, started_at, started_clock, exc)
         if future is not None and not future.done():
-            future.set_exception(exc)
+            if isinstance(exc, asyncio.CancelledError):
+                future.cancel()
+            else:
+                future.set_exception(exc)
         raise
     finally:
         if flight_key and _INFLIGHT_MCP.get(flight_key) is future:
@@ -723,14 +852,20 @@ def search_similar_cases(query: str, limit: int = 3, runtime: ToolRuntime = None
 
 
 # ── Тулзы на агента ──────────────────────────────────────────────
+from analysis import analysis_dataset_create, analysis_sql
+from verification_tools import verification_recheck
+
 SCOUT_MCP_TOOL_NAMES = {
     "server_time",
+    "source_info",
     "count_events",
+    "aggregate_events",
     "timeline",
     "top_values",
     "top_values_batch",
     "field_fill_rates",
     "duplicates",
+    "search_fields",
     "field_lookup",
     "enum_lookup",
     "search_events",
@@ -744,6 +879,9 @@ scout_tools = [item for item in mcp_tools if item.name in SCOUT_MCP_TOOL_NAMES] 
 ]
 # Инвестигейтор — MCP + журнал расследования
 investigator_tools = list(mcp_tools or []) + [
+    analysis_dataset_create,
+    analysis_sql,
+    verification_recheck,
     log_finding,
     list_findings,
     get_finding,

@@ -4,7 +4,10 @@
 
 import asyncio
 import functools
+import hashlib
+import json
 import time
+from urllib.parse import urlsplit, urlunsplit
 from collections.abc import Callable
 from typing import Annotated, Any, TypeVar
 
@@ -14,6 +17,8 @@ from pydantic import Field
 
 from logicore_mcp.domain.window import server_time_payload
 from logicore_mcp.mcp.contracts import (
+    AGGREGATE_DIMENSIONS_PARAM,
+    AGGREGATE_LIMIT,
     COLUMNS_PARAM,
     DUPLICATES_LIMIT,
     EXTRACT_MAX_ROWS,
@@ -33,6 +38,7 @@ from logicore_mcp.mcp.contracts import (
 )
 from logicore_mcp.mcp.flows import (
     READ_ONLY,
+    aggregate_events_flow,
     count_events_flow,
     duplicates_flow,
     enum_lookup_flow,
@@ -40,6 +46,7 @@ from logicore_mcp.mcp.flows import (
     field_fill_rates_flow,
     field_lookup_flow,
     search_events_flow,
+    search_fields_flow,
     timeline_flow,
     top_values_batch_flow,
     top_values_flow,
@@ -313,6 +320,34 @@ async def timeline(
         )
 
 
+@mcp.tool(annotations=READ_ONLY, title="Агрегация по полям", structured_output=False)
+@_envelope_unexpected
+async def aggregate_events(
+    time_from: TIME_FROM_PARAM,
+    dimensions: AGGREGATE_DIMENSIONS_PARAM,
+    time_to: TIME_TO_PARAM = None,
+    iql: Annotated[FILTER_PARAM, Field(description=FILTER_SHORT)] = None,
+    limit: AGGREGATE_LIMIT = 100,
+) -> dict[str, Any]:
+    """Группирует события сразу по нескольким полям и считает строки в каждой группе.
+
+    Подходит для составных ключей вроде src_ip + dst_ip. groups_total равен точному
+    COUNT DISTINCT только при complete=true. При ceiling_reached=true это лишь нижняя
+    граница: сузьте окно/фильтр или используйте полный SQL-анализ выгрузки.
+    """
+    schema = await schema_fields_catalog()
+    async with use_client() as client:
+        return await aggregate_events_flow(
+            client,
+            dimensions=dimensions,
+            time_from=time_from,
+            time_to=time_to,
+            filter=iql,
+            limit=limit,
+            schema=schema,
+        )
+
+
 @mcp.tool(annotations=READ_ONLY, title="Топ значений поля", structured_output=False)
 @_envelope_unexpected
 async def top_values(
@@ -505,6 +540,24 @@ async def duplicates(
         )
 
 
+@mcp.tool(annotations=READ_ONLY, title="Поиск полей схемы", structured_output=False)
+@_envelope_unexpected
+async def search_fields(
+    query: Annotated[str, Field(description="Часть имени или описания; пустая строка — весь каталог.")] = "",
+    limit: SEARCH_LIMIT = 50,
+) -> dict[str, Any]:
+    """Ищет поля живой схемы по имени и описанию, не обращаясь к событиям.
+
+    Вызывать перед незнакомым фильтром или агрегацией. Точный смысл найденных
+    полей уточняйте через field_lookup. Ответ содержит total и truncated.
+    """
+    return search_fields_flow(
+        query=query,
+        limit=limit,
+        schema=await schema_fields_catalog(),
+    )
+
+
 @mcp.tool(annotations=READ_ONLY, title="Справочник полей", structured_output=False)
 @_envelope_unexpected
 async def field_lookup(
@@ -519,7 +572,9 @@ async def field_lookup(
 
     Пример вызова: {"fields": ["action", "object"]}
 
-    Ответ: fields[{field, type, description}], счётчики described/without_overlay."""
+    Ответ: независимые fields[{ok, field, type, description}] либо ошибка и похожие
+    имена у конкретного поля. complete=false означает, что часть имён неизвестна;
+    валидные поля при этом всё равно возвращаются."""
     return await field_lookup_flow(
         fields=fields,
         schema=await schema_fields_catalog(),
@@ -546,6 +601,36 @@ async def enum_lookup(
 
     Ответ: {field, found?, value?, description?, similar?, values?}."""
     return enum_lookup_flow(field=field, value=value)
+
+
+@mcp.tool(annotations=READ_ONLY, title="Паспорт источника", structured_output=False)
+@_envelope_unexpected
+async def source_info() -> dict[str, Any]:
+    """Возвращает фактический endpoint, tenant IDs и SHA-256 живой схемы без секретов."""
+    config = settings()
+    schema = await schema_fields_catalog()
+    async with use_client() as client:
+        await client.user_context()
+        tenant_ids = client.tenant_ids()
+    parts = urlsplit(config.url)
+    host = parts.hostname or ""
+    if parts.port:
+        host = f"{host}:{parts.port}"
+    endpoint = urlunsplit((parts.scheme, host, parts.path, "", ""))
+    canonical = json.dumps(
+        {name: schema[name].type for name in sorted(schema)},
+        ensure_ascii=False,
+        sort_keys=True,
+    ).encode("utf-8")
+    return {
+        "ok": True,
+        "source": "earth",
+        "endpoint": endpoint,
+        "tenant_ids": list(tenant_ids),
+        "schema_version": f"sha256:{hashlib.sha256(canonical).hexdigest()}",
+        "schema_fields": len(schema),
+        "fake_earth": bool(config.fake_earth),
+    }
 
 
 @mcp.tool(annotations=READ_ONLY, title="Время сервера", structured_output=False)

@@ -1,10 +1,12 @@
 """Единый предметный сервис Markdown и ZIP артефактов расследования."""
 
 import datetime
+import tempfile
+from pathlib import Path
 
-from artifact_store import artifact_from_data_url
+from artifact_store import artifact_from_data_url, put_artifact_file, s3_enabled
 from evidence import with_investigation_chain
-from reporting import build_investigation_package, build_report
+from reporting import build_investigation_package, build_report, write_investigation_package
 
 VERIFICATION_HEADING = "## Статус проверки и доверие"
 
@@ -46,14 +48,44 @@ def create_report_artifacts(
         "saved_at": saved_at or datetime.datetime.now(datetime.UTC).isoformat(timespec="seconds"),
     }
     if state.get("evidence"):
-        package_name, package_url, package_bytes = build_investigation_package(
-            title,
-            markdown,
-            state,
-            saved_at=saved_at,
-            filename=previous.get("package_filename"),
-            verification=verification,
-        )
-        artifacts.append(artifact_from_data_url(package_url, context))
-        last_report.update({"package_filename": package_name, "package_bytes": package_bytes})
+        if s3_enabled():
+            with tempfile.TemporaryDirectory(prefix="logicore-package-") as directory:
+                package_name, package_path, package_bytes, manifest_digest = write_investigation_package(
+                    title,
+                    markdown,
+                    state,
+                    Path(directory),
+                    saved_at=saved_at,
+                    filename=previous.get("package_filename"),
+                    verification=verification,
+                )
+                package_artifact = put_artifact_file(
+                    package_path.name, package_path, "application/zip", context,
+                )
+        else:
+            package_name, package_url, package_bytes = build_investigation_package(
+                title,
+                markdown,
+                state,
+                saved_at=saved_at,
+                filename=previous.get("package_filename"),
+                verification=verification,
+            )
+            package_artifact = artifact_from_data_url(package_url, context)
+            encoded = package_url.split("base64,", 1)[1].split("#", 1)[0]
+            import base64
+            import hashlib
+            import io
+            import zipfile
+
+            with zipfile.ZipFile(io.BytesIO(base64.b64decode(encoded))) as bundle:
+                manifest_digest = hashlib.sha256(bundle.read("manifest.json")).hexdigest()
+        package_artifact["manifest_sha256"] = manifest_digest
+        artifacts.append(package_artifact)
+        last_report.update({
+            "package_filename": package_name,
+            "package_bytes": package_bytes,
+            "package_sha256": package_artifact["sha256"],
+            "manifest_sha256": manifest_digest,
+        })
     return last_report, artifacts

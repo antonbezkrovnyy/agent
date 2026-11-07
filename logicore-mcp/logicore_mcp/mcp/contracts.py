@@ -82,6 +82,18 @@ def _non_empty_lookup_fields(value: list[str]) -> list[str]:
     return value
 
 
+def _non_empty_dimensions(value: list[str]) -> list[str]:
+    if not value or len(value) > 5:
+        raise ValueError("dimensions обязателен: от 1 до 5 имён полей.")
+    return value
+
+
+def _aggregate_limit(value: int) -> int:
+    if not 1 <= value <= 100:
+        raise ValueError("limit должен быть 1..100, дефолт 100.")
+    return value
+
+
 def _order(value: str) -> str:
     if value not in ("asc", "desc"):
         raise ValueError('order должен быть "asc" или "desc", дефолт "desc" — свежие сверху.')
@@ -143,8 +155,26 @@ LOOKUP_FIELDS_PARAM = Annotated[
     list[str],
     AfterValidator(_non_empty_lookup_fields),
     Field(
-        description="Обязательно: до 20 имён полей из logicore://schema/fields.",
+        description="Обязательно: до 20 имён полей; неизвестные имена возвращаются отдельными ошибками.",
         json_schema_extra={"minItems": 1, "maxItems": 20},
+    ),
+]
+
+AGGREGATE_DIMENSIONS_PARAM = Annotated[
+    list[str],
+    AfterValidator(_non_empty_dimensions),
+    Field(
+        description="От 1 до 5 полей GROUP BY, например ['src_ip', 'dst_ip'].",
+        json_schema_extra={"minItems": 1, "maxItems": 5},
+    ),
+]
+
+AGGREGATE_LIMIT = Annotated[
+    int,
+    AfterValidator(_aggregate_limit),
+    Field(
+        description="Потолок групп Earth, 1..100. При достижении потолка complete=false.",
+        json_schema_extra={"minimum": 1, "maximum": 100},
     ),
 ]
 

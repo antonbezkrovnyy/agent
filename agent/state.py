@@ -67,6 +67,9 @@ class EvidenceChannels(TypedDict):
     callback_url: str
     artifacts: Annotated[list[dict], operator.add]
     evidence: Annotated[list[dict], operator.add]
+    tool_calls: Annotated[list[dict], operator.add]
+    analysis_datasets: Annotated[list[dict], operator.add]
+    analysis_results: Annotated[list[dict], operator.add]
     findings: Annotated[list[dict], operator.add]
     hypotheses: Annotated[list[dict], merge_hypotheses]
 
@@ -103,6 +106,7 @@ class ProvenanceChannels(TypedDict):
     """Метаданные независимой проверки и происхождения данных."""
 
     independent_verification: dict
+    verification_checks: Annotated[list[dict], operator.add]
     tenant: str
     source_endpoint: str
     schema_version: str

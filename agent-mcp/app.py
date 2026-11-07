@@ -280,6 +280,12 @@ async def investigation_result(investigation_id: str) -> ResultResponse:
         "memory_operations": values.get("memory_operations") or [],
         "run_metrics": values.get("run_metrics") or [],
         "artifacts": artifacts,
+        "verification": report.get("verification") or result.get("verification") or {},
+        "tool_calls": values.get("tool_calls") or [],
+        "analysis_datasets": values.get("analysis_datasets") or [],
+        "analysis_results": values.get("analysis_results") or [],
+        "package_sha256": report.get("package_sha256") or "",
+        "manifest_sha256": report.get("manifest_sha256") or "",
     }
 
 

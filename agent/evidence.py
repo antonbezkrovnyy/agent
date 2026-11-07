@@ -9,7 +9,7 @@ def evidence_record(state: dict, evidence_id: str) -> dict | None:
     return next((item for item in state.get("evidence") or [] if item.get("id") == evidence_id), None)
 
 
-def claim_evidence_ids(state: dict) -> list[str]:
+def referenced_evidence_ids(state: dict) -> list[str]:
     ids: list[str] = []
     for key in ("scout_result", "inv_result", "report_result"):
         result = state.get(key) or {}
@@ -25,8 +25,12 @@ def claim_evidence_ids(state: dict) -> list[str]:
         ids.extend(finding.get("evidence_ids") or [])
     for hypothesis in state.get("hypotheses") or []:
         ids.extend(hypothesis.get("evidence_ids") or [])
+    return list(dict.fromkeys(ids))
+
+
+def claim_evidence_ids(state: dict) -> list[str]:
     available = {item.get("id") for item in state.get("evidence") or []}
-    return list(dict.fromkeys(item for item in ids if item in available))
+    return [item for item in referenced_evidence_ids(state) if item in available]
 
 
 def _compact_value(value, limit: int = 2000):
@@ -105,6 +109,7 @@ def case_events(state: dict) -> list[dict]:
             "window": item.get("window"),
             "arguments": item.get("arguments") or {},
             "iql": item.get("iql"),
+            "parent_call_id": item.get("parent_call_id") or "",
         })
     for item in state.get("skill_runs") or []:
         events.append({"at": item.get("recorded_at"), "type": "skill", **item})
@@ -327,6 +332,32 @@ def chain_markdown(state: dict) -> str:
     lines.extend(f"- {item}" for item in chain["not_checked"])
     if not chain["not_checked"]:
         lines.append("Не указано.")
+    calls = list(state.get("tool_calls") or [])
+    if calls:
+        lines.extend([
+            "",
+            "## Аудит всех вызовов",
+            "",
+            "Полные аргументы и результаты: `tool_calls.jsonl`; SQL и датасеты — в `analysis_results/` и `datasets/`.",
+            "",
+            "| # | Tool | Статус | Аргументы | Результат | Evidence |",
+            "|---|---|---|---|---|---|",
+        ])
+        for index, call in enumerate(calls, start=1):
+            arguments = json_dumps(call.get("arguments_effective") or {}, ensure_ascii=False)
+            result = json_dumps(call.get("result"), ensure_ascii=False)
+            evidence_link = call.get("evidence_id") or "—"
+            if call.get("reused"):
+                evidence_link += " (reused)"
+            cells = [
+                str(index),
+                str(call.get("tool") or ""),
+                str(call.get("status") or ""),
+                arguments[:500] + ("…" if len(arguments) > 500 else ""),
+                result[:300] + ("…" if len(result) > 300 else ""),
+                evidence_link,
+            ]
+            lines.append("| " + " | ".join(cell.replace("|", "\\|").replace("\n", " ") for cell in cells) + " |")
     return "\n".join(lines)
 
 

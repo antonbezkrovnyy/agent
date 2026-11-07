@@ -26,6 +26,7 @@ class EvidenceRecord(BaseModel):
     investigation_id: str | None = None
     run_id: str | None = None
     step_id: str
+    parent_call_id: str = ""
     tool: str
     arguments: dict = Field(default_factory=dict)
     iql: str | None = None
@@ -35,6 +36,26 @@ class EvidenceRecord(BaseModel):
     result_ref: str
     created_at: str
     result: Any = Field(default_factory=dict)
+    error: Any = None
+
+
+class ToolCallRecord(BaseModel):
+    id: str
+    investigation_id: str | None = None
+    run_id: str | None = None
+    role: str = ""
+    work_item_id: str = ""
+    tool: str
+    arguments_requested: dict = Field(default_factory=dict)
+    arguments_effective: dict = Field(default_factory=dict)
+    started_at: str
+    finished_at: str
+    duration_ms: int
+    status: Literal["ok", "partial", "error", "cancelled"]
+    result: Any = None
+    evidence_id: str | None = None
+    reused: bool = False
+    reused_from: str | None = None
     error: Any = None
 
 

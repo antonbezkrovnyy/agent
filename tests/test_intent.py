@@ -2,7 +2,7 @@ import json
 from datetime import UTC, datetime
 
 from conftest import FakeStructured, intent
-from investigation import _intent_fallback, _intent_structured
+from investigation import _intent_fallback, _intent_structured, _normalize_intent
 import llm as llm_mod
 from llm import IntentDecision, WindowSpec, build_intent_llm
 from langchain_core.messages import HumanMessage
@@ -52,6 +52,29 @@ def test_intent_fallback_does_not_guess_skills_from_keywords():
     assert result["work_mode"] == "deep"
     assert result["skill_id"] is None
     assert result["related_investigation_id"] is None
+
+
+def test_complex_new_thread_cannot_route_to_reporter_without_new_data():
+    decision = _normalize_intent({
+        "label": "complex",
+        "work_mode": "deep",
+        "needs_new_data": False,
+        "new_investigation": "new",
+    }, {"context": {}})
+
+    assert decision["needs_new_data"] is True
+
+
+def test_complex_new_thread_preserves_related_case_loading():
+    decision = _normalize_intent({
+        "label": "complex",
+        "work_mode": "deep",
+        "needs_new_data": False,
+        "new_investigation": "continue",
+        "related_investigation_id": "case-old",
+    }, {"context": {}})
+
+    assert decision["needs_new_data"] is False
 
 
 def test_intent_accepts_missing_rationale_and_empty_ids():

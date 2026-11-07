@@ -17,8 +17,14 @@
 - `agent/memory.py` — Case Store, извлечение и консолидация Context Memory.
 - `agent/memory_models.py` — Pydantic-схемы дел, фактов и операций памяти.
 - `agent/memory_store.py` — предметная SQL-схема в отдельной `agent-memory-db`.
-- `agent/artifact_store.py` — S3-ключи и подписанные URL, без base64 в постоянном state.
-- `agent/artifacts.py` — единый сервис Markdown/ZIP и памяти отчёта.
+- `agent/artifact_store.py` — S3-ключи, потоковая загрузка и подписанные URL,
+  без base64 в постоянном state; data-URL только локальный fallback.
+- `agent/artifacts.py` — единый сервис Markdown/ZIP, памяти отчёта и detached hashes;
+  `agent/reporting.py` — сборка ZIP во временный файл.
+- `agent/analysis.py` — JSONL-датасеты, DuckDB SQL и Evidence, без shell в Aegra.
+- `analysis-service/` — изолированный read-only `SELECT` с лимитами, не второй MCP LogiCore.
+- `agent/verification_tools.py` — same-source recheck и свежие Evidence;
+  `agent/provenance.py` — фактические source/time metadata.
 - `agent/verification.py` — статусы доверия, публикация открытых issues и update_failed.
 - `agent/metrics.py` — длительность, токены, tool calls и повторы по ролям/items.
 - `agent-mcp/app.py` — асинхронный MCP-адаптер над Aegra runs API, не второй движок.
@@ -65,13 +71,18 @@
   из MCP и должен совпадать с выполненным запросом, агент не генерирует его повторно.
   Runtime стримит native `create_agent` и события завершённых tools: технический таймаут
   не отбрасывает Evidence, findings, гипотезы, окна, артефакты и приватную историю.
-- Аналитический отчёт прикрепляется как Markdown плюс ZIP с `report.md`, `queries.md`,
-  `evidence.jsonl`, `events.csv` и `manifest.json`. Пакет строится детерминированно.
+  Отменённые вызовы фиксируются как `cancelled`, вложенные Evidence имеют `parent_call_id`.
+- Аналитический отчёт прикрепляется как Markdown плюс самодостаточный ZIP с `report.md`,
+  `queries.md`, полными inline `evidence.jsonl`, аудитом каждого вызова `tool_calls.jsonl`,
+  `events.csv`, analysis-датасетами/результатами и `manifest.json`. `evidence://` — только
+  внутренний ID, не внешняя зависимость. Пакет строится детерминированно и валидирует
+  отсутствующие results/ссылки; SHA-256 ZIP и manifest хранятся также вне архива.
   Раздел «Статус проверки и доверие» фиксирует `consistent_with_evidence/unverified/issues_open/update_failed`
   и открытые issues; он всегда есть в файле, а в чат выводится при проблемном результате.
   `consistent_with_evidence` означает только согласованность с пакетом, не независимую
   истинность. Матрица claims различает подтверждение в архиве, вероятность, спорность и
-  неподтверждение; manifest содержит provenance и статус независимой проверки.
+  неподтверждение; manifest содержит фактические source/time metadata. `verification_recheck`
+  всегда `independent=false` и `same_source_replay`; он не подменяет независимый источник.
   Rework без изменённого Markdown — `update_failed`, а не успех.
 - `memory_operations` фиксирует исходное/фактическое действие и исход каждой записи;
   журнал попадает в Case Store, отчёт и manifest. Не заменять его одним счётчиком.
@@ -86,7 +97,10 @@
   и partial-claims проверяются детерминированно. `has_more=true` допустимо только после
   непустой look-ahead-страницы; пустая — `false`, ошибка проверки — `null` с `pagination_error`.
   Категоричная полнота разрешена только при `has_more=false`; `null` — неизвестность,
-  а не доказательство продолжения или завершения.
+  а не доказательство продолжения или завершения. Claims имеют `evidence_class`:
+  `полный` запрещён при partial/proxy; `прокси` — только предположение. Ключевая Deep-аномалия
+  требует альтернативы и дискриминирующий тест, «объясни всплеск» — required baseline.
+  Top-N не заменяет профиль распределения; pivot расходуется по ценности для гипотез.
 - InvestigationScope строится structured LLM до Planner. Discovery ограничен двумя
   items; required — максимум двумя. Optional попадает только в отчёт/suggestions.
   Work item содержит acceptance/priority/estimated_cost. Replan разрешён только для
@@ -104,13 +118,16 @@
   если доступен structured output. Intent классифицируется LLM; keyword-списки
   для выбора режима/skill запрещены, fallback — консервативный state.
   `needs_new_data/export` имеют приоритет над `inspect_memory`; смена окна в
-  continuation требует новых данных. Обзор памяти — только самостоятельный simple-запрос.
+  continuation требует новых данных. `complex` на пустом деле консервативно нормализуется
+  в `needs_new_data=true`, кроме related-case и memory/report маршрутов: Reporter без данных
+  недопустим. Обзор памяти — только самостоятельный simple-запрос.
   Явная команда запомнить факт — `remember_fact` → Reporter → `memory_save`, а не
   `inspect_memory`; пользовательский факт сохраняется без Evidence даже на новом треде.
 - Windowed tools определяются по JSON Schema (`time_from/time_to`), а не по
   hardcoded списку имён.
 - Continuation сохраняет `context.id`, base/focus/history окон, `depth_history`,
-  Evidence, findings и гипотезы. Save-only и редактирование отчёта также сохраняют Scope,
+  Evidence, полный tool audit, analysis-датасеты/результаты, verification checks, findings
+  и гипотезы. Save-only и редактирование отчёта также сохраняют Scope,
   план, work items, `inv_result` и завершённые метрики. Повторный work item получает явный
   handoff только у Investigator и не начинает базовую разведку заново. Идентичный успешный
   MCP-вызов с теми же фактическими аргументами и окном переиспользует Evidence на любой
@@ -140,7 +157,15 @@
   read-only и создают Evidence. Явная новая тема архивируется перед очисткой;
   `uncertain` продолжает текущий случай.
 - Полная выгрузка использует универсальный `extract_data`; не добавлять
-  ping-specific или другие одноразовые дубликаты этого инструмента.
+  ping-specific или другие одноразовые дубликаты этого инструмента. Составной GROUP BY
+  выполняется через `aggregate_events`, ad-hoc вычисления — через JSONL и изолированный
+  DuckDB `analysis_sql`. Точный COUNT DISTINCT запрещён при `complete=false`; после
+  неуспешных агрегатов используется SQL fallback. Произвольный shell/Python в Aegra запрещён.
+  Запрошенные колонки валидируются через `field_lookup`, `unavailable_columns` явно делают
+  датасет partial; значения дополняются `NULL`. Идентичные полные dataset/SQL переиспользуются,
+  цикл одинаковых выгрузок недопустим; SQL-ошибки имеют machine-readable recovery, а не
+  запускают новую выгрузку. На run допускается до 6 `analysis_sql` с исправлением запроса,
+  седьмой вызов — `sql_attempt_limit`. Критик отклоняет текст, противоречащий артефактам.
 - Пользовательского бюджета времени нет. Не возвращать `deadline_at`,
   `budget_seconds` или выбор времени через interrupt без отдельного решения.
 - Критики не получают MCP-инструменты. Их сбой обозначается `critic_unavailable`,
@@ -152,9 +177,9 @@
 
 Текущие `run_limit`: scout 10, investigator 30, reporter 60. Значения и остальные
 лимиты задаются в `agent/config.py` через env и сбрасываются на каждый новый запуск
-роли. Технические таймауты: soft 480 с, hard 600 с на роль, export 120 с. После soft
+роли. Технические таймауты: soft 600 с, hard 900 с на роль, export 120 с. После soft
 Scout/Investigator/Reporter теряют investigative tools и получают до 10 попыток
-structured finalization внутри общего hard deadline; fallback сохраняет partial state.
+structured finalization по 300 с внутри общего hard deadline; fallback сохраняет partial state.
 
 При изменении лимитов обновлять тест `tests/test_tool_limit.py`, `README.md` и
 `docs/DEV.md`. Не описывать tool limit как общий лимит чата: это неверно. У Scout 10
@@ -183,7 +208,7 @@ uv run --with "langchain==1.3.10" --with "langgraph==1.2.16" \
   --with "langchain-openai" --with "pydantic-settings" \
   --with "httpx" --with "tenacity" --with "pytest" --with "loguru" \
   --with "psycopg" --with "mcp[cli]>=2,<3" \
-  --with "fastapi" --with "uvicorn" pytest -q tests
+  --with "fastapi" --with "uvicorn" --with "duckdb>=1,<2" pytest -q tests
 
 git diff --check
 ```

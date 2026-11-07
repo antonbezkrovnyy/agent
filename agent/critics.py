@@ -256,6 +256,49 @@ def _distribution_issues(state: State) -> list[CriticIssue]:
     return issues
 
 
+def _artifact_claim_issues(state: State) -> list[CriticIssue]:
+    import re
+
+    package = (state.get("last_report") or {}).get("package_filename")
+    if not package:
+        return []
+    negative = re.compile(
+        r"(?:zip[^\n.]{0,120}(?:не формируется|не создан|не удалось создать|отсутствует|нет средства)|"
+        r"(?:не формируется|не создан|не удалось создать|нет средства)[^\n.]{0,120}zip)",
+        re.IGNORECASE,
+    )
+    if not any(negative.search(text) for text in _report_texts(state)):
+        return []
+    return [CriticIssue(
+        claim="Текст отчёта противоречит наличию ZIP-пакета.",
+        reason=f"В state создан пакет {package}; нельзя утверждать, что ZIP отсутствует или не формируется.",
+        suggested_action="rework_report",
+    )]
+
+
+def _evidence_strength_issues(state: State) -> list[CriticIssue]:
+    records = {item.get("id"): item for item in state.get("evidence") or []}
+    issues = []
+    for result_key in ("inv_result", "report_result"):
+        for claim in (state.get(result_key) or {}).get("claims") or []:
+            if claim.get("evidence_class") != "полный":
+                continue
+            weak = [
+                evidence_id for evidence_id in claim.get("evidence_ids") or []
+                if evidence_id not in records
+                or records[evidence_id].get("status") != "ok"
+                or records[evidence_id].get("tool") == "field_fill_rates"
+            ]
+            if weak:
+                issues.append(CriticIssue(
+                    claim=claim.get("text") or "",
+                    evidence_ids=weak,
+                    reason="Класс «полный» недопустим по partial/error или прокси field_fill_rates; понизьте класс evidence и силу формулировки.",
+                    suggested_action="rework_report",
+                ))
+    return issues
+
+
 def _deterministic_issues(state: State) -> list[dict]:
     records = {item.get("id"): item for item in state.get("evidence") or []}
     issues: list[CriticIssue] = []
@@ -315,6 +358,8 @@ def _deterministic_issues(state: State) -> list[dict]:
     issues.extend(_partial_sample_issues(state))
     issues.extend(_completeness_issues(state))
     issues.extend(_distribution_issues(state))
+    issues.extend(_evidence_strength_issues(state))
+    issues.extend(_artifact_claim_issues(state))
     unique = {}
     for issue in issues:
         key = (issue.claim, tuple(issue.evidence_ids), issue.reason)

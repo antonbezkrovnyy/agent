@@ -295,6 +295,10 @@ def test_first_attempt_reuses_identical_mcp_evidence(patch_llm):
     result = invoke(build_graph(), "проверь повтор", thread_id="runtime-first-reuse")
 
     assert len(result["evidence"]) == 1
+    assert len(result["tool_calls"]) == 2
+    assert [item["reused"] for item in result["tool_calls"]] == [False, True]
+    assert result["tool_calls"][0]["arguments_effective"]["time_from"]
+    assert result["tool_calls"][1]["evidence_id"] == result["evidence"][0]["id"]
     assert result["work_items"][0]["attempt"] == 1
     assert sum(
         '"reused": true' in message.content

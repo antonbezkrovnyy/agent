@@ -1,6 +1,20 @@
 from conftest import FakeAgent, FakeStructured, ai, build_graph, intent, invoke, tc
 
 
+def test_timeout_defaults_leave_one_full_finalization_attempt():
+    from config import Settings
+
+    settings = Settings()
+
+    assert settings.agent_finalize_after_seconds == 600
+    assert settings.agent_finalize_attempt_timeout_seconds == 300
+    assert settings.agent_timeout_seconds == 900
+    assert (
+        settings.agent_timeout_seconds - settings.agent_finalize_after_seconds
+        >= settings.agent_finalize_attempt_timeout_seconds
+    )
+
+
 def test_tool_limit_moves_workflow_forward(patch_llm):
     agent = FakeAgent({
         "Ты — скаут": [

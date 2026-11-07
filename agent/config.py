@@ -52,7 +52,7 @@ class Settings(BaseSettings):
     planner_max_revisions: int = 2
     scope_discovery_max_items: int = 2
     scope_required_max_items: int = 2
-    agent_prompt_version: str = "2026-11-06.3"
+    agent_prompt_version: str = "2026-11-07.7"
 
     # Отдельные Case Store и Context Memory, не БД Aegra checkpoints
     agent_memory_database_url: str = ""
@@ -71,11 +71,19 @@ class Settings(BaseSettings):
     agent_memory_embedding_token: str = ""
 
     # Технические таймауты от зависаний; пользователь не управляет ими
-    agent_finalize_after_seconds: int = 480
+    agent_finalize_after_seconds: int = 600
     agent_finalize_attempts: int = 10
-    agent_finalize_attempt_timeout_seconds: int = 30
-    agent_timeout_seconds: int = 600
+    agent_finalize_attempt_timeout_seconds: int = 300
+    agent_timeout_seconds: int = 900
     export_timeout_seconds: int = 120
+
+    # Изолированный SQL-анализ полных выгрузок, без исполнения кода в Aegra
+    analysis_service_url: str = "http://analysis-service:9200"
+    analysis_service_token: str = ""
+    analysis_timeout_seconds: int = 120
+    analysis_dataset_max_rows: int = 20000
+    analysis_result_max_rows: int = 10000
+    analysis_sql_max_attempts: int = 6
 
     # Файлы расследований: S3 в работе, data-URL только для локального fallback
     artifact_store_backend: str = "auto"

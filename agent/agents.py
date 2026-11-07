@@ -280,6 +280,9 @@ def _agent_input(state: State, work_key: str) -> dict:
         "artifacts": list(state.get("artifacts") or []),
         "findings": list(state.get("findings") or []),
         "evidence": list(state.get("evidence") or []),
+        "tool_calls": list(state.get("tool_calls") or []),
+        "analysis_datasets": list(state.get("analysis_datasets") or []),
+        "analysis_results": list(state.get("analysis_results") or []),
         "hypotheses": list(state.get("hypotheses") or []),
         "context": state.get("context") or {},
         "last_report": state.get("last_report") or {},
@@ -297,6 +300,7 @@ def _agent_input(state: State, work_key: str) -> dict:
         "case_task": case_task,
         "mcp_reuse_run_id": state.get("mcp_reuse_run_id") or "",
         "independent_verification": state.get("independent_verification") or {},
+        "verification_checks": list(state.get("verification_checks") or []),
         "tenant": state.get("tenant") or "",
         "source_endpoint": state.get("source_endpoint") or "",
         "schema_version": state.get("schema_version") or "",
@@ -481,6 +485,11 @@ def _restore_stream_state(latest: dict, events: dict) -> dict:
     for item in result.get("evidence") or []:
         evidence[item.get("id")] = item
     result["evidence"] = list(evidence.values())
+    for key in ("tool_calls", "analysis_datasets", "analysis_results"):
+        unique = {}
+        for item in result.get(key) or []:
+            unique[item.get("id")] = item
+        result[key] = list(unique.values())
     artifacts = {}
     for item in result.get("artifacts") or []:
         identity = (
@@ -700,13 +709,18 @@ async def _run_agent(agent: str, state: State, work_key: str) -> tuple[dict, lis
     input_count = len(original_input["messages"])
     new_messages = list(result["messages"][input_count:])
     update: dict = {}
-    for key in ("artifacts", "findings", "evidence"):
+    for key in (
+        "artifacts", "findings", "evidence", "tool_calls", "analysis_datasets",
+        "analysis_results", "verification_checks",
+    ):
         before = len(original_input[key])
         values = list(result.get(key) or [])
         if len(values) > before:
             update[key] = values[before:]
     if result.get("hypotheses") != original_input["hypotheses"]:
         update["hypotheses"] = list(result.get("hypotheses") or [])
+    if result.get("independent_verification") != original_input["independent_verification"]:
+        update["independent_verification"] = result.get("independent_verification") or {}
     if result.get("last_report") != original_input["last_report"]:
         update["last_report"] = result.get("last_report") or {}
     if result.get("context") != original_input["context"]:

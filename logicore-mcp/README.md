@@ -103,14 +103,17 @@ LOGIQ_TRANSPORT=stdio LOGIQ_URL=... LOGIQ_USER=... LOGIQ_PASSWORD=... \
 | `search_events` | События: `iql`, `columns`, `page`, `limit`, `order`, `groups`, `order_by`, `query_limit`, `include_activity` |
 | `extract_data` | Постраничная выгрузка: те же параметры поиска плюс `max_rows`; `include_activity` отсутствует |
 | `count_events` | Точный count и события/минуту: `iql`, `groups`, `query_limit` |
+| `aggregate_events` | Настоящий GROUP BY до 5 `dimensions`, count групп, `complete`, `groups_lower_bound` |
 | `timeline` | Ровные бакеты по времени: `iql`, `groups` |
 | `top_values` | Top/bottom одного поля: `field`, `iql`, `limit` |
 | `top_values_batch` | До 10 полей за вызов, сбой одного поля не отменяет остальные |
 | `get_event` | Полная карточка по `uuid + timestamp` из одной строки `search_events` |
 | `field_fill_rates` | Заполненность всех полей с курсором `offset`, `failed` и `time_coverage` |
 | `duplicates` | Группы повторов по `key_fields`, `limit` |
-| `field_lookup` | Типы и описания до 20 полей |
+| `search_fields` | Поиск имён и описаний в живой схеме без обращения к событиям |
+| `field_lookup` | До 20 независимых результатов; неизвестное имя не скрывает валидные поля |
 | `enum_lookup` | Значения и расшифровки перечислений таксономии MP SIEM 7.0 |
+| `source_info` | Endpoint, tenant IDs, SHA-256 схемы и `fake_earth` без секретов |
 | `server_time` | Локальное время MCP-процесса для вычисления относительных окон |
 
 Resource `logicore://schema/fields` содержит фактические имена и типы полей.
@@ -197,6 +200,11 @@ Resource `logicore://schema/fields` содержит фактические им
 
 ### Группировки и справочники
 
+- `aggregate_events` использует `/events/groups` с составным `columns`; `groups` из
+  search/count остаётся дополнительными equality-фильтрами, это другой параметр MARS.
+  `groups_total` — точный COUNT DISTINCT только при `complete=true`; при потолке или
+  частичном покрытии он `null`, а `groups_lower_bound` — лишь прочитанное число групп.
+  Тогда нужно сузить окно/фильтр либо выполнить SQL над полной выгрузкой.
 - `distinct` при `complete=false` — нижняя граница, а не итог окна.
 - `share` при усечении — процент от суммы прочитанных групп, не всех событий.
 - `null_count` в `top_values` — число null-групп, не null-событий.

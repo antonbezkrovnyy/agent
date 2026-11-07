@@ -519,6 +519,85 @@ async def timeline_flow(
     return envelope
 
 
+async def aggregate_events_flow(
+    client: EarthClient,
+    *,
+    dimensions: Sequence[str],
+    time_from: str | None,
+    time_to: str | None,
+    filter: str | None,
+    limit: int,
+    schema: Mapping[str, FieldSchema],
+) -> dict[str, Any]:
+    """Группировка по составному ключу с явной нижней границей при потолке Earth."""
+    try:
+        unique: dict[str, None] = {}
+        for name in dimensions:
+            if not isinstance(name, str) or not name.strip():
+                raise FilterError("Имя измерения должно быть непустой строкой")
+            unique.setdefault(name, None)
+        if not unique or len(unique) > 5:
+            raise FilterError("dimensions: от 1 до 5 уникальных имён полей")
+        for name in unique:
+            if name not in schema and name not in RESERVED_COLUMNS:
+                raise _unknown_field_error(name, schema, prefix="Неизвестное измерение: ")
+        start, end, wsource = _window_or_raise(
+            "aggregate_events",
+            time_from,
+            time_to,
+            echo={"dimensions": list(unique), "iql": filter, "limit": limit},
+        )
+        iql = _iql_or_raise(filter)
+    except LogicoreError as exc:
+        return _error(exc)
+
+    await client.user_context()
+    request = build_groups_request(
+        columns=list(unique),
+        filters=iql,
+        time_from=start,
+        time_to=end,
+        tenant_ids=client.tenant_ids(),
+        limit=limit,
+    )
+    try:
+        items, coverage = unwrap(await client.group_by(request))
+    except LogicoreError as exc:
+        return _error(exc)
+    rows = [
+        {
+            **{name: item.get(name) for name in unique},
+            "count": int(item.get("total_rows_count") or 0),
+        }
+        for item in items
+    ]
+    ceiling_reached = len(rows) >= limit
+    complete = not ceiling_reached and coverage is None
+    envelope: dict[str, Any] = {
+        "ok": True,
+        "window": _window_payload(start, end, wsource),
+        "filter_applied": filter,
+        "iql": iql,
+        "dimensions": list(unique),
+        "groups": rows,
+        "groups_count": len(rows),
+        "groups_lower_bound": len(rows),
+        "groups_total": len(rows) if not ceiling_reached else None,
+        "events_in_groups": sum(item["count"] for item in rows),
+        "complete": complete,
+        "ceiling_reached": ceiling_reached,
+    }
+    if ceiling_reached:
+        envelope["hint"] = (
+            f"Достигнут потолок {limit} групп: groups_total и точный COUNT DISTINCT неизвестны. "
+            "Сузьте окно/фильтр или выполните полный анализ выгрузки через SQL."
+        )
+    if coverage is not None:
+        envelope["coverage"] = coverage
+        envelope["groups_total"] = None
+    return envelope
+
+
 async def top_values_flow(
     client: EarthClient,
     *,
@@ -1062,12 +1141,53 @@ def _enum_values() -> dict[str, list[dict[str, str]]]:
     return _enum_values_cache
 
 
+def search_fields_flow(
+    *,
+    query: str,
+    limit: int,
+    schema: Mapping[str, FieldSchema],
+) -> dict[str, Any]:
+    """Поиск по живой схеме без обращения к событиям Earth."""
+    from logicore_mcp.domain.filters import similar_fields
+
+    overlay = _field_overlay()
+    names = sorted(set(schema) | set(RESERVED_COLUMNS))
+    needle = query.strip().lower()
+    if needle:
+        direct = [
+            name for name in names
+            if needle in name.lower() or needle in str(overlay.get(name) or "").lower()
+        ]
+        direct.sort(key=lambda name: (
+            name.lower() != needle,
+            not name.lower().startswith(needle),
+            name,
+        ))
+        names = list(dict.fromkeys([*direct, *similar_fields(needle, schema, limit=5)]))
+    entries = [
+        {
+            "field": name,
+            "type": schema[name].type if name in schema else "DateTime('UTC')",
+            "description": overlay.get(name),
+        }
+        for name in names[:limit]
+    ]
+    return {
+        "ok": True,
+        "query": query,
+        "fields": entries,
+        "returned": len(entries),
+        "total": len(names),
+        "truncated": len(names) > limit,
+    }
+
+
 async def field_lookup_flow(
     *,
     fields: Sequence[str],
     schema: Mapping[str, FieldSchema],
 ) -> dict[str, Any]:
-    """Пайплайн lookup полей: тип из живой схемы + overlay-описание из бандла (TD-0014, UC-0004)."""
+    """Независимый lookup каждого поля: ошибка одного имени не скрывает остальные."""
     unique: dict[str, None] = {}
     for name in fields:
         if not isinstance(name, str) or not name.strip():
@@ -1084,23 +1204,38 @@ async def field_lookup_flow(
         return _error(FilterError(f"Не больше {FIELD_LOOKUP_MAX_FIELDS} полей", hint=f"Передано {len(unique)}."))
     overlay = _field_overlay()
     entries: list[dict[str, Any]] = []
+    invalid = 0
     for name in unique:
         if name not in schema and name not in RESERVED_COLUMNS:
-            return _error(_unknown_field_error(name, schema, prefix="Неизвестное поле: "))
+            invalid += 1
+            error = _unknown_field_error(name, schema, prefix="Неизвестное поле: ")
+            entries.append({
+                "field": name,
+                "ok": False,
+                "error": str(error),
+                "hint": error.hint,
+            })
+            continue
         entries.append(
             {
                 "field": name,
+                "ok": True,
                 "type": schema[name].type if name in schema else "DateTime('UTC')",
                 "description": overlay.get(name),
             }
         )
-    described = sum(1 for entry in entries if entry["description"] is not None)
-    logger.info("tool=field_lookup fields={} described={}", len(entries), described)
+    described = sum(1 for entry in entries if entry.get("description") is not None)
+    logger.info("tool=field_lookup fields={} described={} invalid={}", len(entries), described, invalid)
     return {
-        "ok": True,
+        "ok": invalid < len(entries),
+        "complete": invalid == 0,
         "fields": entries,
         "described": described,
-        "without_overlay": len(entries) - described,
+        "without_overlay": sum(
+            1 for entry in entries if entry.get("ok") and entry.get("description") is None
+        ),
+        "invalid": invalid,
+        **({"error": "Все запрошенные поля неизвестны"} if invalid == len(entries) else {}),
     }
 
 

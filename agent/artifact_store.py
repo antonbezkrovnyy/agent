@@ -4,6 +4,7 @@ import base64
 import hashlib
 import hmac
 from datetime import UTC, datetime
+from pathlib import Path
 from typing import Protocol
 from urllib.parse import quote, urlencode, urlsplit, urlunsplit
 
@@ -31,12 +32,14 @@ class S3ArtifactStore:
     def _sign(key: str, data: bytes) -> str:
         return hmac.new(key, data, hashlib.sha256).hexdigest()
 
-    def _headers(self, method: str, url: str, data: bytes, query: dict | None = None) -> dict:
+    def _headers(
+        self, method: str, url: str, data: bytes, query: dict | None = None, *, payload_hash: str | None = None,
+    ) -> dict:
         parts = urlsplit(url)
         now = datetime.now(UTC)
         amz_date = now.strftime("%Y%m%dT%H%M%SZ")
         date = now.strftime("%Y%m%d")
-        payload_hash = hashlib.sha256(data).hexdigest()
+        payload_hash = payload_hash or hashlib.sha256(data).hexdigest()
         headers = {
             "host": parts.netloc,
             "x-amz-content-sha256": payload_hash,
@@ -74,14 +77,42 @@ class S3ArtifactStore:
         response.raise_for_status()
         return response
 
-    def put_bytes(self, key: str, data: bytes, content_type: str) -> str:
-        if not self._ready:
+    def _ensure_bucket(self) -> None:
+        if self._ready:
+            return
+        try:
             self._request("PUT")
-            self._ready = True
+        except httpx.HTTPStatusError as exc:
+            if exc.response.status_code != 409:
+                raise
+        self._ready = True
+
+    def put_bytes(self, key: str, data: bytes, content_type: str) -> str:
+        self._ensure_bucket()
         url = f"{self.endpoint}/{self.bucket}/{quote(key, safe='/')}"
         headers = self._headers("PUT", url, data)
         headers["Content-Type"] = content_type
         response = httpx.put(url, headers=headers, content=data, timeout=60)
+        response.raise_for_status()
+        return key
+
+    def put_file(self, key: str, path: Path, content_type: str) -> str:
+        self._ensure_bucket()
+        digest = hashlib.sha256()
+        with path.open("rb") as source:
+            for chunk in iter(lambda: source.read(1024 * 1024), b""):
+                digest.update(chunk)
+        url = f"{self.endpoint}/{self.bucket}/{quote(key, safe='/')}"
+        headers = self._headers("PUT", url, b"", payload_hash=digest.hexdigest())
+        headers["Content-Type"] = content_type
+        headers["Content-Length"] = str(path.stat().st_size)
+        with path.open("rb") as source:
+            response = httpx.put(
+                url,
+                headers=headers,
+                content=iter(lambda: source.read(1024 * 1024), b""),
+                timeout=120,
+            )
         response.raise_for_status()
         return key
 
@@ -142,6 +173,42 @@ def artifact_url(artifact: dict | str) -> str:
     return artifact.get("data_url") or ""
 
 
+def s3_enabled() -> bool:
+    return _s3_enabled()
+
+
+def _file_sha256(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as source:
+        for chunk in iter(lambda: source.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def put_artifact_file(
+    filename: str, path: Path, content_type: str, context: dict, run_id: str = "current",
+) -> dict:
+    safe_run = "".join(char if char.isalnum() or char in "-_" else "-" for char in run_id)
+    key = "/".join(filter(None, [
+        _settings.artifact_s3_prefix.strip("/"),
+        str(context.get("id") or "unassigned"),
+        safe_run,
+        filename,
+    ]))
+    if _s3_enabled():
+        try:
+            _get_store().put_file(key, path, content_type)
+            return {
+                "storage": "s3", "key": key, "filename": filename,
+                "content_type": content_type, "bytes": path.stat().st_size,
+                "sha256": _file_sha256(path),
+            }
+        except Exception:
+            if path.stat().st_size > _settings.artifact_inline_fallback_bytes:
+                raise
+    return put_artifact(filename, path.read_bytes(), content_type, context, run_id)
+
+
 def put_artifact(filename: str, data: bytes, content_type: str, context: dict, run_id: str = "current") -> dict:
     safe_run = "".join(char if char.isalnum() or char in "-_" else "-" for char in run_id)
     key = "/".join(filter(None, [
@@ -156,6 +223,7 @@ def put_artifact(filename: str, data: bytes, content_type: str, context: dict, r
             return {
                 "storage": "s3", "key": key, "filename": filename,
                 "content_type": content_type, "bytes": len(data),
+                "sha256": hashlib.sha256(data).hexdigest(),
             }
         except Exception:
             if len(data) > _settings.artifact_inline_fallback_bytes:
@@ -164,6 +232,7 @@ def put_artifact(filename: str, data: bytes, content_type: str, context: dict, r
     return {
         "storage": "inline", "key": key, "filename": filename,
         "content_type": content_type, "bytes": len(data),
+        "sha256": hashlib.sha256(data).hexdigest(),
         "data_url": f"data:{content_type};base64,{encoded}#{quote(filename)}",
     }
 

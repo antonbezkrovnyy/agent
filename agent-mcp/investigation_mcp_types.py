@@ -51,6 +51,12 @@ class ResultResponse(ErrorFields):
     memory_operations: NotRequired[list[dict[str, Any]]]
     run_metrics: NotRequired[list[dict[str, Any]]]
     artifacts: NotRequired[list[dict[str, Any]]]
+    verification: NotRequired[dict[str, Any]]
+    tool_calls: NotRequired[list[dict[str, Any]]]
+    analysis_datasets: NotRequired[list[dict[str, Any]]]
+    analysis_results: NotRequired[list[dict[str, Any]]]
+    package_sha256: NotRequired[str]
+    manifest_sha256: NotRequired[str]
     progress: NotRequired[dict[str, Any]]
 
 

@@ -280,6 +280,10 @@ Scout нашёл зацепку, данные неполны, нужна при�
 Загружаются контекст, Evidence, findings, гипотезы, окна и отчёт. Перед использованием
 старого вывода обязателен новый контрольный запрос к LogiCore.
 
+Если structured Intent вернул `complex` на пустом деле без `needs_new_data`, нормализация
+консервативно включает получение данных. Исключения — `related_investigation_id` и специальные
+memory/report маршруты: без этого исправления Reporter не должен строить вывод без Evidence.
+
 ### 6.8. Отчёт и выгрузка событий
 
 «Отчёт», «отчёт расследования» и «аналитический отчёт» идут в Reporting: Reporter
@@ -309,18 +313,46 @@ continuation-control не подменяет задачу пользовател
 | `issues_open` | Лимит доработок исчерпан, конкретные замечания не закрыты |
 | `update_failed` | Reporter не сохранил изменённый Markdown после `rework_report` |
 
-`independent_verification` имеет отдельные статусы `not_performed/partial/passed` и содержит
-метод, источник и время проверки, если они известны. По умолчанию это `not_performed`:
-прохождение критика по архиву не считается независимой проверкой первичной системы.
+`independent_verification` имеет статусы `not_performed/partial/passed`, метод, источник,
+время и журнал проверок. `verification_recheck` повторяет до пяти исходных MCP/analysis-запросов,
+сохраняет свежие Evidence и сравнивает результаты без volatile duration: `matched/changed/error`.
+Для него фиксируются `method=same_source_replay` и `independent=false`: совпадение через тот же
+MCP не называется независимой проверкой. Прохождение критика по архиву тоже ею не является.
 Матрица claims дополнительно различает `confirmed_in_archive`, `probable`, `disputed` и
 `not_confirmed`; она показывает силу ссылки на Evidence, а не истинность в реальном мире.
-Manifest содержит `verification` и `provenance`: источник state, отсутствие подписи,
-tenant/endpoint/schema version, prompt version, семантику времени и временные оси.
+Manifest содержит `verification` и `provenance`: фактические `source_info` (endpoint,
+tenant IDs, fingerprint схемы, fake Earth), prompt version, отсутствие подписи и временные
+поля, реально прочитанные через `field_lookup`, без выдуманной нормализации времени.
 `has_more=true` запрещает категоричное «все/ровно/полный» даже при совпадении count.
 `has_more=null` с `pagination_error` означает неизвестную полноту и тоже блокирует такие
 утверждения; `has_more=false` подтверждает завершение только при отсутствии других ограничений.
 При расхождении внутренних и внешних дат проверяются replay/backfill и source/receive/ingest
 time; расхождения окон требуют half-open и граничных запросов, а не догадки об «артефакте».
+
+### 6.9. Защита от ложной сходимости
+
+Для ключевой Deep-аномалии Investigator фиксирует основную и минимум две альтернативные
+гипотезы с дискриминирующим тестом в `reason`. До `supported` требуется хотя бы один тест;
+невыполненные остаются `open` и попадают в `NOT_CHECKED`. Для «объясни аномалию/всплеск»
+Planner создаёт required baseline с повторяемостью времени, объёма и состава; недоступный
+baseline ограничивает объяснение статусом `partial`.
+
+Анализ подмножества использует кардинальность, концентрацию top-1/top-10, null identity и
+служебные диапазоны через `aggregate_events` или SQL, а не только top-N. Служебный IP,
+`create == remove` и ровный фон — повод для проверки, но не доказательство синтетики.
+Pivot выбирается по дискриминирующей ценности для гипотез, а не по top-N.
+
+Каждый claim имеет `evidence_class`:
+
+| Класс | Основание и формулировка |
+|---|---|
+| `полный` | Полные данные/распределения и дедупликация; категоричная формулировка допустима |
+| `агрегатный` | Корректные count/timeline/top/aggregate; оговорка о гранулярности |
+| `прокси` | `field_fill_rates.top_value` и косвенные признаки; только предположение/гипотеза |
+
+Замена источника более слабым понижает класс в самом claim. Без дедупликации допустимо только
+«не менее N». Critic детерминированно отклоняет `полный` при partial/error или proxy
+`field_fill_rates`, а также проверяет alternatives, baseline, симметрию и failed work items.
 
 `queries.md`, `evidence.jsonl` и `events.csv` остаются фактическими результатами вызовов
 с учётом `partial/error`; они не удостоверяют автоматически каждый вывод в свободном тексте.
@@ -558,6 +590,19 @@ search. Старые дела без embedding появятся в поиске 
 | `result` | Полный нормализованный результат |
 | `error` | Ошибка или null |
 
+### 10.2.1. `ToolCallRecord` и analysis-каналы
+
+Каждый вызов дополнительно сохраняется в `tool_calls` с ID, run/role/work item,
+`arguments_requested`, `arguments_effective`, timestamps, длительностью, `ok/partial/error/cancelled`,
+результатом для LLM, Evidence ID и `reused/reused_from`. Это не второй набор Evidence,
+а полный аудит обращений, включая внутренние, дедуплицированные и отменённые вызовы.
+Вложенные `extract_data` и recheck Evidence дополнительно содержат `parent_call_id`.
+
+`analysis_datasets` хранит JSONL-строки, запрос, страницы и source Evidence;
+`analysis_results` — SQL, полный ответ и связь с датасетом. `verification_checks` хранит
+same-source сравнения и ссылки на исходный/новый Evidence. Все каналы продолжаются вместе
+с делом и очищаются при явной новой теме.
+
 ### 10.3. `FindingRecord`
 
 Содержит `timestamp`, `claim`, `evidence_ids` и `next_action`.
@@ -583,7 +628,7 @@ search. Старые дела без embedding появятся в поиске 
 
 - `status=done/partial/failed`;
 - `summary`;
-- `claims` с Evidence ID;
+- `claims` с Evidence ID и `evidence_class=полный/агрегатный/прокси`;
 - `limitations` и `not_checked`;
 - `recommended_export_query` или null;
 - необязательный `skill_run`.
@@ -647,12 +692,14 @@ continuations. `agent_phase`, `continuation` и `termination_reason` разли�
 | `search_events` | Поиск событий по фильтру и окну |
 | `extract_data` | Полная выгрузка с внутренней пагинацией |
 | `count_events` | Количество и интенсивность событий |
+| `aggregate_events` | Составной GROUP BY до 5 полей; точный COUNT DISTINCT только при `complete=true` |
 | `timeline` | Распределение по времени |
-| `top_values`, `top_values_batch` | Топы одного или нескольких полей |
+| `top_values`, `top_values_batch` | Топы одного или нескольких независимых полей |
 | `get_event` | Карточка события по uuid + timestamp |
 | `field_fill_rates` | Заполненность полей |
 | `duplicates` | Поиск дубликатов |
-| `field_lookup`, `enum_lookup` | Справочники полей и значений |
+| `search_fields`, `field_lookup`, `enum_lookup` | Поиск полей, независимые результаты lookup и значения |
+| `source_info` | Endpoint, tenant IDs, SHA-256 живой схемы и признак fake Earth без секретов |
 | `server_time` | Текущее серверное время |
 
 Windowed tools определяются по JSON Schema через `time_from/time_to`, а не по
@@ -677,6 +724,9 @@ Evidence сохраняет фактический `iql`, а не переген
 |---|---|
 | `get_evidence` | Прочитать полную Evidence без повторного MCP-запроса |
 | `get_evidence_batch` | Прочитать до 50 полных Evidence одним вызовом |
+| `analysis_dataset_create` | Полный JSONL-датасет через `extract_data`, страницы и источник Evidence |
+| `analysis_sql` | Один read-only `SELECT` в отдельном DuckDB; полный результат как Evidence |
+| `verification_recheck` | Same-source повтор до 5 MCP/analysis-запросов с `matched/changed/error` |
 | `log_finding`, `list_findings`, `get_finding` | Вести журнал находок |
 | `update_window` | Изменить окно текущего дела |
 | `list_hypotheses`, `get_hypothesis` | Прочитать компактный журнал или полную историю гипотезы |
@@ -686,6 +736,34 @@ Evidence сохраняет фактический `iql`, а не переген
 | `search_similar_cases` | Найти компактные карточки похожих дел |
 | `save_report` | Сохранить Markdown-отчёт |
 | `send_report` | Доставить отчёт на callback |
+
+### 11.3. SQL-анализ выгрузок
+
+`analysis_dataset_create` вызывает универсальный `extract_data` постранично и сохраняет
+канонический JSONL, фактические окно/IQL/колонки, страницы, `row_count`, `complete` и
+source Evidence. Проекция проверяется через частичный `field_lookup`: несуществующие поля
+не запрашиваются, а попадают в `unavailable_columns` и делают датасет partial. Отсутствующие
+значения передаются в DuckDB как `NULL`, поэтому SQL не падает при полностью пустом поле
+или пустом датасете. Если `columns` не задан, используется расширенная проекция с `src_ip`,
+`dst_ip` и `original_time`, а не только короткая серверная. Идентичные dataset и SQL с полным
+результатом переиспользуются внутри run с `reused=true`, чтобы SQL-ошибка не запускала цикл
+одинаковых выгрузок. По умолчанию технический потолок — 20000 строк; при его достижении
+датасет явно неполный.
+
+`analysis_sql` отправляет строки в отдельный `analysis-service` (DuckDB). Разрешён один
+`SELECT`; statements, комментарии, записи, `ATTACH/COPY/INSTALL/LOAD` и внешние table
+functions запрещены. Сервис не получает доступ к репозиторию, `.env` или Docker socket,
+работает read-only с tmpfs, ограничениями 30 с, 256 МБ и 10000 строк результата.
+Ошибки возвращают `missing_column`, `invalid_literal`, `memory_limit` или `query_failed`
+с доступными полями и recovery hint: исправить SQL/проекцию, а не повторять выгрузку.
+На run разрешено до 6 `analysis_sql` с исправлением запроса; седьмой вызов получает
+`sql_attempt_limit` без нового Evidence.
+Произвольный Python и shell в Aegra не исполняются.
+
+После двух неуспешных агрегатов, при составном `COUNT DISTINCT` за пределами потолка
+или ad-hoc вычислениях Investigator использует JSONL + SQL вместо однотипных retries.
+Полный SQL-результат нормализуется как `EvidenceRecord`; модель получает только preview.
+Неполный датасет или усечённый результат даёт `Evidence.status=partial`.
 
 ## 12. Отчёты и выгрузка
 
@@ -703,12 +781,22 @@ LLM не создаёт эту хронологию и не может доба�
 
 ```text
 investigation.zip
-├── report.md       # отчёт и детерминированная цепочка
-├── queries.md      # фактические IQL/JSON-запросы и номера Evidence
-├── evidence.jsonl  # полная запись каждого вызова и результата
-├── events.csv      # события со ссылками на Evidence
-└── manifest.json   # case ID, индекс Evidence, неполные данные и SHA-256 файлов
+├── report.md                 # отчёт, цепочка и компактный аудит всех вызовов
+├── queries.md                # фактические IQL/JSON-запросы и номера Evidence
+├── evidence.jsonl            # уникальные Evidence с полным inline result
+├── tool_calls.jsonl          # каждый MCP/внутренний/reused/error вызов и результат для LLM
+├── events.csv                # события из result.events со ссылками на Evidence
+├── datasets/*.jsonl          # созданные analysis-датасеты, если они были
+├── analysis_results/*.json   # полные SQL-запросы и результаты, если они были
+└── manifest.json             # индексы, self-contained validation, provenance и SHA-256
 ```
+
+`evidence://case/id` — стабильный внутренний идентификатор, а не внешняя зависимость
+ZIP: полный `result` обязан находиться inline. `tool_calls.jsonl` отделяет аудит каждого
+вызова от дедупликации Evidence и включает requested/effective arguments, роль, item,
+run, статус, результат и `reused`. Пакетный валидатор фиксирует отсутствующие результаты,
+неизвестные Evidence ID и нарушенные связи. SHA-256 ZIP и manifest дополнительно хранятся
+в state вне архива и возвращаются через `investigation_result`.
 
 IQL приходит непосредственно из MCP и совпадает с выполненным запросом. Для вызовов
 без IQL показываются фактические JSON-аргументы. В «Ход работы» запрос связан с
@@ -728,9 +816,11 @@ Export:
 ### 12.1. ArtifactStore
 
 `agent/artifact_store.py` сохраняет файлы в SeaweedFS по S3 API. Ключ имеет вид
-`investigations/<case-id>/<run-id>/<filename>`. В `state.artifacts` находятся только
-storage, key, filename, content type и размер; base64 остаётся лишь в inline fallback
-локального режима или при сбое S3 для файлов до 256 КиБ.
+`investigations/<case-id>/<run-id>/<filename>`. ZIP собирается во временный файл и
+загружается чанками; `put_artifact_file` не требует data URL. В `state.artifacts` находятся
+только storage, key, filename, content type, размер и SHA-256; base64 остаётся лишь в inline fallback
+локального режима или при сбое S3 для файлов до 256 КиБ. Для ZIP отдельно сохраняются
+`package_sha256` и `manifest_sha256`; цифровой подписи артефактов пока нет.
 
 UI и callback получают подписанные HTTPS-ссылки. TTL по умолчанию 3600 секунд. При
 повторном открытии отчёта или вызове `investigation_result` подпись создаётся заново,
@@ -745,7 +835,7 @@ object keys и метаданные файлов.
 |---|---|
 | `investigation_start` | Немедленный `investigation_id` и `run_id`; window/mode/scope/alert |
 | `investigation_status` | Run status, этап, Scope, готово X/Y и ошибки |
-| `investigation_result` | Отчёт, claims, метрики, память и свежие S3-ссылки |
+| `investigation_result` | Отчёт, claims, метрики, tool audit, датасеты, SQL, verification, S3 и SHA-256 |
 | `investigation_continue` | Следующий этап в том же треде после success/cancel/error |
 | `investigation_restart` | Повтор последнего запроса после отмены или ошибки |
 | `investigation_evidence` | Все Evidence или одна полная запись |
@@ -876,11 +966,15 @@ Structured output строится через function calling с fallback на 
 | Investigator tool calls | 30 на запуск роли | Tool-цикл завершается |
 | Reporter tool calls | 60 на запуск роли | Tool-цикл завершается |
 | `MAX_REWORK` | 1 на внешний run | Дальше возвращается текущий результат |
-| Agent soft timeout | 480 с на запуск роли | Investigative tools отключаются, начинается finalization |
-| Finalize attempts | 10 внутри общего дедлайна | Первая и до девяти исправляющих попыток |
-| Finalize attempt timeout | 30 с на model call | Переход к следующей попытке или fallback |
-| Agent hard timeout | 600 с на запуск роли | `partial/failed` поверх сохранённого state |
+| Agent soft timeout | 600 с на запуск роли | Investigative tools отключаются, начинается finalization |
+| Finalize attempts | до 10 внутри общего дедлайна | Первая и до девяти исправляющих попыток |
+| Finalize attempt timeout | 300 с на model call | Переход к следующей попытке или fallback |
+| Agent hard timeout | 900 с на запуск роли | `partial/failed` поверх сохранённого state |
 | Export timeout | 120 с | Evidence error и ответ об ошибке |
+| Analysis dataset | 20000 строк | Датасет и связанный SQL получают `complete=false` при усечении |
+| Analysis result | 10000 строк | `truncated=true`, Evidence `partial` |
+| `analysis_sql` attempts | 6 на run | Седьмой вызов — `sql_attempt_limit`, без нового Evidence |
+| DuckDB query | 30 с / 256 МБ | Явная ошибка analysis service, без shell/Python |
 | Summarization | 230000 tokens / 20 messages | История сокращается middleware |
 | Critic context | 2000 message / 8000 dialog chars | Вход ограничивается |
 | Report injection | 8000 chars | Длинный отчёт помечается обрезанным |
@@ -933,7 +1027,7 @@ Structured response получает до 10 попыток внутри общ�
 
 `AGENT_TIMEOUT_SECONDS` не ограничивает весь чат. Прямые вызовы Intent, chat и
 критиков отдельным agent timeout не покрыты, поэтому полный run может быть длиннее
-600 секунд. Пользовательского бюджета времени нет.
+900 секунд. Пользовательского бюджета времени нет.
 
 ### 14.4. Деградация
 
@@ -1017,6 +1111,10 @@ slash-команд нет; ручные pause/resume и tool-step режим в�
 | `agent/memory_store.py` | Предметная схема и pgvector-поиск |
 | `agent/artifact_store.py` | S3, object keys и подписанные URL |
 | `agent/artifacts.py` | Единый сервис Markdown/ZIP и памяти отчёта |
+| `agent/analysis.py` | JSONL-датасеты, SQL и Evidence |
+| `analysis-service/` | Изолированный read-only DuckDB |
+| `agent/verification_tools.py` | Same-source повторные запросы |
+| `agent/provenance.py` | Источник, временные поля и сводка проверок |
 | `agent/metrics.py` | Длительность, токены, tool calls и повторы |
 | `agent/state.py` | Общие Evidence/Case/Memory Channels и supervisor |
 | `agent/observability.py` | OpenInference role/scope/item metadata и prompt version |
@@ -1041,10 +1139,10 @@ uv run --with "langchain==1.3.10" --with "langgraph==1.2.16" \
   --with "langchain-openai" --with "pydantic-settings" \
   --with "httpx" --with "tenacity" --with "pytest" --with "loguru" \
   --with "psycopg" --with "mcp[cli]>=2,<3" \
-  --with "fastapi" --with "uvicorn" pytest -q tests
+  --with "fastapi" --with "uvicorn" --with "duckdb>=1,<2" pytest -q tests
 ```
 
 Тесты используют fake LLM/MCP и настоящий граф. Покрыты quick/deep, окна, Evidence,
-гипотезы, критики, continuation, Context Memory, похожие дела, export, лимиты,
-деградации и structured response. Живые сценарии дополнительно проверяются через
+гипотезы, критики, continuation, Context Memory, похожие дела, export, tool audit,
+составные агрегаты, JSONL/DuckDB, same-source provenance, лимиты, деградации и structured response. Живые сценарии дополнительно проверяются через
 реальный API на новых тредах.

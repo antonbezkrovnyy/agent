@@ -37,6 +37,7 @@ def test_windowed_tools_accept_iql_instead_of_jsonlogic_filter():
         "search_events",
         "extract_data",
         "count_events",
+        "aggregate_events",
         "timeline",
         "top_values",
         "top_values_batch",

@@ -62,6 +62,13 @@ def _normalize_intent(decision: dict, state: State) -> dict:
     """Разрешить противоречивые флаги structured output без keyword-классификации."""
     decision = dict(decision)
     if (
+        not state.get("context")
+        and decision.get("label") == "complex"
+        and not decision.get("related_investigation_id")
+        and not any(decision.get(key) for key in ("edit_existing_report", "remember_fact", "inspect_memory"))
+    ):
+        decision["needs_new_data"] = True
+    if (
         state.get("context")
         and decision.get("label") in ("complex", "continuation")
         and decision.get("window_requested")
@@ -208,6 +215,7 @@ def node_intent(state: State) -> dict:
             "active_work_item": Overwrite({}),
             "run_metrics": Overwrite([]),
             "independent_verification": {"status": "not_performed"},
+            "verification_checks": Overwrite([]),
         })
     if decision.get("needs_new_data") or transition == "new" or mode == "quick":
         skill = get_skill(decision.get("skill_id")) if mode == "deep" else None
@@ -250,6 +258,9 @@ def node_archive(state: State) -> dict:
         update.update({
             "context": _new_context(state["intent"]),
             "evidence": Overwrite([]),
+            "tool_calls": Overwrite([]),
+            "analysis_datasets": Overwrite([]),
+            "analysis_results": Overwrite([]),
             "findings": Overwrite([]),
             "hypotheses": Overwrite([]),
             "skill_runs": Overwrite([]),
@@ -265,6 +276,7 @@ def node_archive(state: State) -> dict:
             "active_work_item": Overwrite({}),
             "run_metrics": Overwrite([]),
             "independent_verification": {"status": "not_performed"},
+            "verification_checks": Overwrite([]),
             "time_axes": {},
             "time_semantics": "",
             "replan_requested": False,

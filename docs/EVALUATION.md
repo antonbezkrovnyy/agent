@@ -94,10 +94,12 @@ checkpoint и не Context Memory: оценка не становится фак
 Phoenix SDK. Она содержит verdict, score, summary и run ID; ошибка annotation не меняет
 исходный отчёт и не отменяет сохранение оценки.
 
-`agent-evaluator/scenarios.json` содержит 24 сценария: 18 live и 6 фиксированных.
+`agent-evaluator/scenarios.json` содержит 26 сценариев: 20 live и 6 фиксированных.
 `agent-evaluator/experiments.py` валидирует их без сети, создаёт Phoenix Dataset и
 запускает Experiment только по явному `--execute`. Evaluators проверяют completion,
-Scope, Evidence, required tools и повторные запросы. Команды — [OBSERVABILITY.md](OBSERVABILITY.md).
+Scope, Evidence, required tools, повторные запросы и `artifact_compliance`: лимит
+`analysis_dataset_create`, отсоединённые SHA-256, `evidence_class` и отсутствие ложного
+«ZIP не формируется». Команды — [OBSERVABILITY.md](OBSERVABILITY.md).
 
 ## Настройки
 

@@ -38,8 +38,13 @@ Mars API, Aegra предоставляет API и checkpoints, Phoenix соби�
 - Skills `incident_dating`, `event_drilldown` и `entity_pivot` v1 автоматически
   выбираются по задаче. Есть адаптивные окна, разбор `uuid + timestamp`, typed
   anchors, дедупликация `type:value`, ограничения глубины/ширины и `NOT_CHECKED`.
-- Поиск, подсчёт и агрегаты через 12 read-only MCP-инструментов. Фильтры принимаются
+- Поиск, подсчёт и агрегаты через 15 read-only MCP-инструментов, включая составной
+  `aggregate_events`, `search_fields` и фактический `source_info`. Фильтры принимаются
   как готовый `iql` и передаются в MARS напрямую, без JsonLogic-трансляции.
+- Полные JSONL-датасеты через `analysis_dataset_create` и произвольный read-only `SELECT`
+  в изолированном DuckDB `analysis-service`. Это штатный fallback после неуспешных агрегатов
+  и для составного `COUNT DISTINCT`; идентичные полные dataset/SQL переиспользуются,
+  а цикл одинаковых выгрузок блокируется детерминированно. Python/shell в Aegra не исполняется.
 - Отдельные Quick, Deep Investigation и Reporting-субграфы с delta-границей,
   которая не дублирует additive state в supervisor.
 - Приватные tool-циклы scout, investigator и reporter через `create_agent` и
@@ -61,7 +66,7 @@ Mars API, Aegra предоставляет API и checkpoints, Phoenix соби�
 - Модели по ролям через env; `model` и фактическая `duration_ms` в `skill_runs`.
 - Метрики `run_metrics` по ролям и items: длительность, токены, tool calls по типам,
   повторные запросы и continuations. Они попадают в Case Store, manifest и MCP.
-- Phoenix annotations, 24 golden-сценария и штатные Datasets/Experiments для сравнения
+- Phoenix annotations, 26 golden-сценариев и штатные Datasets/Experiments для сравнения
   моделей и версий промптов; локальная validation не запускает живые runs.
 - `Evidence` с фактическими аргументами, окном, статусом и результатом вызова.
   Явные `time_from/time_to` запроса не перезаписываются контекстом. Идентичные успешные
@@ -76,7 +81,10 @@ Mars API, Aegra предоставляет API и checkpoints, Phoenix соби�
   ошибка проверки — `null` с `pagination_error`. Категоричная полнота допустима только
   при `has_more=false`; `null` запрещает её как неизвестную, а не подтверждает продолжение.
 - Детерминированные проверки отчёта: Evidence ID из Markdown, явные суммы, сумма бакетов
-  timeline, null/остаток в распределениях и локальные оговорки у claims по partial-выборкам.
+  timeline, null/остаток, несоответствие `evidence_class=полный` partial/proxy Evidence и
+  ложные утверждения об отсутствии уже созданного ZIP.
+  Для ключевых Deep-аномалий требуются альтернативные гипотезы, дискриминирующий тест,
+  профиль распределения вместо top-N и required baseline; pivot идёт по ценности для гипотез.
 - Детерминированная цепочка «задача → вызовы → окна → режимы → находки →
   ограничения → NOT_CHECKED» автоматически добавляется в файлы отчётов. Save-only запуск
   сохраняет Scope, план, work items и завершённые метрики расследования.
@@ -84,15 +92,18 @@ Mars API, Aegra предоставляет API и checkpoints, Phoenix соби�
   результате выводится и в чат: `consistent_with_evidence`, `unverified`, `issues_open`, `update_failed`.
   Открытые issues перечислены явно; Evidence отделены от непроверенных текстовых выводов.
   Rework без нового `save_report` или без изменений в Markdown считается `update_failed`,
-  а не успешной доработкой. Независимая проверка первичных данных обозначается отдельно:
-  `not_performed/partial/passed`. Матрица по каждому claim различает «подтверждено в архиве»,
-  «вероятно», «спорно» и «не подтверждено». Manifest фиксирует provenance, отсутствие подписи,
-  семантику времени и статус независимой проверки.
-- Проверяемый ZIP-пакет расследования: `report.md`, фактические IQL/JSON-запросы,
-  `evidence.jsonl`, `events.csv` и `manifest.json` с индексом Evidence, журналом
-  памяти и SHA-256. В отчёте видно, какие факты LLM предложила, сохранила или отклонила.
+  а не успешной доработкой. `verification_recheck` повторяет критичные запросы и сохраняет
+  `matched/changed/error`, но явно остаётся same-source проверкой, а не независимым
+  доказательством. Матрица по каждому claim различает «подтверждено в архиве», «вероятно»,
+  «спорно» и «не подтверждено». Manifest фиксирует фактический источник, схему и временные поля.
+- Проверяемый самодостаточный ZIP: `report.md`, `queries.md`, полные `evidence.jsonl`,
+  аудит каждого вызова `tool_calls.jsonl`, `events.csv`, JSONL-датасеты, SQL-результаты и
+  `manifest.json` с валидацией ссылок и SHA-256. Хэши ZIP и manifest хранятся также вне
+  архива в state и возвращаются через MCP. В отчёте есть компактный аудит всех вызовов.
 - SeaweedFS/S3-хранение файлов по ключам `investigations/<case>/<run>/<file>`;
-  в state остаются метаданные, в чат и callback выдаются подписанные URL с TTL.
+  ZIP собирается во временный файл и загружается потоком, без base64 в постоянном state.
+  Отменённые вызовы попадают в аудит как `cancelled`, схема полей валидируется через
+  `field_lookup`, SQL-ошибки возвращают machine-readable recovery.
 - Асинхронный MCP-интерфейс самого агента: старт, статус, результат, отмена и
   получение Evidence без ожидания долгого run и без base64 в structured JSON.
 - Структурированные ответы агентов и критиков с текстовым fallback. Пользовательские
@@ -128,7 +139,8 @@ Multiuser/OIDC намеренно не реализуется. Текущий an
 | `agent-chat-ui` | 3000 | Веб-чат на Next.js |
 | `agui-agent` | 2027 | AG-UI адаптер и control API поверх Aegra runs, без второго графа |
 | `copilotkit-demo` | 3001 | CopilotKit-рабочий стол аналитика поверх общих Aegra threads |
-| `logicore-mcp` | 9000, только Docker-сеть | 12 read-only MCP-инструментов |
+| `logicore-mcp` | 9000, только Docker-сеть | 15 read-only MCP-инструментов |
+| `analysis-service` | 9200, только Docker-сеть | Изолированный DuckDB `SELECT` над JSONL-датасетами |
 | `agent-mcp` | 9100 | Асинхронный MCP-интерфейс расследований |
 | `agent-evaluator` | 9200, только Docker-сеть | Фоновая оценка завершённых runs |
 | `seaweedfs` | 8333 | S3-файлы отчётов и пакетов Evidence |
@@ -239,7 +251,8 @@ Endpoint: `http://localhost:9100/mcp`, заголовок `Authorization: Bearer
 
 - `investigation_start(task, window?, mode?, scope_mode?, alert?)` → `investigation_id`;
 - `investigation_status(investigation_id)` → этап, Scope, готово X/Y и ошибки;
-- `investigation_result(investigation_id)` → отчёт, claims, метрики, память и свежие S3-ссылки;
+- `investigation_result(investigation_id)` → отчёт, claims, метрики, полный tool audit,
+  датасеты, SQL-результаты, verification, свежие S3-ссылки и отсоединённые SHA-256;
 - `investigation_continue(investigation_id, message, ...)` → следующий этап в том же треде;
 - `investigation_restart(investigation_id)` → повтор последнего запроса после отмены/ошибки;
 - `investigation_evidence(investigation_id, evidence_id?)` → полные Evidence;
@@ -358,10 +371,10 @@ Quick и deep используют общие Evidence и handoff, но имею
 | Tool calls скаута за один запуск роли | 10 |
 | Tool calls инвестигейтора за один запуск роли | 30 |
 | Tool calls репортёра за один запуск роли | 60 |
-| Soft timeout перед finalization | 480 с |
-| Попытки structured finalization | 10 |
-| Таймаут одной finalize-попытки | 30 с |
-| Общий hard timeout одной роли | 600 с |
+| Soft timeout перед finalization | 600 с |
+| Попытки structured finalization | до 10 внутри общего дедлайна |
+| Таймаут одной finalize-попытки | 300 с |
+| Общий hard timeout одной роли | 900 с |
 | Таймаут узла `export` | 120 с |
 | Возвраты на доработку за внешний run | 1 |
 | Work items / параллельные ветки | 5 / 2 |
@@ -372,6 +385,9 @@ Quick и deep используют общие Evidence и handoff, но имею
 | Строк на страницу `extract_data` | 100 |
 | Строк в `extract_data` по умолчанию | 1000 (`LOGIQ_EXTRACT_MAX_ROWS`) |
 | Допустимый `max_rows` одного вызова | 1–5000 |
+| Строк analysis-датасета / SQL-результата | до 20000 / 10000 |
+| Попытки `analysis_sql` на run | до 6 с исправлением SQL |
+| SQL query timeout / память DuckDB | 30 с / 256 МБ |
 | MCP rate limit | 300 вызовов за скользящие 600 с |
 
 `run_limit` сбрасывается при каждом новом запуске соответствующего агента:
@@ -446,7 +462,10 @@ Structured response получает до 10 попыток внутри общ�
 │   ├── memory_models.py   # схемы дел, фактов и операций
 │   ├── memory_store.py    # предметные таблицы и pgvector-поиск
 │   ├── artifact_store.py  # S3-ключи и подписанные ссылки
-│   ├── artifacts.py       # единый сервис Markdown/ZIP
+│   ├── artifacts.py       # единый сервис Markdown/ZIP и отсоединённые хэши
+│   ├── analysis.py        # JSONL-датасеты, SQL-запросы и Evidence
+│   ├── verification_tools.py # same-source recheck критичных Evidence
+│   ├── provenance.py      # фактический источник, время и сводка проверок
 │   ├── metrics.py         # длительность, токены и tool calls
 │   ├── contracts.py       # Evidence, Scope, WorkItem, Finding, CriticIssue, Hypothesis
 │   ├── export.py          # детерминированная таблица и файл
@@ -462,6 +481,7 @@ Structured response получает до 10 попыток внутри общ�
 │   ├── skills/            # registry, контракты и playbooks
 │   └── prompts/           # системные промпты
 ├── logicore-mcp/          # MCP-сервер, пагинация Mars API и handoff README
+├── analysis-service/      # Изолированный DuckDB read-only SQL
 ├── agent-mcp/             # Асинхронный MCP-интерфейс расследований
 ├── agui-agent/            # AG-UI и control API поверх Aegra
 ├── copilotkit-demo/       # Рабочий стол аналитика и CopilotKit-чат

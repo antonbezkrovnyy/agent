@@ -129,6 +129,13 @@ class Claim(BaseModel):
 
     text: str
     evidence_ids: list[str] = Field(default_factory=list)
+    evidence_class: Literal["полный", "агрегатный", "прокси"] | None = Field(
+        default=None,
+        description=(
+            "Сила опоры: полный — полные распределения/данные и дедупликация; "
+            "агрегатный — корректные count/timeline/top/aggregate; прокси — косвенные признаки"
+        ),
+    )
 
 
 class Escalation(BaseModel):

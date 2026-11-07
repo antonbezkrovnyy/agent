@@ -34,6 +34,8 @@ def _independent_verification(state: dict) -> dict:
         "method": value.get("method") or "",
         "source": value.get("source") or "",
         "checked_at": value.get("checked_at") or "",
+        "independent": bool(value.get("independent")),
+        "checks": list(value.get("checks") or []),
     }
 
 
@@ -60,6 +62,7 @@ def _claim_statuses(claims: list[dict], evidence: list[dict], issues: list[dict]
             "status": status,
             "label": _CLAIM_LABELS[status],
             "evidence_ids": ids,
+            "evidence_class": claim.get("evidence_class"),
         })
     return rows
 
@@ -79,16 +82,25 @@ def verification_block(
         "- **Фактические данные:** `queries.md`, `evidence.jsonl` и `events.csv` содержат результаты вызовов инструментов, их аргументы и окна. Это не самостоятельное подтверждение первичной системы; ограничения `partial/error` остаются в силе. `has_more=true` подтверждает продолжение, `has_more=null` с `pagination_error` — неизвестную полноту.",
     ]
     independence = independent["status"]
+    same_source = independent.get("method") == "same_source_replay" and not independent.get("independent")
     if independence == "not_performed":
         lines.append("- **Независимая проверка первичных данных:** не выполнялась.")
     else:
-        lines.append(f"- **Независимая проверка первичных данных:** {independence}.")
+        heading = "Повторная проверка того же источника" if same_source else "Независимая проверка первичных данных"
+        lines.append(f"- **{heading}:** {independence}.")
         if independent.get("method"):
             lines.append(f"  - Метод: {independent['method']}")
         if independent.get("source"):
             lines.append(f"  - Источник: {independent['source']}")
         if independent.get("checked_at"):
             lines.append(f"  - Время проверки: {independent['checked_at']}")
+        if same_source:
+            lines.append("  - Это перепроверка через тот же MCP и источник, а не независимое подтверждение.")
+        for check in independent.get("checks") or []:
+            lines.append(
+                f"  - `{check.get('source_evidence_id')}` → `{check.get('recheck_evidence_id') or '—'}`: "
+                f"{check.get('status')}."
+            )
     if detail:
         lines.append(f"- **Что не получилось:** {detail}")
     if status != "consistent_with_evidence":
@@ -104,20 +116,31 @@ def verification_block(
     if claim_statuses:
         lines.extend([
             "",
-            "| Утверждение | Статус |\n|---|---|",
+            "| Утверждение | Статус | Класс evidence |\n|---|---|---|",
         ])
         for row in claim_statuses:
             text = row["claim"].replace("|", "\\|").replace("\n", " ")
-            lines.append(f"| {text} | {row['label']} |")
+            lines.append(f"| {text} | {row['label']} | {row.get('evidence_class') or 'не указан'} |")
     return "\n".join(lines)
 
 
 def finalize_verification(state: dict, update: dict, status: str, detail: str = "") -> dict:
+    package_state = dict(state)
+    for key in ("evidence", "tool_calls", "analysis_datasets", "analysis_results", "verification_checks"):
+        if key not in update:
+            continue
+        merged = {item.get("id"): item for item in state.get(key) or [] if item.get("id")}
+        for item in update.get(key) or []:
+            if item.get("id"):
+                merged[item["id"]] = item
+        package_state[key] = list(merged.values())
+    if "independent_verification" in update:
+        package_state["independent_verification"] = update["independent_verification"]
     current = update.get("report_result") or state.get("report_result") or {}
     critic = update.get("critic") or state.get("critic") or {}
     issues = list(critic.get("issues") or [])
-    independent = _independent_verification(state)
-    claim_statuses = _claim_statuses(current.get("claims") or [], state.get("evidence") or [], issues)
+    independent = _independent_verification(package_state)
+    claim_statuses = _claim_statuses(current.get("claims") or [], package_state.get("evidence") or [], issues)
     verification = {
         "status": status,
         "detail": detail,
@@ -137,7 +160,7 @@ def finalize_verification(state: dict, update: dict, status: str, detail: str = 
         last_report, artifacts = create_report_artifacts(
             previous.get("title") or "Отчёт расследования",
             previous.get("markdown") or "",
-            state,
+            package_state,
             previous=previous,
             verification_block=block,
             verification=verification,

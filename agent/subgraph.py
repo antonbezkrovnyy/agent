@@ -6,7 +6,10 @@ from langgraph.graph.message import add_messages
 from state import merge_hypotheses, merge_progress, merge_tool_usage, merge_work_items
 
 
-_APPEND_KEYS = ("artifacts", "evidence", "findings", "skill_runs", "memory_operations", "run_metrics")
+_APPEND_KEYS = (
+    "artifacts", "evidence", "tool_calls", "analysis_datasets", "analysis_results",
+    "findings", "skill_runs", "memory_operations", "run_metrics", "verification_checks",
+)
 _MESSAGE_KEYS = ("messages", "scout_msgs", "inv_msgs", "rep_msgs")
 
 

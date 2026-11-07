@@ -92,6 +92,7 @@ def test_package_contains_queries_evidence_events_and_manifest():
         "report.md",
         "queries.md",
         "evidence.jsonl",
+        "tool_calls.jsonl",
         "events.csv",
         "manifest.json",
     }
@@ -114,7 +115,9 @@ def test_package_contains_queries_evidence_events_and_manifest():
     assert manifest["evidence_count"] == 2
     assert manifest["events_count"] == 2
     assert manifest["evidence_index"] == {"ev-search": 1, "ev-count": 2}
-    assert len(manifest["files"]) == 4
+    assert manifest["tool_call_count"] == 0
+    assert manifest["package_validation"]["self_contained"] is True
+    assert len(manifest["files"]) == 5
     assert all(item["sha256"] for item in manifest["files"])
     assert manifest["provenance"]["source"] == "aegra_checkpoint"
     assert manifest["provenance"]["signed"] is False
@@ -144,6 +147,9 @@ def test_save_report_attaches_markdown_and_package():
     assert result.update["artifacts"][1]["content_type"] == "application/zip"
     assert result.update["artifacts"][0]["key"].startswith("investigations/case-package/")
     assert result.update["last_report"]["package_filename"].endswith(".zip")
+    assert len(result.update["last_report"]["package_sha256"]) == 64
+    assert len(result.update["last_report"]["manifest_sha256"]) == 64
+    assert result.update["artifacts"][1]["sha256"] == result.update["last_report"]["package_sha256"]
     payload = json.loads(result.update["messages"][0].content)
     assert payload["package_bytes"] > 0
 

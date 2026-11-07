@@ -85,6 +85,12 @@ async def _live_task(payload: dict) -> dict:
         state_response = await client.get(f"{base_url}/threads/{thread_id}/state")
         values = state_response.json().get("values") or {} if state_response.status_code == 200 else {}
     evidence = values.get("evidence") or []
+    claims = (values.get("report_result") or {}).get("claims") or []
+    report = values.get("last_report") or {}
+    report_text = "\n".join([
+        str((values.get("report_result") or {}).get("answer") or ""),
+        str(report.get("markdown") or ""),
+    ])
     return {
         "kind": "run",
         "status": status,
@@ -93,9 +99,16 @@ async def _live_task(payload: dict) -> dict:
         "scope_mode": (values.get("investigation_scope") or {}).get("mode") or "",
         "plan_items": len((values.get("investigation_plan") or {}).get("items") or []),
         "evidence_ids": [item.get("id") for item in evidence],
-        "claims": (values.get("report_result") or {}).get("claims") or [],
+        "claims": claims,
         "tools": list(dict.fromkeys(item.get("tool") for item in evidence if item.get("tool"))),
         "repeated_tool_calls": sum(item.get("repeated_tool_calls") or 0 for item in values.get("run_metrics") or []),
+        "analysis_dataset_create_calls": sum(
+            1 for item in values.get("tool_calls") or [] if item.get("tool") == "analysis_dataset_create"
+        ),
+        "package_sha256": report.get("package_sha256") or "",
+        "manifest_sha256": report.get("manifest_sha256") or "",
+        "false_zip_denial": bool(report.get("package_filename")) and "ZIP-архив не формируется" in report_text,
+        "claims_missing_evidence_class": sum(1 for item in claims if not item.get("evidence_class")),
     }
 
 
@@ -145,6 +158,21 @@ def efficiency(output: dict, expected: dict) -> float:
     return float(maximum is None or output.get("repeated_tool_calls", 0) <= maximum)
 
 
+def artifact_compliance(output: dict, expected: dict) -> float:
+    if output.get("kind") == "state":
+        return 1.0
+    maximum = expected.get("max_analysis_dataset_create")
+    checks = [
+        maximum is None or output.get("analysis_dataset_create_calls", 0) <= maximum,
+        not expected.get("require_detached_hashes") or bool(
+            output.get("package_sha256") and output.get("manifest_sha256")
+        ),
+        not expected.get("forbid_false_zip_denial") or not output.get("false_zip_denial"),
+        not expected.get("require_evidence_classes") or output.get("claims_missing_evidence_class", 0) == 0,
+    ]
+    return float(all(checks))
+
+
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--execute", action="store_true", help="Выполнить живые runs; без флага только validation")
@@ -180,6 +208,7 @@ def main() -> None:
             "scope_compliance": scope_compliance,
             "evidence_compliance": evidence_compliance,
             "efficiency": efficiency,
+            "artifact_compliance": artifact_compliance,
         },
         experiment_name=f"logicore-{args.variant}",
         experiment_metadata={"variant": args.variant, "prompt_version": os.environ.get("AGENT_PROMPT_VERSION", "")},
