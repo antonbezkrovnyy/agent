@@ -580,6 +580,20 @@ search. Старые дела без embedding появятся в поиске 
 возвращает последние активные записи. Ничего не сохраняется и не изменяется. Тот же
 снимок доступен Scout, Investigator и Reporter через read-only `inspect_memory`.
 
+### 9.7. SilverBullet и редактирование памяти
+
+SilverBullet используется как пространство знаний, карточек отчётов и редактора памяти,
+без встраивания чата. `knowledge-service` индексирует published Markdown-страницы в
+`wiki_pages/wiki_sections` и pgvector, предоставляя агентам `wiki_search/wiki_read`.
+Содержимое страниц — методический контекст, а не Evidence и не исполняемые skills.
+
+`agent-memory-db` остаётся единственным источником истины для фактов. Редактор в
+SilverBullet вызывает Memory API, а не изменяет независимую Markdown-копию. Исправление
+требует `base_revision`, создаёт новую revision и superseded-историю. Pin/exclusion
+управляет retrieval без пересчёта embeddings; изменение текста вычисляет новый embedding
+или помечает факт `index_status=pending` с текстовым fallback. Артефакты остаются в S3,
+в SilverBullet публикуются только карточки и ссылки. Подробности — [KNOWLEDGE.md](KNOWLEDGE.md).
+
 ## 10. Модели данных
 
 ### 10.1. `IntentDecision`
@@ -682,8 +696,10 @@ same-source сравнения и ссылки на исходный/новый 
 ### 10.10. `ContextFact`
 
 `statement`, `entities`, `category`, `status`, `source_kind`, `source_case_ids`,
-`evidence_ids`, `valid_from`, `valid_to`, `superseded_by`, `scope`, `created_at` и
-`updated_at`. Embedding хранится рядом в таблице, а не внутри Pydantic-объекта.
+`evidence_ids`, `valid_from`, `valid_to`, `superseded_by`, `scope`, `revision`,
+`pinned`, `excluded`, `index_status`, `created_at` и `updated_at`.
+`base_revision` передаётся только при редактировании и не хранится как отдельное поле факта.
+Embedding хранится рядом в таблице, а не внутри Pydantic-объекта.
 
 ### 10.11. `SkillRunResult`
 
@@ -763,6 +779,8 @@ Evidence сохраняет фактический `iql`, а не переген
 | `inspect_memory` | Показать текущее дело, активные факты и последние случаи без записи |
 | `search_context_memory` | Найти факты по новой сущности или симптому |
 | `search_similar_cases` | Найти компактные карточки похожих дел |
+| `wiki_search` | Найти до 10 карточек SilverBullet-страниц с ID/revision/разделом |
+| `wiki_read` | Прочитать страницу SilverBullet или раздел до 12000 символов |
 | `save_report` | Сохранить Markdown-отчёт |
 | `send_report` | Доставить отчёт на callback |
 
@@ -1156,6 +1174,8 @@ slash-команд нет; ручные pause/resume и tool-step режим в�
 | `agent/verification_tools.py` | Same-source повторные запросы |
 | `agent/provenance.py` | Источник, временные поля и сводка проверок |
 | `agent/metrics.py` | Длительность, токены, tool calls и повторы |
+| `agent/knowledge.py` | Wiki search/read и публикация карточек отчётов |
+| `knowledge-service/` | SilverBullet-индекс, Wiki/Memory API и редактор |
 | `agent/deadline.py` | Оставшееся время и общий технический дедлайн run |
 | `agent/state.py` | Общие Evidence/Case/Memory Channels и supervisor |
 | `agent/observability.py` | OpenInference role/scope/item metadata и prompt version |

@@ -48,6 +48,9 @@
   существующий `create_agent`, без отдельного графа skills.
 - `agent/execution_audit.py` — фактические model inputs вне checkpoints;
   `control_overrides.py` и `step_mode.py` — opt-in ручное управление без смены автопилота.
+- `agent/knowledge.py` — read-only Wiki API и best-effort публикация карточек отчётов.
+- `knowledge-service/` — SilverBullet-индекс, Wiki/Memory API и редактор памяти,
+  без чата агента и второго investigation engine; `silverbullet/seed/` — стартовые страницы.
 - `agui-agent/` — AG-UI-адаптер и валидированный control API над общими Aegra
   threads/runs, без собственного графа и `InMemorySaver`.
 - `copilotkit-demo/` — CopilotKit-рабочий стол поверх тех же Aegra checkpoints;
@@ -152,7 +155,14 @@
   `agent_memory.context_facts`. Подтверждённый investigation-факт требует валидные
   Evidence; гипотезы не сохраняются. `observed` по умолчанию живёт 24 часа.
   Семантический поиск идёт через pgvector, а найденные факты не считаются свежими
-  Evidence и перепроверяются при влиянии на вывод.
+  Evidence и перепроверяются при влиянии на вывод. `agent-memory-db` остаётся единственным
+  источником истины для фактов: SilverBullet редактирует их только через Memory API с
+  `base_revision`; исправление создаёт новую revision, exclusion исключает из retrieval,
+  embedding пересчитывается при смысловом изменении и может быть `pending`.
+  SilverBullet-страницы индексируются в `wiki_pages/wiki_sections` и используются только
+  через `wiki_search/wiki_read` как методический контекст, не Evidence и не исполняемые skills.
+  Карточка отчёта содержит ссылки на S3, а не вторую копию ZIP; сбой knowledge-service
+  не роняет расследование и сохранение отчёта.
 - `search_similar_cases` возвращает только компактные карточки похожих дел, не
   continuation и не текущие Evidence. Похожее дело не заменяет `context.id`.
 - Ошибка памяти не роняет диалог. OIDC/multiuser не реализуем.

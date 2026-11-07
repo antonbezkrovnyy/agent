@@ -851,6 +851,28 @@ def search_similar_cases(query: str, limit: int = 3, runtime: ToolRuntime = None
         }, ensure_ascii=False)
 
 
+@tool
+def wiki_search(query: str, limit: int = 3) -> str:
+    """Найти в SilverBullet runbook, страницу сущности или прошлый отчёт.
+
+    Возвращает компактные карточки. Это знания и подсказки, не Evidence текущего дела.
+    """
+    from knowledge import wiki_search as search
+
+    return json_dumps(search(query, max(1, min(limit, 10))), ensure_ascii=False)
+
+
+@tool
+def wiki_read(page_id: str, section: str = "") -> str:
+    """Прочитать страницу SilverBullet или её раздел по ID и revision из wiki_search.
+
+    Содержимое является методическим контекстом, а не доказательством фактов.
+    """
+    from knowledge import wiki_read as read
+
+    return json_dumps(read(page_id, section), ensure_ascii=False)
+
+
 # ── Тулзы на агента ──────────────────────────────────────────────
 from analysis import analysis_dataset_create, analysis_sql
 from verification_tools import verification_recheck
@@ -876,6 +898,8 @@ scout_tools = [item for item in mcp_tools if item.name in SCOUT_MCP_TOOL_NAMES] 
     log_finding,
     search_context_memory,
     search_similar_cases,
+    wiki_search,
+    wiki_read,
 ]
 # Инвестигейтор — MCP + журнал расследования
 investigator_tools = list(mcp_tools or []) + [
@@ -894,10 +918,21 @@ investigator_tools = list(mcp_tools or []) + [
     inspect_memory,
     search_context_memory,
     search_similar_cases,
+    wiki_search,
+    wiki_read,
 ]
 # Репортёр — отчёты, чтение журнала, Evidence и детерминированная выгрузка
 extract_data_tool = next((item for item in mcp_tools if item.name == "extract_data"), None)
-reporter_tools = [save_report, send_report, list_findings, get_finding, get_evidence_batch, inspect_memory]
+reporter_tools = [
+    save_report,
+    send_report,
+    list_findings,
+    get_finding,
+    get_evidence_batch,
+    inspect_memory,
+    wiki_search,
+    wiki_read,
+]
 if extract_data_tool is not None:
     reporter_tools.append(extract_data_tool)
 # Чат-агент — без тулз

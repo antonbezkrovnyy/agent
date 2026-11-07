@@ -42,6 +42,8 @@ def test_scout_tools_exclude_full_export_and_memory_overview():
         "log_finding",
         "search_context_memory",
         "search_similar_cases",
+        "wiki_search",
+        "wiki_read",
     }
 
 

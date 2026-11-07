@@ -133,6 +133,11 @@ Mars API, Aegra предоставляет API и checkpoints, Phoenix соби�
   постоянным хранилищем и retention 30 дней; read-only MCP без code execution.
 - Фоновый `agent-evaluator`: независимая оценка завершённого run по state и trace,
   хранение в `agent_memory.run_evaluations` и отложенное уведомление «Автодиагностика» в треде.
+- SilverBullet как рабочее пространство знаний, карточек отчётов и редактирования памяти,
+  без встраивания чата. `knowledge-service` индексирует страницы в существующую pgvector-БД,
+  предоставляет `wiki_search/wiki_read` и Memory API. Пользователь может создавать и исправлять
+  факты, менять TTL, закреплять и исключать их; revisions и `base_revision` предотвращают
+  молчаливую перезапись. Подробности — [KNOWLEDGE.md](docs/KNOWLEDGE.md).
 
 Multiuser/OIDC намеренно не реализуется. Текущий anonymous-режим предназначен
 только для локальной разработки.
@@ -157,6 +162,8 @@ Multiuser/OIDC намеренно не реализуется. Текущий an
 | `agent-memory-db` | только Docker-сеть | Case Store, Context Memory и журнал исполнения в `agent_memory`, pgvector |
 | `redis` | 6379 | Очередь задач и SSE-брокер |
 | `phoenix` | 6006 | OpenInference/OpenTelemetry-трассировка |
+| `silverbullet` | 3002 | Знания, карточки отчётов и страницы памяти, без чата агента |
+| `knowledge-service` | 2028 | Wiki/Memory API, pgvector-индекс и редактор памяти |
 
 ### AG-UI copilot
 
@@ -241,6 +248,8 @@ docker compose up -d --build
 После запуска:
 
 - чат: http://localhost:3000;
+- SilverBullet: http://localhost:3002;
+- редактор памяти: http://localhost:2028/memory;
 - API: http://localhost:2026;
 - Phoenix: http://localhost:6006;
 - webhook: `http://<хост>:2025/anomaly`.
@@ -496,6 +505,8 @@ Structured response получает до 10 попыток внутри общ�
 │   └── prompts/           # системные промпты
 ├── logicore-mcp/          # MCP-сервер, пагинация Mars API и handoff README
 ├── analysis-service/      # Изолированный DuckDB read-only SQL
+├── knowledge-service/     # SilverBullet-индекс, Wiki/Memory API и редактор
+├── silverbullet/seed/     # Стартовые страницы SilverBullet и команда памяти
 ├── agent-mcp/             # Асинхронный MCP-интерфейс расследований
 ├── agui-agent/            # AG-UI и control API поверх Aegra
 ├── copilotkit-demo/       # Рабочий стол аналитика и CopilotKit-чат

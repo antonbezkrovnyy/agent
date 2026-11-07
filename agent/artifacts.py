@@ -89,4 +89,21 @@ def create_report_artifacts(
             "package_sha256": package_artifact["sha256"],
             "manifest_sha256": manifest_digest,
         })
+    from knowledge import publish_report_card
+
+    report_result = state.get("report_result") or {}
+    verification_data = verification or report_result.get("verification") or {}
+    publish_report_card({
+        "case_id": str(context.get("id") or "unassigned"),
+        "run_id": run_id,
+        "title": title,
+        "summary": str(report_result.get("answer") or markdown)[:4000],
+        "verification_status": verification_data.get("status") or "not_reviewed",
+        "saved_at": last_report["saved_at"],
+        "artifacts": [{
+            "key": item.get("key"),
+            "filename": item.get("filename"),
+            "sha256": item.get("sha256"),
+        } for item in artifacts],
+    })
     return last_report, artifacts

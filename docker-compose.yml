@@ -154,6 +154,7 @@ services:
       - AGENT_TIMEOUT_SECONDS=900
       - ANALYSIS_SERVICE_URL=http://analysis-service:9200
       - ANALYSIS_SERVICE_TOKEN=${ANALYSIS_SERVICE_TOKEN:-}
+      - KNOWLEDGE_SERVICE_URL=http://knowledge-service:2028
       - ANALYSIS_DATASET_MAX_ROWS=20000
       - ANALYSIS_RESULT_MAX_ROWS=10000
       - ANALYSIS_SQL_MAX_ATTEMPTS=6
@@ -187,6 +188,8 @@ services:
       logicore-mcp:
         condition: service_healthy
       analysis-service:
+        condition: service_healthy
+      knowledge-service:
         condition: service_healthy
     healthcheck:
       test: ["CMD-SHELL", "curl -sf http://localhost:2026/health || exit 1"]
@@ -385,6 +388,50 @@ services:
     depends_on:
       agui-agent:
         condition: service_healthy
+
+  # SilverBullet — знания, карточки отчётов и редактор памяти, без чата агента.
+  silverbullet:
+    image: ghcr.io/silverbulletmd/silverbullet:latest
+    restart: unless-stopped
+    ports:
+      - "3002:3000"
+    volumes:
+      - silverbullet_data:/space
+
+  knowledge-service:
+    build:
+      context: .
+      dockerfile: knowledge-service/Dockerfile
+    restart: unless-stopped
+    ports:
+      - "2028:2028"
+    env_file:
+      - ./.env
+    environment:
+      - AGENT_MEMORY_DATABASE_URL=postgresql://agent_memory:${AGENT_MEMORY_POSTGRES_PASSWORD:-agent_memory_password}@agent-memory-db:5432/agent_memory_db
+      - LLM_BASE_URL=http://litellm:4000/v1
+      - LLM_TOKEN=${LITELLM_AGENT_KEY:-litellm-local-key}
+      - AGENT_MEMORY_EMBEDDING_MODEL=logicore-embedding
+      - AGENT_MEMORY_EMBEDDING_BASE_URL=
+      - AGENT_MEMORY_EMBEDDING_TOKEN=
+      - KNOWLEDGE_SPACE_DIR=/space
+      - KNOWLEDGE_SEED_DIR=/seed
+      - KNOWLEDGE_AGUI_PUBLIC_URL=http://localhost:2027
+    volumes:
+      - silverbullet_data:/space
+    depends_on:
+      agent-memory-db:
+        condition: service_healthy
+      litellm:
+        condition: service_healthy
+      silverbullet:
+        condition: service_started
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:2028/health', timeout=3)"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 20s
 volumes:
   postgres_data:
   litellm_postgres_data:
@@ -392,3 +439,4 @@ volumes:
   redis_data:
   seaweedfs_data:
   phoenix_data:
+  silverbullet_data:

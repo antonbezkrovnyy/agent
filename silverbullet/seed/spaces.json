@@ -1,0 +1,22 @@
+{
+  "logicore": {
+    "name": "LogiCore",
+    "folder": "/space",
+    "binding": {
+      "prefix": "/logicore"
+    },
+    "access": "none",
+    "readOnly": false,
+    "shell": {
+      "enabled": false,
+      "whitelist": []
+    },
+    "indexPage": "Home",
+    "description": "Знания, отчёты и память LogiCore",
+    "themeColor": "#e1e1e1",
+    "headHtml": "",
+    "spaceIgnore": "",
+    "logPush": false,
+    "revisions": "managed"
+  }
+}

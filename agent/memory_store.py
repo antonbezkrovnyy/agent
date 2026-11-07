@@ -108,9 +108,25 @@ class MemoryStore:
                         )
                     """)
                     cursor.execute("""
+                        ALTER TABLE agent_memory.context_facts
+                        ADD COLUMN IF NOT EXISTS revision INTEGER NOT NULL DEFAULT 1
+                    """)
+                    cursor.execute("""
+                        ALTER TABLE agent_memory.context_facts
+                        ADD COLUMN IF NOT EXISTS pinned BOOLEAN NOT NULL DEFAULT false
+                    """)
+                    cursor.execute("""
+                        ALTER TABLE agent_memory.context_facts
+                        ADD COLUMN IF NOT EXISTS excluded BOOLEAN NOT NULL DEFAULT false
+                    """)
+                    cursor.execute("""
+                        ALTER TABLE agent_memory.context_facts
+                        ADD COLUMN IF NOT EXISTS index_status TEXT NOT NULL DEFAULT 'ready'
+                    """)
+                    cursor.execute("""
                         CREATE INDEX IF NOT EXISTS context_facts_active_idx
                         ON agent_memory.context_facts (scope, updated_at DESC)
-                        WHERE valid_to IS NULL AND superseded_by IS NULL
+                        WHERE valid_to IS NULL AND superseded_by IS NULL AND excluded = false
                     """)
                     cursor.execute("""
                         CREATE INDEX IF NOT EXISTS context_facts_embedding_idx
@@ -234,16 +250,19 @@ class MemoryStore:
                 f"Embedding has {len(embedding)} dimensions; expected {self.embedding_dimensions}"
             )
 
-    def _write_fact(self, cursor, fact: ContextFact, embedding: list[float]) -> None:
-        self._validate_embedding(embedding)
+    def _write_fact(self, cursor, fact: ContextFact, embedding: list[float] | None) -> None:
+        if embedding is not None:
+            self._validate_embedding(embedding)
         fact = ContextFact.model_validate(safe_json(fact.model_dump(mode="json")))
         cursor.execute("""
             INSERT INTO agent_memory.context_facts (
                 id, scope, statement, category, entities, status, source_kind,
                 source_case_ids, evidence_ids, valid_from, valid_to,
-                superseded_by, embedding, created_at, updated_at
+                superseded_by, revision, pinned, excluded, index_status,
+                embedding, created_at, updated_at
             ) VALUES (
-                %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s::vector, %s, %s
+                %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s,
+                %s, %s, %s, %s, %s::vector, %s, %s
             )
             ON CONFLICT (id) DO UPDATE SET
                 statement = EXCLUDED.statement,
@@ -257,6 +276,7 @@ class MemoryStore:
                 valid_to = EXCLUDED.valid_to,
                 superseded_by = EXCLUDED.superseded_by,
                 embedding = EXCLUDED.embedding,
+                index_status = EXCLUDED.index_status,
                 updated_at = EXCLUDED.updated_at
         """, (
             fact.id,
@@ -271,18 +291,22 @@ class MemoryStore:
             fact.valid_from,
             fact.valid_to,
             fact.superseded_by,
-            self._vector(embedding),
+            fact.revision,
+            fact.pinned,
+            fact.excluded,
+            fact.index_status,
+            self._vector(embedding) if embedding is not None else None,
             fact.created_at,
             fact.updated_at,
         ))
 
-    def put_fact(self, fact: ContextFact, embedding: list[float]) -> None:
+    def put_fact(self, fact: ContextFact, embedding: list[float] | None) -> None:
         self._setup()
         with psycopg.connect(self.database_url) as connection:
             with connection.cursor() as cursor:
                 self._write_fact(cursor, fact, embedding)
 
-    def supersede_fact(self, target: ContextFact, fact: ContextFact, embedding: list[float]) -> None:
+    def supersede_fact(self, target: ContextFact, fact: ContextFact, embedding: list[float] | None) -> None:
         self._setup()
         now = datetime.now(UTC)
         with psycopg.connect(self.database_url) as connection:
@@ -294,6 +318,35 @@ class MemoryStore:
                     WHERE id = %s
                 """, (fact.id, fact.valid_from or now, now, target.id))
 
+    def update_fact_controls(
+        self,
+        scope: str,
+        fact_id: str,
+        base_revision: int,
+        *,
+        pinned: bool | None = None,
+        excluded: bool | None = None,
+        expire: bool = False,
+    ) -> ContextFact | None:
+        self._setup()
+        with psycopg.connect(self.database_url) as connection:
+            with connection.cursor() as cursor:
+                cursor.execute("""
+                    UPDATE agent_memory.context_facts
+                    SET revision = revision + 1,
+                        pinned = COALESCE(%s, pinned),
+                        excluded = COALESCE(%s, excluded),
+                        valid_to = CASE WHEN %s THEN now() ELSE valid_to END,
+                        updated_at = now()
+                    WHERE scope = %s AND id = %s AND revision = %s
+                    RETURNING id, scope, statement, category, entities, status, source_kind,
+                              source_case_ids, evidence_ids, valid_from, valid_to,
+                              superseded_by, revision, pinned, excluded, index_status,
+                              created_at, updated_at
+                """, (pinned, excluded, expire, scope, fact_id, base_revision))
+                row = cursor.fetchone()
+        return self._fact_from_row(row) if row else None
+
     def get_fact(self, scope: str, fact_id: str) -> ContextFact | None:
         if not self.enabled:
             return None
@@ -303,7 +356,7 @@ class MemoryStore:
                 cursor.execute("""
                     SELECT id, scope, statement, category, entities, status, source_kind,
                            source_case_ids, evidence_ids, valid_from, valid_to,
-                           superseded_by, created_at, updated_at
+                           superseded_by, revision, pinned, excluded, index_status, created_at, updated_at
                     FROM agent_memory.context_facts
                     WHERE scope = %s AND id = %s
                 """, (scope, fact_id))
@@ -319,10 +372,11 @@ class MemoryStore:
                 cursor.execute("""
                     SELECT id, scope, statement, category, entities, status, source_kind,
                            source_case_ids, evidence_ids, valid_from, valid_to,
-                           superseded_by, created_at, updated_at
+                           superseded_by, revision, pinned, excluded, index_status, created_at, updated_at
                     FROM agent_memory.context_facts
                     WHERE scope = %s AND lower(statement) = lower(%s)
                       AND (valid_to IS NULL OR valid_to > now()) AND superseded_by IS NULL
+                      AND excluded = false
                     ORDER BY updated_at DESC
                     LIMIT 1
                 """, (scope, statement))
@@ -338,11 +392,12 @@ class MemoryStore:
                 cursor.execute("""
                     SELECT id, scope, statement, category, entities, status, source_kind,
                            source_case_ids, evidence_ids, valid_from, valid_to,
-                           superseded_by, created_at, updated_at
+                           superseded_by, revision, pinned, excluded, index_status, created_at, updated_at
                     FROM agent_memory.context_facts
                     WHERE scope = %s
                       AND (valid_to IS NULL OR valid_to > now()) AND superseded_by IS NULL
-                    ORDER BY updated_at DESC
+                      AND excluded = false
+                    ORDER BY pinned DESC, updated_at DESC
                     LIMIT %s
                 """, (scope, limit))
                 rows = cursor.fetchall()
@@ -365,13 +420,14 @@ class MemoryStore:
                 cursor.execute("""
                     SELECT id, scope, statement, category, entities, status, source_kind,
                            source_case_ids, evidence_ids, valid_from, valid_to,
-                           superseded_by, created_at, updated_at,
+                           superseded_by, revision, pinned, excluded, index_status, created_at, updated_at,
                            1 - (embedding <=> %s::vector) AS similarity
                     FROM agent_memory.context_facts
                     WHERE scope = %s AND embedding IS NOT NULL
                       AND (valid_to IS NULL OR valid_to > now()) AND superseded_by IS NULL
+                      AND excluded = false
                       AND 1 - (embedding <=> %s::vector) >= %s
-                    ORDER BY embedding <=> %s::vector
+                    ORDER BY pinned DESC, embedding <=> %s::vector
                     LIMIT %s
                 """, (vector, scope, vector, similarity_threshold, vector, limit))
                 rows = cursor.fetchall()
@@ -382,7 +438,8 @@ class MemoryStore:
         columns = [
             "id", "scope", "statement", "category", "entities", "status",
             "source_kind", "source_case_ids", "evidence_ids", "valid_from",
-            "valid_to", "superseded_by", "created_at", "updated_at",
+            "valid_to", "superseded_by", "revision", "pinned", "excluded",
+            "index_status", "created_at", "updated_at",
         ]
         payload = dict(zip(columns, row, strict=False))
         fact = ContextFact.model_validate(payload)

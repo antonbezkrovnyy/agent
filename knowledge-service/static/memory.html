@@ -1,0 +1,140 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Память агента</title>
+  <style>
+    :root { color-scheme: light dark; font-family: system-ui, sans-serif; }
+    body { margin: 0; padding: 16px; background: Canvas; color: CanvasText; }
+    h1 { font-size: 20px; margin: 0 0 12px; }
+    h2 { font-size: 16px; margin: 20px 0 8px; }
+    input, textarea, button { font: inherit; }
+    input, textarea { box-sizing: border-box; width: 100%; padding: 8px; background: Canvas; color: CanvasText; border: 1px solid #8886; border-radius: 6px; }
+    textarea { min-height: 80px; resize: vertical; }
+    button { padding: 7px 10px; margin: 4px 4px 0 0; border: 1px solid #8886; border-radius: 6px; background: ButtonFace; color: ButtonText; cursor: pointer; }
+    .search { display: flex; gap: 8px; }
+    .search input { flex: 1; }
+    .fact { border: 1px solid #8886; border-radius: 8px; padding: 10px; margin: 10px 0; }
+    .meta { font-size: 12px; opacity: .75; margin: 6px 0; }
+    .status { font-size: 12px; font-weight: 600; }
+    #status { margin: 10px 0; min-height: 20px; }
+    .error { color: #d64545; }
+    .ok { color: #318c5a; }
+  </style>
+</head>
+<body>
+  <h1>Память агента</h1>
+  <div class="search">
+    <input id="query" placeholder="Семантический поиск по фактам">
+    <button id="search">Найти</button>
+  </div>
+  <div id="status"></div>
+  <div id="facts"></div>
+  <h2>Новый факт</h2>
+  <textarea id="newStatement" placeholder="Одно проверяемое утверждение"></textarea>
+  <button id="create">Сохранить факт</button>
+<script>
+const $ = id => document.getElementById(id);
+let controller;
+function status(text, error = false) {
+  $("status").textContent = text;
+  $("status").className = error ? "error" : "ok";
+}
+async function request(path, options = {}) {
+  const response = await fetch(path, {
+    headers: {"Content-Type": "application/json"},
+    ...options,
+  });
+  const data = await response.json();
+  if (!response.ok) throw new Error(data.detail || `HTTP ${response.status}`);
+  return data;
+}
+function field(label, value) {
+  const node = document.createElement("div");
+  node.className = "meta";
+  node.textContent = `${label}: ${value ?? "—"}`;
+  return node;
+}
+function button(text, action) {
+  const node = document.createElement("button");
+  node.textContent = text;
+  node.addEventListener("click", action);
+  return node;
+}
+function renderFact(fact) {
+  const card = document.createElement("div");
+  card.className = "fact";
+  const editor = document.createElement("textarea");
+  editor.value = fact.statement;
+  card.append(editor);
+  const validTo = document.createElement("input");
+  validTo.type = "datetime-local";
+  validTo.title = "Действует до";
+  validTo.value = fact.valid_to ? fact.valid_to.slice(0, 16) : "";
+  card.append(validTo);
+  card.append(field("Источник", `${fact.source_kind}; ${fact.status}`));
+  card.append(field("Revision", fact.revision));
+  card.append(field("Индекс", fact.index_status));
+  card.append(field("Действует до", fact.valid_to));
+  card.append(field("Режим", fact.excluded ? "исключён" : fact.pinned ? "закреплён" : "обычный"));
+  const controls = document.createElement("div");
+  controls.append(button("Сохранить", async () => {
+    await run(async () => {
+      await request(`/memory/facts/${fact.id}`, {method: "PUT", body: JSON.stringify({
+        statement: editor.value,
+        valid_to: validTo.value ? new Date(validTo.value).toISOString() : null,
+        base_revision: fact.revision,
+      })});
+      await load();
+    });
+  }));
+  controls.append(button(fact.pinned ? "Открепить" : "Закрепить", async () => {
+    await run(async () => {
+      await request(`/memory/facts/${fact.id}/controls`, {method: "POST", body: JSON.stringify({
+        base_revision: fact.revision,
+        pinned: !fact.pinned,
+      })});
+      await load();
+    });
+  }));
+  controls.append(button(fact.excluded ? "Вернуть" : "Исключить", async () => {
+    await run(async () => {
+      await request(`/memory/facts/${fact.id}/controls`, {method: "POST", body: JSON.stringify({
+        base_revision: fact.revision,
+        excluded: !fact.excluded,
+      })});
+      await load();
+    });
+  }));
+  card.append(controls);
+  return card;
+}
+async function run(action) {
+  try {
+    status("Сохраняю…");
+    await action();
+    status("Готово");
+  } catch (error) {
+    status(error.message, true);
+  }
+}
+async function load() {
+  if (controller) controller.abort();
+  controller = new AbortController();
+  const data = await request(`/memory/facts?limit=50&query=${encodeURIComponent($("query").value)}`, {signal: controller.signal});
+  $("facts").replaceChildren();
+  if (!data.items.length) $("facts").textContent = "Факты не найдены.";
+  for (const fact of data.items) $("facts").append(renderFact(fact));
+}
+$("search").addEventListener("click", () => run(load));
+$("query").addEventListener("keydown", event => { if (event.key === "Enter") run(load); });
+$("create").addEventListener("click", () => run(async () => {
+  await request("/memory/facts", {method: "POST", body: JSON.stringify({statement: $("newStatement").value, valid_to: null})});
+  $("newStatement").value = "";
+  await load();
+}));
+run(load);
+</script>
+</body>
+</html>

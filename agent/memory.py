@@ -491,6 +491,7 @@ def _updated_fact(target: ContextFact, draft: ContextFactDraft) -> ContextFact:
             ])),
             "evidence_ids": list(dict.fromkeys([*target.evidence_ids, *draft.evidence_ids])),
             "valid_to": _valid_to(draft),
+            "revision": target.revision + 1,
             "created_at": target.created_at,
             "updated_at": now,
             "superseded_by": None,

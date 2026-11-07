@@ -87,6 +87,10 @@ class ContextFact(ContextFactDraft):
     scope: str = "default"
     source_case_ids: list[str] = Field(default_factory=list)
     superseded_by: str | None = None
+    revision: int = 1
+    pinned: bool = False
+    excluded: bool = False
+    index_status: str = "ready"
     created_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
     updated_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
 
