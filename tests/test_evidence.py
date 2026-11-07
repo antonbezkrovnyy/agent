@@ -53,13 +53,25 @@ def test_evidence_is_structured_and_window_is_frozen(patch_llm):
 
 
 def test_tool_exception_becomes_error_evidence(patch_llm):
+    broken_call = tc("broken_tool", {"time_from": "bad"})
     agent = FakeAgent({
         "Ты — скаут": [ai(calls=[tc("count_events", {})]), ai("Есть события")],
         "Ты — инвестигейтор": [
-            ai(calls=[tc("broken_tool", {"time_from": "bad"})]),
-            ai("Не удалось выполнить запрос"),
+            ai(calls=[broken_call]),
+            ai(calls=[tc("InvestigationResult", {
+                "status": "partial",
+                "summary": "Не удалось выполнить запрос",
+                "claims": [{"text": "Запрос не выполнен", "evidence_ids": [broken_call["id"]]}],
+                "limitations": ["Ошибка broken_tool"],
+                "not_checked": ["Повторный запрос"],
+            })]),
         ],
-        "Ты — репортёр": [ai("Данные недоступны")],
+        "Ты — репортёр": [ai(calls=[tc("ReporterResult", {
+            "answer": "Данные недоступны",
+            "claims": [{"text": "Данные недоступны", "evidence_ids": [broken_call["id"]]}],
+            "limitations": ["Ошибка broken_tool"],
+            "not_checked": ["Повторный запрос"],
+        })])],
     })
     patch_llm(agent, FakeStructured(intent()))
 

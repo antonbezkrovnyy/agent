@@ -39,7 +39,8 @@ def create_report_artifacts(
         exact_filename=bool(previous.get("filename")),
     )
     context = state.get("context") or {}
-    artifacts = [artifact_from_data_url(report_url, context)]
+    run_id = state.get("mcp_reuse_run_id") or "current"
+    artifacts = [artifact_from_data_url(report_url, context, run_id)]
     last_report = {
         "title": title,
         "markdown": markdown,
@@ -60,7 +61,7 @@ def create_report_artifacts(
                     verification=verification,
                 )
                 package_artifact = put_artifact_file(
-                    package_path.name, package_path, "application/zip", context,
+                    package_path.name, package_path, "application/zip", context, run_id,
                 )
         else:
             package_name, package_url, package_bytes = build_investigation_package(
@@ -71,7 +72,7 @@ def create_report_artifacts(
                 filename=previous.get("package_filename"),
                 verification=verification,
             )
-            package_artifact = artifact_from_data_url(package_url, context)
+            package_artifact = artifact_from_data_url(package_url, context, run_id)
             encoded = package_url.split("base64,", 1)[1].split("#", 1)[0]
             import base64
             import hashlib

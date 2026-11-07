@@ -119,6 +119,7 @@ class AgentWorkState(AgentState, EvidenceChannels, CaseChannels, MemoryChannels,
 
     active_work_item: dict
     mcp_reuse_run_id: str
+    run_deadline_at: str
     work_mode: str
     depth_history: list[dict]
     investigation_plan: dict
@@ -139,6 +140,7 @@ class State(MessagesState, EvidenceChannels, CaseChannels, MemoryChannels, Prove
     report_result: dict
     intent: dict
     mcp_reuse_run_id: str
+    run_deadline_at: str
     work_mode: str
     depth_history: list[dict]
     investigation_plan: dict

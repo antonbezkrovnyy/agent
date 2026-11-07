@@ -57,8 +57,22 @@ def _user_requests_block(state: State) -> str:
     return "Сообщения пользователя (в хронологии):\n" + "\n".join(lines)[:CRITIC_DIALOG_LIMIT]
 
 
+def _critic_evidence_ids(state: State, prompt: str) -> list[str]:
+    records = state.get("evidence") or []
+    ids = claim_evidence_ids(state)
+    if prompt == "critic_report":
+        report_text = "\n".join(_report_texts(state))
+        ids.extend(
+            record["id"] for record in records
+            if record.get("id") and record["id"] in report_text
+        )
+    if ids:
+        return list(dict.fromkeys(ids))
+    return [record["id"] for record in records[-20:] if record.get("id")]
+
+
 def _critic_messages(state: State, prompt: str, extra_block: str) -> list[BaseMessage]:
-    evidence_ids = None if prompt == "critic_report" else claim_evidence_ids(state) or None
+    evidence_ids = _critic_evidence_ids(state, prompt)
     parts = [
         compose("base", prompt),
         _intent_block(state),
@@ -276,6 +290,32 @@ def _artifact_claim_issues(state: State) -> list[CriticIssue]:
     )]
 
 
+def _aggregate_support_issues(state: State) -> list[CriticIssue]:
+    aggregate_tools = {
+        "count_events", "timeline", "top_values", "top_values_batch",
+        "aggregate_events", "analysis_sql",
+    }
+    records = {item.get("id"): item for item in state.get("evidence") or []}
+    issues = []
+    for result_key in ("inv_result", "report_result"):
+        for claim in (state.get(result_key) or {}).get("claims") or []:
+            if claim.get("evidence_class") != "агрегатный":
+                continue
+            ids = [item for item in claim.get("evidence_ids") or [] if item in records]
+            if not ids or any(records[item].get("tool") in aggregate_tools for item in ids):
+                continue
+            issues.append(CriticIssue(
+                claim=claim.get("text") or "",
+                evidence_ids=ids,
+                reason=(
+                    "Агрегатный claim обобщает наблюдения без агрегатного Evidence. "
+                    "Получи count/aggregate за то же окно и фильтр либо понизь вывод до наблюдения по выборке."
+                ),
+                suggested_action="rework_data",
+            ))
+    return issues
+
+
 def _evidence_strength_issues(state: State) -> list[CriticIssue]:
     records = {item.get("id"): item for item in state.get("evidence") or []}
     issues = []
@@ -310,9 +350,26 @@ def _deterministic_issues(state: State) -> list[dict]:
                 reason="Служебное сообщение ToolCallLimitMiddleware выдано вместо результата этапа.",
                 suggested_action="rework_report" if result_key == "report_result" else "rework_data",
             ))
-    for result_key in ("inv_result", "report_result"):
-        for claim in (state.get(result_key) or {}).get("claims") or []:
-            unknown = [item for item in claim.get("evidence_ids") or [] if item not in records]
+    for result_key, text_key in (("inv_result", "summary"), ("report_result", "answer")):
+        result = state.get(result_key) or {}
+        claims = result.get("claims") or []
+        text = str(result.get(text_key) or "").strip()
+        if records and text and not claims and result.get("status") not in ("partial", "failed"):
+            issues.append(CriticIssue(
+                claim=text[:500],
+                reason="Ответ по собранным Evidence не содержит structured claims с явными ссылками.",
+                suggested_action="rework_report" if result_key == "report_result" else "rework_data",
+            ))
+        for claim in claims:
+            evidence_ids = claim.get("evidence_ids") or []
+            if not evidence_ids:
+                issues.append(CriticIssue(
+                    claim=claim.get("text") or "",
+                    reason="Фактический claim не содержит Evidence ID.",
+                    suggested_action="rework_report",
+                ))
+                continue
+            unknown = [item for item in evidence_ids if item not in records]
             if unknown:
                 issues.append(CriticIssue(
                     claim=claim.get("text") or "",
@@ -358,6 +415,7 @@ def _deterministic_issues(state: State) -> list[dict]:
     issues.extend(_partial_sample_issues(state))
     issues.extend(_completeness_issues(state))
     issues.extend(_distribution_issues(state))
+    issues.extend(_aggregate_support_issues(state))
     issues.extend(_evidence_strength_issues(state))
     issues.extend(_artifact_claim_issues(state))
     unique = {}
@@ -375,6 +433,10 @@ def _critic_run(state: State, prompt: str, model: Any, allowed_verdicts: tuple, 
     messages = with_prompt_override(state, prompt, _critic_messages(state, prompt, extra_block))
     audit_messages(prompt, state, messages)
     try:
+        from deadline import run_expired
+
+        if run_expired(state):
+            raise TimeoutError("Investigation run deadline exceeded")
         result = model.invoke(
             messages,
             config=trace_config(prompt, state),
@@ -400,6 +462,17 @@ def _critic_run(state: State, prompt: str, model: Any, allowed_verdicts: tuple, 
         reasons = " ".join(dict.fromkeys(item["reason"] for item in deterministic))
         if not feedback or feedback.startswith("Критик недоступен"):
             feedback = f"{feedback} {reasons}".strip()
+    if verdict == "ok" and issues:
+        if "rework_data" in allowed_verdicts and any(
+            item.get("suggested_action") == "rework_data" for item in issues
+        ):
+            verdict = "rework_data"
+        elif "rework_report" in allowed_verdicts:
+            verdict = "rework_report"
+        elif "rework_data" in allowed_verdicts:
+            verdict = "rework_data"
+        if not feedback:
+            feedback = "Вердикт ok отклонён: критик вернул незакрытые issues."
     rework = state.get("rework", 0) + (1 if verdict.startswith("rework_") else 0)
     return {"critic": {"verdict": verdict, "feedback": feedback, "issues": issues}, "rework": rework}
 
@@ -431,7 +504,7 @@ def node_critic_evidence(state: State) -> dict:
             structured_block("Результат work item", item_result),
         )
         verdict = update["critic"]["verdict"]
-        retry = verdict == "rework_data" and (active_item.get("attempt") or 0) <= settings.max_rework
+        retry = verdict == "rework_data" and update["rework"] <= settings.max_rework
         status = "pending" if retry else ("done" if verdict in ("ok", "critic_unavailable") else "failed")
         return {
             "work_items": [{

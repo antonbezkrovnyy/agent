@@ -27,6 +27,7 @@
   `agent/provenance.py` — фактические source/time metadata.
 - `agent/verification.py` — статусы доверия, публикация открытых issues и update_failed.
 - `agent/metrics.py` — длительность, токены, tool calls и повторы по ролям/items.
+- `agent/deadline.py` — оставшееся время и общий технический дедлайн run.
 - `agent-mcp/app.py` — асинхронный MCP-адаптер над Aegra runs API, не второй движок.
 - `agent-mcp/investigation_mcp_types.py` — TypedDict для MCP structuredContent.
 - `agent-evaluator/` — оценка runs, Phoenix annotations и SDK experiments.
@@ -80,27 +81,38 @@
   Раздел «Статус проверки и доверие» фиксирует `consistent_with_evidence/unverified/issues_open/update_failed`
   и открытые issues; он всегда есть в файле, а в чат выводится при проблемном результате.
   `consistent_with_evidence` означает только согласованность с пакетом, не независимую
-  истинность. Матрица claims различает подтверждение в архиве, вероятность, спорность и
-  неподтверждение; manifest содержит фактические source/time metadata. `verification_recheck`
+  истинность. Матрица claims различает связь с успешным Evidence, вероятность, спорность
+  и неподтверждение; наличие ссылки не является смысловым доказательством. Ссылки `Q1…QN`
+  и `query_refs` ведут к воспроизводящим запросам в
+  `queries.md`; manifest содержит фактические source/time metadata. `verification_recheck`
   всегда `independent=false` и `same_source_replay`; он не подменяет независимый источник.
   Rework без изменённого Markdown — `update_failed`, а не успех.
 - `memory_operations` фиксирует исходное/фактическое действие и исход каждой записи;
-  журнал попадает в Case Store, отчёт и manifest. Не заменять его одним счётчиком.
+  журнал попадает в Case Store, отчёт и manifest. Memory Save пересобирает пакет с сохранением
+  verification, claims/`query_refs`, revision и memory-аудита до verification-блока.
+  Не заменять журнал одним счётчиком.
 - S3 state содержит только object keys и метаданные; подписанные URL создаются при
-  выдаче. Внешний agent-mcp работает только с `inv-*` тредами и не дублирует граф.
-  Ответы используют штатный `structuredContent` через TypedDict, не JSON в text content.
+  выдаче. Ключ включает case, фактический run и SHA-256 содержимого, поэтому новая версия
+  не перезаписывает старый объект. Внешний agent-mcp работает только с `inv-*` тредами
+  и не дублирует граф. Ответы используют штатный `structuredContent` через TypedDict,
+  не JSON в text content.
 - Evaluator работает только после успешного run, хранит оценки в `run_evaluations` и
   не меняет Evidence/отчёт. Не публиковать сообщение поверх более нового run.
-- Claims ссылаются только на существующие Evidence ID. Critic Evidence получает полные
-  записи по claims/findings, Critic Report — весь Evidence Bundle для проверки Markdown;
-  Reporter читает записи через batch-инструмент. Явные суммы, timeline.total, null/остаток
-  и partial-claims проверяются детерминированно. `has_more=true` допустимо только после
+- Каждый claim содержит существующие Evidence ID; ответ по собранным Evidence требует
+  structured claims. `ok` несовместим с открытыми issues. Критики получают только связанные
+  с claims/findings/Markdown записи, а большие коллекции — в ограниченной prompt-проекции;
+  полные результаты остаются в state и ZIP. Reporter читает записи через batch-инструмент.
+  Явные суммы, timeline.total, null/остаток и partial-claims проверяются детерминированно. `has_more=true` допустимо только после
   непустой look-ahead-страницы; пустая — `false`, ошибка проверки — `null` с `pagination_error`.
   Категоричная полнота разрешена только при `has_more=false`; `null` — неизвестность,
   а не доказательство продолжения или завершения. Claims имеют `evidence_class`:
-  `полный` запрещён при partial/proxy; `прокси` — только предположение. Ключевая Deep-аномалия
-  требует альтернативы и дискриминирующий тест, «объясни всплеск» — required baseline.
-  Top-N не заменяет профиль распределения; pivot расходуется по ценности для гипотез.
+  `полный` запрещён при partial/proxy; `агрегатный` требует агрегатного Evidence, а не одной
+  выборки; `прокси` — только предположение. Массовая доля требует числитель и знаменатель
+  с одинаковыми окном/фильтром. Первое/последнее событие — `done` только при count=0
+  до/после якоря или полном покрытии соответствующей стороны, иначе `partial` и NOT_CHECKED.
+  Вторичный источник профилируется, если может изменить основной вывод, без разбора всех top-N.
+  Ключевая Deep-аномалия требует альтернативы и дискриминирующий тест, «объясни всплеск» —
+  required baseline. Top-N не заменяет профиль распределения; pivot расходуется по ценности.
 - InvestigationScope строится structured LLM до Planner. Discovery ограничен двумя
   items; required — максимум двумя. Optional попадает только в отчёт/suggestions.
   Work item содержит acceptance/priority/estimated_cost. Replan разрешён только для
@@ -166,7 +178,9 @@
   цикл одинаковых выгрузок недопустим; SQL-ошибки имеют machine-readable recovery, а не
   запускают новую выгрузку. На run допускается до 6 `analysis_sql` с исправлением запроса,
   седьмой вызов — `sql_attempt_limit`. Критик отклоняет текст, противоречащий артефактам.
-- Пользовательского бюджета времени нет. Не возвращать `deadline_at`,
+- Пользовательского бюджета времени нет. Технический `run_deadline_at` задаётся один раз
+  на run через `AGENT_RUN_TIMEOUT_SECONDS`, ограничивает все роли и новые волны; прямой
+  LLM-запрос ограничен `LLM_REQUEST_TIMEOUT_SECONDS`. Не возвращать пользовательский
   `budget_seconds` или выбор времени через interrupt без отдельного решения.
 - Критики не получают MCP-инструменты. Их сбой обозначается `critic_unavailable`,
   а не превращается в `ok` и не останавливает run.
@@ -177,16 +191,19 @@
 
 Текущие `run_limit`: scout 10, investigator 30, reporter 60. Значения и остальные
 лимиты задаются в `agent/config.py` через env и сбрасываются на каждый новый запуск
-роли. Технические таймауты: soft 600 с, hard 900 с на роль, export 120 с. После soft
-Scout/Investigator/Reporter теряют investigative tools и получают до 10 попыток
+роли. Технические таймауты: soft 600 с, hard 900 с на роль, export 120 с,
+LLM-запрос 300 с, общий run 1800 с. После soft Scout/Investigator/Reporter теряют
+investigative tools и получают до 10 попыток
 structured finalization по 300 с внутри общего hard deadline; fallback сохраняет partial state.
 
 При изменении лимитов обновлять тест `tests/test_tool_limit.py`, `README.md` и
 `docs/DEV.md`. Не описывать tool limit как общий лимит чата: это неверно. У Scout 10
 выполненных вызовов на запуск без continuation. Investigator и Reporter после лимита
 автоматически продолжают работу со сброшенным `run_tool_call_count`; fallback без
-инструментов — только после `AGENT_MAX_CONTINUATIONS`. Сырой текст middleware не
-является пользовательским ответом. Несколько Evidence читать через batch-инструмент.
+инструментов — после `AGENT_MAX_CONTINUATIONS` или при `no_progress`. Investigator
+не делает новый continuation/rework без новых Evidence: item становится partial/failed
+с открытым acceptance. Сырой текст middleware не является пользовательским ответом.
+Несколько Evidence читать через batch-инструмент.
 
 ## Изменения кода
 

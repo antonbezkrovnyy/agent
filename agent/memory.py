@@ -145,6 +145,9 @@ def _case_from_state(state: State, config: RunnableConfig) -> dict:
         work_mode=state.get("work_mode") or "quick",
         depth_history=list(state.get("depth_history") or []),
         evidence=list(state.get("evidence") or []),
+        tool_calls=list(state.get("tool_calls") or []),
+        analysis_datasets=list(state.get("analysis_datasets") or []),
+        analysis_results=list(state.get("analysis_results") or []),
         findings=list(state.get("findings") or []),
         hypotheses=list(state.get("hypotheses") or []),
         skill_runs=list(state.get("skill_runs") or []),
@@ -152,12 +155,20 @@ def _case_from_state(state: State, config: RunnableConfig) -> dict:
         visited_anchors=list(state.get("visited_anchors") or []),
         inv_summary=state.get("inv_summary") or "",
         inv_result=state.get("inv_result") or {},
+        report_result=dict(state.get("report_result") or {}),
         last_report=state.get("last_report") or {},
+        independent_verification=dict(state.get("independent_verification") or {}),
+        verification_checks=list(state.get("verification_checks") or []),
         memory_operations=list(state.get("memory_operations") or []),
         investigation_scope=state.get("investigation_scope") or {},
         investigation_plan=state.get("investigation_plan") or {},
         work_items=list(state.get("work_items") or []),
         run_metrics=list(state.get("run_metrics") or []),
+        tenant=state.get("tenant") or "",
+        source_endpoint=state.get("source_endpoint") or "",
+        schema_version=state.get("schema_version") or "",
+        time_semantics=state.get("time_semantics") or "",
+        time_axes=dict(state.get("time_axes") or {}),
         chain=chain,
     )
     return case.model_dump(mode="json")
@@ -359,6 +370,9 @@ def node_memory_load(state: State, config: RunnableConfig) -> dict:
         "work_mode": "deep",
         "depth_history": list(case.get("depth_history") or []),
         "evidence": list(case.get("evidence") or []),
+        "tool_calls": list(case.get("tool_calls") or []),
+        "analysis_datasets": list(case.get("analysis_datasets") or []),
+        "analysis_results": list(case.get("analysis_results") or []),
         "findings": list(case.get("findings") or []),
         "hypotheses": list(case.get("hypotheses") or []),
         "skill_runs": list(case.get("skill_runs") or []),
@@ -366,11 +380,20 @@ def node_memory_load(state: State, config: RunnableConfig) -> dict:
         "visited_anchors": list(case.get("visited_anchors") or []),
         "inv_summary": case.get("inv_summary") or "",
         "inv_result": case.get("inv_result") or {},
+        "report_result": case.get("report_result") or {},
         "last_report": case.get("last_report") or {},
+        "independent_verification": case.get("independent_verification") or {},
+        "verification_checks": list(case.get("verification_checks") or []),
         "memory_operations": list(case.get("memory_operations") or []),
         "investigation_scope": case.get("investigation_scope") or {},
         "investigation_plan": case.get("investigation_plan") or {},
         "work_items": list(case.get("work_items") or []),
+        "run_metrics": list(case.get("run_metrics") or []),
+        "tenant": case.get("tenant") or "",
+        "source_endpoint": case.get("source_endpoint") or "",
+        "schema_version": case.get("schema_version") or "",
+        "time_semantics": case.get("time_semantics") or "",
+        "time_axes": case.get("time_axes") or {},
         "intent": intent,
         "transition": "continue",
         "memory_loaded": investigation_id,
@@ -543,6 +566,10 @@ def _consolidate(state: State) -> tuple[int, list[str], list[dict]]:
         SystemMessage(content=system_prompt(compose("memory_consolidation"))),
         HumanMessage(content=json.dumps(safe_json(payload), ensure_ascii=False, default=str)),
     ]
+    from deadline import run_expired
+
+    if run_expired(state):
+        raise TimeoutError("Investigation run deadline exceeded")
     response = llm_mod.context_memory_llm.invoke(
         messages,
         config=trace_config("memory_consolidation", state),
@@ -608,12 +635,38 @@ def node_memory_save(state: State, config: RunnableConfig) -> dict:
     report_state = {**state, "memory_operations": operations, "memory_error": error}
     extra: dict = {}
     if state.get("last_report"):
+        from artifacts import strip_verification
+
         report = dict(state["last_report"])
-        markdown = report.get("markdown") or ""
+        revision = report.get("revision")
+        markdown = strip_verification(report.get("markdown") or "")
         if audit not in markdown:
             markdown = markdown.rstrip() + "\n\n" + audit
         title = report.get("title") or "Расследование"
-        report, artifacts = create_report_artifacts(title, markdown, report_state)
+        verification = report.get("verification") or (state.get("report_result") or {}).get("verification") or {}
+        verification_markdown = None
+        if verification:
+            from verification import verification_block
+
+            verification_markdown = verification_block(
+                verification.get("status") or "not_reviewed",
+                verification.get("issues") or [],
+                verification.get("detail") or "",
+                verification.get("independent_verification"),
+                verification.get("claims") or [],
+            )
+        report, artifacts = create_report_artifacts(
+            title,
+            markdown,
+            report_state,
+            previous=report,
+            verification_block=verification_markdown,
+            verification=verification or None,
+        )
+        if verification:
+            report["verification"] = verification
+        if revision is not None:
+            report["revision"] = revision
         report_state["last_report"] = report
         extra = {"last_report": report, "artifacts": Overwrite(artifacts)}
         final_message = next(

@@ -32,7 +32,7 @@ def test_skill_run_records_model_and_duration():
         "limitations": [],
         "skill_run": {
             "skill_id": "incident_dating",
-            "version": 1,
+            "version": 2,
             "status": "done",
             "summary": "Готово",
             "window_updates": 0,

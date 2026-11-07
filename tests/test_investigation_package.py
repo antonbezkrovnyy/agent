@@ -133,7 +133,9 @@ def test_chain_links_query_to_jsonl_record():
     assert "Результат: `evidence.jsonl`, запись 1." in report
     assert "```iql\naction = 'allow'\n```" in report
     assert "```json" in report
-    assert "Запросы расследования" in queries_markdown(state)
+    queries = queries_markdown(state)
+    assert "Запросы расследования" in queries
+    assert '<a id="query-1"></a>' in queries
 
 
 def test_save_report_attaches_markdown_and_package():
@@ -183,7 +185,7 @@ def test_verification_update_preserves_filename_timestamp_and_revision():
     assert "Старое утверждение" in final["markdown"]
     assert final["markdown"].count("## Статус проверки и доверие") == 1
     assert "Независимая проверка первичных данных:** не выполнялась" in final["markdown"]
-    assert "Подтверждённый факт | Подтверждено в архиве" in final["markdown"]
+    assert "Подтверждённый факт | Связано с успешным Evidence" in final["markdown"]
     assert "Ограниченное наблюдение | Вероятно / ограничено Evidence" in final["markdown"]
     assert "Недоказанная догадка | Не подтверждено" in final["markdown"]
     assert final["verification"]["independent_verification"]["status"] == "not_performed"

@@ -52,10 +52,12 @@ Tags: `role:<role>`, `mode:<mode>`, `scope:<scope>`. Metadata не содерж�
 
 - start/finish и длительность;
 - модель, prompt/completion/total tokens;
+- фактические `llm_messages`, число `usage_messages` и `token_usage_status=available/partial/unavailable`;
+  `token_usage_complete=false` запрещает трактовать нулевые или частичные токены как полную стоимость;
 - вызовы инструментов по именам и повторы одинаковых запросов;
 - число автоматических continuations;
 - `agent_phase`, `continuation` и `termination_reason`, чтобы отличать обычную работу,
-  finalization, fallback и повторный заход; завершённые до таймаута вызовы не обнуляются.
+  finalization, fallback, повторный заход и `no_progress`; завершённые до таймаута вызовы не обнуляются.
 
 Метрики попадают в `run_metrics`, work item, Case Record, `manifest.json` и ответ
 `investigation_result`. Evaluator добавляет долю unsupported claims, replan count,

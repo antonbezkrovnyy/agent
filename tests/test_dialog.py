@@ -41,5 +41,5 @@ def test_plain_answer_gets_report_critic(patch_llm):
     assert result["artifacts"] == []
     assert critic_evidence.calls == 1
     assert critic_report.calls == 1
-    assert "Фактические результаты инструментов" in critic_report.systems[0]
+    assert "Evidence, связанные с claims/findings/Markdown" in critic_report.systems[0]
     assert_clean(result)

@@ -26,6 +26,9 @@ class CaseRecord(BaseModel):
     work_mode: str = "quick"
     depth_history: list[dict] = Field(default_factory=list)
     evidence: list[dict] = Field(default_factory=list)
+    tool_calls: list[dict] = Field(default_factory=list)
+    analysis_datasets: list[dict] = Field(default_factory=list)
+    analysis_results: list[dict] = Field(default_factory=list)
     findings: list[dict] = Field(default_factory=list)
     hypotheses: list[dict] = Field(default_factory=list)
     skill_runs: list[dict] = Field(default_factory=list)
@@ -33,12 +36,20 @@ class CaseRecord(BaseModel):
     visited_anchors: list[str] = Field(default_factory=list)
     inv_summary: str = ""
     inv_result: dict = Field(default_factory=dict)
+    report_result: dict = Field(default_factory=dict)
     last_report: dict = Field(default_factory=dict)
+    independent_verification: dict = Field(default_factory=dict)
+    verification_checks: list[dict] = Field(default_factory=list)
     memory_operations: list["MemoryOperationRecord"] = Field(default_factory=list)
     investigation_scope: dict = Field(default_factory=dict)
     investigation_plan: dict = Field(default_factory=dict)
     work_items: list[dict] = Field(default_factory=list)
     run_metrics: list[dict] = Field(default_factory=list)
+    tenant: str = ""
+    source_endpoint: str = ""
+    schema_version: str = ""
+    time_semantics: str = ""
+    time_axes: dict = Field(default_factory=dict)
     chain: dict = Field(default_factory=dict)
 
 

@@ -121,6 +121,30 @@ def test_limit_finalizer_returns_schema_without_raw_middleware(monkeypatch):
     assert "Исчерпан лимит 60 вызовов" in structured["limitations"][0]
 
 
+def test_investigator_limit_does_not_continue_without_new_evidence(patch_llm, monkeypatch):
+    import asyncio
+    import agents as agents_mod
+    from test_agent_runtime import runtime_state
+
+    async def fallback(agent, result, schema):
+        return agents_mod._fallback_limited(schema, agent).model_dump()
+
+    monkeypatch.setattr(agents_mod, "_finalize_limited", fallback)
+    agent = FakeAgent({
+        "Ты — инвестигейтор": [ai(calls=[tc("count_events", {})]) for _ in range(62)],
+    })
+    patch_llm(agent, FakeStructured(intent(mode="deep")))
+
+    result, _, update = asyncio.run(agents_mod._run_agent(
+        "investigator", runtime_state(), "inv_msgs",
+    ))
+
+    assert result["termination_reason"] == "no_progress"
+    assert update["run_metrics"][0]["segments"] == 2
+    assert update["run_metrics"][0]["termination_reason"] == "no_progress"
+    assert agent.calls <= 62
+
+
 def test_get_evidence_batch_reads_records_in_one_call():
     import json
     from types import SimpleNamespace

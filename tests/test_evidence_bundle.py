@@ -128,10 +128,28 @@ def test_critic_receives_full_claim_evidence():
     assert "unrelated" not in system
 
 
-def test_report_critic_receives_all_evidence_for_markdown_validation():
-    messages = _critic_messages(state_with_evidence(), "critic_report", "Проверка")
+def test_report_critic_receives_referenced_and_markdown_evidence():
+    state = state_with_evidence()
+    messages = _critic_messages(state, "critic_report", "Проверка")
     system = messages[0].content
 
-    assert "полный Evidence Bundle" in system
+    assert "claims/findings/Markdown" in system
     assert "event-9" in system
-    assert "unrelated" in system
+    assert "unrelated" not in system
+
+    state["last_report"] = {"markdown": "Дополнительная проверка: e2"}
+    messages = _critic_messages(state, "critic_report", "Проверка")
+
+    assert "unrelated" in messages[0].content
+
+
+def test_prompt_bundle_bounds_large_collections_without_mutating_state():
+    state = state_with_evidence()
+    state["evidence"][0]["result"]["events"] = [{"uuid": f"event-{i}"} for i in range(60)]
+
+    text = full_evidence_block(state, ["e1"])
+
+    assert "event-49" in text
+    assert "event-50" not in text
+    assert "ещё 10 элементов" in text
+    assert len(state["evidence"][0]["result"]["events"]) == 60

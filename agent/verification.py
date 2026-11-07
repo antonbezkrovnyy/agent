@@ -20,7 +20,7 @@ _PROGRESS = {
     "update_failed": "Не удалось исправить отчёт",
 }
 _CLAIM_LABELS = {
-    "confirmed_in_archive": "Подтверждено в архиве",
+    "confirmed_in_archive": "Связано с успешным Evidence",
     "probable": "Вероятно / ограничено Evidence",
     "disputed": "Спорно",
     "not_confirmed": "Не подтверждено",
@@ -41,6 +41,7 @@ def _independent_verification(state: dict) -> dict:
 
 def _claim_statuses(claims: list[dict], evidence: list[dict], issues: list[dict]) -> list[dict]:
     records = {item.get("id"): item for item in evidence}
+    query_positions = {item.get("id"): index for index, item in enumerate(evidence, start=1)}
     rows = []
     for claim in claims:
         text = str(claim.get("text") or "")
@@ -63,6 +64,11 @@ def _claim_statuses(claims: list[dict], evidence: list[dict], issues: list[dict]
             "label": _CLAIM_LABELS[status],
             "evidence_ids": ids,
             "evidence_class": claim.get("evidence_class"),
+            "query_refs": [{
+                "evidence_id": evidence_id,
+                "label": f"Q{query_positions[evidence_id]}",
+                "url": f"queries.md#query-{query_positions[evidence_id]}",
+            } for evidence_id in ids if evidence_id in query_positions],
         })
     return rows
 
@@ -116,11 +122,12 @@ def verification_block(
     if claim_statuses:
         lines.extend([
             "",
-            "| Утверждение | Статус | Класс evidence |\n|---|---|---|",
+            "| Утверждение | Статус | Класс evidence | Проверка |\n|---|---|---|---|",
         ])
         for row in claim_statuses:
             text = row["claim"].replace("|", "\\|").replace("\n", " ")
-            lines.append(f"| {text} | {row['label']} | {row.get('evidence_class') or 'не указан'} |")
+            refs = ", ".join(f"[{item['label']}]({item['url']})" for item in row.get("query_refs") or []) or "—"
+            lines.append(f"| {text} | {row['label']} | {row.get('evidence_class') or 'не указан'} | {refs} |")
     return "\n".join(lines)
 
 

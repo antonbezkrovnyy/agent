@@ -255,8 +255,11 @@ Supervisor выполняет готовые items волнами через `as
 сама по себе replan не вызывает. Завершённые items при восстановлении не повторяются.
 
 Reporter получает compact handoff, а не всю монолитную историю. Общий `inv_result`
-агрегируется после всех волн. Scope, план, acceptance, статусы, timestamps и метрики
-попадают в Case Store и детерминированную цепочку отчёта.
+агрегируется после всех волн. Зависимости, переведённые в `skipped`, включаются в сводные
+limitations и `NOT_CHECKED`. Общий статус `done` невозможен при `partial/failed`-результате
+любого item или failed/skipped-статусе, даже если формальная проверка критиком завершена.
+Scope, план, acceptance, статусы, timestamps и метрики попадают в Case Store и
+детерминированную цепочку отчёта.
 
 ### 6.4. Quick → Deep
 
@@ -319,7 +322,11 @@ continuation-control не подменяет задачу пользовател
 Для него фиксируются `method=same_source_replay` и `independent=false`: совпадение через тот же
 MCP не называется независимой проверкой. Прохождение критика по архиву тоже ею не является.
 Матрица claims дополнительно различает `confirmed_in_archive`, `probable`, `disputed` и
-`not_confirmed`; она показывает силу ссылки на Evidence, а не истинность в реальном мире.
+`not_confirmed`. Первый статус отображается как «Связано с успешным Evidence»: он фиксирует
+только существующую ссылку и успешный статус записи, а не смысловое подтверждение текста
+и не истинность в реальном мире. Каждый claim обязан содержать Evidence ID; ответ по
+собранным Evidence должен иметь structured claims. Вердикт `ok` несовместим с issues:
+такой ответ критика детерминированно превращается в rework.
 Manifest содержит `verification` и `provenance`: фактические `source_info` (endpoint,
 tenant IDs, fingerprint схемы, fake Earth), prompt version, отсутствие подписи и временные
 поля, реально прочитанные через `field_lookup`, без выдуманной нормализации времени.
@@ -352,10 +359,24 @@ Pivot выбирается по дискриминирующей ценност�
 
 Замена источника более слабым понижает класс в самом claim. Без дедупликации допустимо только
 «не менее N». Critic детерминированно отклоняет `полный` при partial/error или proxy
-`field_fill_rates`, а также проверяет alternatives, baseline, симметрию и failed work items.
+`field_fill_rates`, а `агрегатный` — если claim ссылается только на выборку без count/top/aggregate/SQL.
+Доля событий с признаком вычисляется как числитель и знаменатель с одинаковыми окном и фильтром;
+неполный top-N такую долю не доказывает. Critic также проверяет alternatives, baseline, симметрию
+и failed work items.
+
+Для первого/последнего события `done` требует `count_events=0` до/после якоря с теми же фильтрами
+либо полного покрытия соответствующей стороны окна. Недоказанная граница и `has_more=true` дают
+`partial` и NOT_CHECKED; соседний бакет не доказывает абсолютное начало. Вторичный генератор
+или источник профилируется одним запросом, если способен изменить главный вывод/датировку;
+независимые аномалии и полный разбор top-N в текущий Scope не добавляются.
 
 `queries.md`, `evidence.jsonl` и `events.csv` остаются фактическими результатами вызовов
 с учётом `partial/error`; они не удостоверяют автоматически каждый вывод в свободном тексте.
+Каждый запрос имеет стабильный якорь `query-N`; матрица claims содержит ссылки `Q1…QN`
+на воспроизводящие запросы в `queries.md` и машинные `query_refs` в verification metadata.
+Последующий Memory Save добавляет аудит памяти до verification-блока и пересобирает пакет
+с сохранением статуса, issues, claims/`query_refs`, revision, имён файлов и `saved_at`;
+пересборка не возвращает manifest к `not_reviewed`.
 При `rework_report` требуется новый revision и отличающийся Markdown. Ответ без нового
 `save_report` или файл без изменений не передаётся критику повторно как будто исправленный:
 это `update_failed`. Финальный блок проверки обновляет тот же файл, сохраняя имя,
@@ -385,13 +406,15 @@ Pivot выбирается по дискриминирующей ценност�
 
 | Skill | Когда применяется | Основные ограничения |
 |---|---|---|
-| `incident_dating` v1 | Найти первое наблюдаемое событие | До 8 изменений окна; до 2 окон без новой информации |
+| `incident_dating` v2 | Найти первое наблюдаемое событие | До 8 изменений окна; до 2 окон без новой информации; доказанная левая граница |
 | `event_drilldown` v1 | Разобрать одно событие по `uuid + timestamp` | Не меняет окно и не делает pivot |
 | `entity_pivot` v1 | Проверить связанные сущности | Глубина 2, до 4 новых anchors и 4 смены окна |
 
 `incident_dating` движется адаптивно: 1 час → 6 часов → 24 часа → 3/7/30 дней,
-затем сужает вилку. Результат называется **первым наблюдаемым событием**, а не
-гарантированным абсолютным началом инцидента.
+затем сужает вилку. Для `done` требуется count=0 строго до якоря или полное покрытие
+более раннего окна, включая проверку левее исходной границы. Иначе результат `partial`
+с NOT_CHECKED. Он называется **первым наблюдаемым событием**, а не гарантированным
+абсолютным началом инцидента.
 
 Anchors канонизируются как `type:value` в нижнем регистре. Повторные ветки,
 anchors без Evidence и превышение лимитов приводят к `partial` и `NOT_CHECKED`.
@@ -407,8 +430,10 @@ anchors без Evidence и превышение лимитов приводят 
 `get_evidence_batch(ids)`. `has_more=true` означает только подтверждённое look-ahead-запросом
 существование следующей страницы. Пустая следующая страница даёт `false` и `next_page=null`;
 ошибка проверки — `has_more=null` и `pagination_error`, а не ложное продолжение.
-Critic Evidence получает полные записи по claims/findings, а Critic Report — весь Evidence
-Bundle, чтобы проверять и ссылки, встречающиеся только в Markdown. Успешный вызов с теми
+Критики получают записи, связанные с claims/findings, а Critic Report дополнительно —
+ID, встречающиеся только в Markdown. Без ссылок доступны не более 20 последних записей.
+Большие коллекции и строки передаются LLM в ограниченной проекции с явным маркером
+сокращения; полные результаты сохраняются в state и `evidence.jsonl`. Успешный вызов с теми
 же фактическими аргументами и окном переиспользуется
 на любой попытке внутри того же run без нового MCP-запроса и дубликата Evidence.
 Одновременные одинаковые вызовы в параллельных items разделяют один singleflight-результат;
@@ -569,7 +594,7 @@ search. Старые дела без embedding появятся в поиске 
 | `window` | last_minutes или точные time_from/time_to |
 | `skill_id` | Выбранный skill или null |
 | `related_investigation_id` | Дело для явного continuation |
-| `confidence` | Уверенность маршрутизации 0–1 |
+| `confidence` | Уверенность маршрутизации 0–1; `new` при наличии истории принимается только от 0.75, иначе дело продолжается |
 | `escalation_reason` | Причина deep |
 | `edit_existing_report`, `export_data` | Специальные маршруты |
 | `inspect_memory`, `memory_query` | Read-only обзор памяти и необязательная тема поиска |
@@ -648,9 +673,10 @@ same-source сравнения и ссылки на исходный/новый 
 - `investigation_id`, `user_id`, `thread_id`;
 - `task`, `summary`, `signature`, `entities`, `updated_at`;
 - `context`, `work_mode`, `depth_history`;
-- `evidence`, `findings`, `hypotheses`;
-- `skill_runs`, `anchors`, `visited_anchors`;
-- `inv_summary`, `inv_result`, `last_report`, `memory_operations`;
+- `evidence`, `tool_calls`, `analysis_datasets`, `analysis_results`;
+- `findings`, `hypotheses`, `skill_runs`, `anchors`, `visited_anchors`;
+- `inv_summary`, `inv_result`, `report_result`, `last_report`, `memory_operations`;
+- `independent_verification`, `verification_checks` и provenance source/time;
 - `investigation_scope`, `investigation_plan`, `work_items`, `run_metrics`, `chain`.
 
 ### 10.10. `ContextFact`
@@ -676,8 +702,11 @@ Scope содержит `mode=discovery/targeted/alert`, `objective`, `included`,
 
 `run_metrics` содержит записи по ролям и items: модель, timestamps, длительность,
 prompt/completion/total tokens, tool calls по именам, повторные запросы и число
-continuations. `agent_phase`, `continuation` и `termination_reason` различают обычную
-работу, finalization и fallback; завершённые до таймаута вызовы сохраняются в метриках.
+continuations. `llm_messages` считает фактические AI-ответы, `usage_messages` — ответы
+с token usage. `token_usage_status=available/partial/unavailable` и `token_usage_complete`
+отличают полный учёт от частичного/отсутствующего; нули при unavailable не означают нулевую
+стоимость. `agent_phase`, `continuation` и `termination_reason` различают обычную работу,
+finalization, fallback и `no_progress`; завершённые до таймаута вызовы сохраняются.
 Те же метрики вкладываются в `manifest.json` и возвращаются через MCP.
 
 ## 11. Инструменты
@@ -816,8 +845,9 @@ Export:
 ### 12.1. ArtifactStore
 
 `agent/artifact_store.py` сохраняет файлы в SeaweedFS по S3 API. Ключ имеет вид
-`investigations/<case-id>/<run-id>/<filename>`. ZIP собирается во временный файл и
-загружается чанками; `put_artifact_file` не требует data URL. В `state.artifacts` находятся
+`investigations/<case-id>/<run-id>/<content-hash>/<filename>`, поэтому изменённая версия
+не перезаписывает прежний объект, а одинаковое содержимое сохраняется идемпотентно.
+ZIP собирается во временный файл и загружается чанками; `put_artifact_file` не требует data URL. В `state.artifacts` находятся
 только storage, key, filename, content type, размер и SHA-256; base64 остаётся лишь в inline fallback
 локального режима или при сбое S3 для файлов до 256 КиБ. Для ZIP отдельно сохраняются
 `package_sha256` и `manifest_sha256`; цифровой подписи артефактов пока нет.
@@ -970,7 +1000,9 @@ Structured output строится через function calling с fallback на 
 | Finalize attempts | до 10 внутри общего дедлайна | Первая и до девяти исправляющих попыток |
 | Finalize attempt timeout | 300 с на model call | Переход к следующей попытке или fallback |
 | Agent hard timeout | 900 с на запуск роли | `partial/failed` поверх сохранённого state |
-| Export timeout | 120 с | Evidence error и ответ об ошибке |
+| Run timeout | 1800 с на весь граф | Новые волны останавливаются, pending items — `skipped`, роли получают оставшееся время |
+| LLM request timeout | 300 с на прямой model call | Ошибка/timeout обрабатывается соответствующим fallback |
+| Export timeout | до 120 с и оставшегося времени run | Evidence error и ответ об ошибке |
 | Analysis dataset | 20000 строк | Датасет и связанный SQL получают `complete=false` при усечении |
 | Analysis result | 10000 строк | `truncated=true`, Evidence `partial` |
 | `analysis_sql` attempts | 6 на run | Седьмой вызов — `sql_attempt_limit`, без нового Evidence |
@@ -991,8 +1023,11 @@ Tool limit принадлежит одному запуску роли. У Scout
 continuation нет: после лимита сразу создаётся fallback с limitation. Investigator и
 Reporter автоматически получают до `AGENT_MAX_CONTINUATIONS=1` продолжения на work item;
 перед каждым сбрасывается только `run_tool_call_count`, а handoff и Evidence сохраняются.
-Новое сообщение и rework тоже начинают новый вызов. Таймер счётчик не сбрасывает.
-Текст middleware не считается ответом.
+Investigator не запускает следующий continuation, если текущий сегмент не добавил Evidence.
+Повторный rework work item без новых Evidence получает `termination_reason=no_progress`,
+`result.status=partial` и `WorkItem.status=failed`; прежний acceptance остаётся в NOT_CHECKED,
+а повторный LLM-критик не вызывается. Новое сообщение и rework с новыми Evidence продолжаются
+обычно. Таймер счётчик не сбрасывает. Текст middleware не считается ответом.
 
 ### 14.2. Partial state, finalization и continuation
 
@@ -1023,11 +1058,15 @@ Structured response получает до 10 попыток внутри общ�
 и дубликата. Ошибки не кэшируются; первая попытка и новый пользовательский run
 выполняют запросы обычно.
 
-### 14.3. Что не является общим дедлайном
+### 14.3. Общий технический дедлайн
 
-`AGENT_TIMEOUT_SECONDS` не ограничивает весь чат. Прямые вызовы Intent, chat и
-критиков отдельным agent timeout не покрыты, поэтому полный run может быть длиннее
-900 секунд. Пользовательского бюджета времени нет.
+`AGENT_RUN_TIMEOUT_SECONDS=1800` ограничивает весь run. Он фиксируется в `run_deadline_at`
+при новом пользовательском сообщении. Роли получают минимум собственного и оставшегося
+времени; export также учитывает остаток. После дедлайна новые волны не запускаются,
+pending items получают `skipped` с явными limitations и `NOT_CHECKED`. Intent, Scope,
+Planner, критики, Chat и Memory consolidation используют fallback без нового LLM-вызова.
+Прямой model call дополнительно ограничен `LLM_REQUEST_TIMEOUT_SECONDS=300`.
+Это техническая защита, а не пользовательский бюджет и не SLO.
 
 ### 14.4. Деградация
 
@@ -1084,7 +1123,8 @@ slash-команд нет; ручные pause/resume и tool-step режим в�
 - **Старые дела:** без embedding не участвуют в поиске похожих до следующего save.
 - **Наблюдения не факты:** `observed` имеет ограниченный TTL и требует перепроверки.
 - **Fallback:** текстовый structured fallback остаётся явной деградацией с limitation.
-- **Нет общего дедлайна:** отдельные agent timeout не покрывает весь run.
+- **Дедлайн кооперативный:** синхронные вызовы ограничены request timeout, но не каждый
+  внешний вызов отменяется ровно на границе общего дедлайна.
 
 ## 17. Карта кода и проверки
 
@@ -1116,6 +1156,7 @@ slash-команд нет; ручные pause/resume и tool-step режим в�
 | `agent/verification_tools.py` | Same-source повторные запросы |
 | `agent/provenance.py` | Источник, временные поля и сводка проверок |
 | `agent/metrics.py` | Длительность, токены, tool calls и повторы |
+| `agent/deadline.py` | Оставшееся время и общий технический дедлайн run |
 | `agent/state.py` | Общие Evidence/Case/Memory Channels и supervisor |
 | `agent/observability.py` | OpenInference role/scope/item metadata и prompt version |
 | `agent/execution_audit.py` | Фактические model inputs в `agent_memory.execution_events` |

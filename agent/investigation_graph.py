@@ -6,6 +6,7 @@ from langgraph.graph import END, START, StateGraph
 
 from agents import node_investigator
 from critics import node_critic_evidence
+from deadline import run_expired
 from planner import item_input, node_collect, node_planner, ready_items
 from scope import node_scope
 from state import State
@@ -14,6 +15,8 @@ from subgraph import apply_delta, invoke_subgraph, state_delta
 
 def _build_item_graph(settings):
     def after_investigator(state: State) -> str:
+        if (state.get("active_work_item") or {}).get("status") == "failed":
+            return END
         return "critic_evidence" if settings.critic_enabled else END
 
     builder = StateGraph(State)
@@ -30,7 +33,7 @@ def build_investigation_graph(settings):
     async def execute(state):
         original = state
         current = state
-        while ready_items(current):
+        while ready_items(current) and not run_expired(current):
             parallel = 1 if current.get("active_skill") else settings.planner_max_parallel
             wave = ready_items(current)[:parallel]
             updates = await asyncio.gather(*(
@@ -42,6 +45,20 @@ def build_investigation_graph(settings):
             current = apply_delta(current, node_collect(current))
             if current.get("replan_requested"):
                 break
+        if run_expired(current) and ready_items(current):
+            skipped = [{
+                "id": item["id"],
+                "status": "skipped",
+                "result": {
+                    "status": "failed",
+                    "summary": "Пропущено из-за общего таймаута расследования.",
+                    "claims": [],
+                    "limitations": ["Истёк общий дедлайн run."],
+                    "not_checked": [item.get("goal") or item["id"]],
+                },
+            } for item in ready_items(current)]
+            current = apply_delta(current, {"work_items": skipped})
+            current = apply_delta(current, node_collect(current))
         return state_delta(original, current)
 
     def after_execute(state: State) -> str:

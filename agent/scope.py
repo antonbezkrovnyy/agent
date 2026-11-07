@@ -75,6 +75,10 @@ def node_scope(state: State) -> dict:
     messages = with_prompt_override(state, "scope", messages)
     audit_messages("scope", state, messages)
     try:
+        from deadline import run_expired
+
+        if run_expired(state):
+            raise TimeoutError("Investigation run deadline exceeded")
         response = llm_mod.scope_llm.invoke(messages, config=trace_config("scope", state))
         scope = response if isinstance(response, InvestigationScope) else InvestigationScope.model_validate(response)
     except Exception:

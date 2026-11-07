@@ -88,3 +88,42 @@ def test_memory_save_failure_is_explicit(patch_llm, monkeypatch):
     assert result["memory_saved"] == ""
     assert "недоступна" in result["memory_error"]
     assert result["report_result"]["answer"] == "Ответ"
+
+
+def test_case_snapshot_restores_audit_analysis_and_verification(monkeypatch):
+    from langchain_core.messages import HumanMessage
+
+    fake = FakeMemory()
+    monkeypatch.setattr(memory_mod, "memory", fake)
+    state = {
+        "messages": [HumanMessage(content="Проверь события")],
+        "context": {"id": "case-full", "time_from": "2026-01-01", "time_to": "2026-01-02"},
+        "work_mode": "deep",
+        "evidence": [{"id": "ev-1"}],
+        "tool_calls": [{"id": "call-1"}],
+        "analysis_datasets": [{"id": "dataset-1", "rows": [{"value": 1}]}],
+        "analysis_results": [{"id": "analysis-1"}],
+        "verification_checks": [{"id": "check-1"}],
+        "independent_verification": {"status": "passed"},
+        "run_metrics": [{"agent": "investigator"}],
+        "report_result": {"answer": "Готово", "claims": []},
+        "tenant": "tenant-1",
+        "source_endpoint": "https://source.test",
+        "schema_version": "schema-1",
+        "time_semantics": "event_time",
+        "time_axes": {"event": "timestamp"},
+    }
+    case = memory_mod._case_from_state(state, {"configurable": {"thread_id": "first"}})
+    fake.cases[("anonymous", "case-full")] = case
+
+    restored = memory_mod.node_memory_load(
+        {"intent": {"related_investigation_id": "case-full"}},
+        {"configurable": {"thread_id": "second"}},
+    )
+
+    for key in (
+        "tool_calls", "analysis_datasets", "analysis_results", "verification_checks",
+        "independent_verification", "run_metrics", "report_result", "tenant",
+        "source_endpoint", "schema_version", "time_semantics", "time_axes",
+    ):
+        assert restored[key] == state[key]

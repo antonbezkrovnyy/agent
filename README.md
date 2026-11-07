@@ -65,7 +65,8 @@ Mars API, Aegra предоставляет API и checkpoints, Phoenix соби�
   структурированные `issues` критиков с `suggested_action`.
 - Модели по ролям через env; `model` и фактическая `duration_ms` в `skill_runs`.
 - Метрики `run_metrics` по ролям и items: длительность, токены, tool calls по типам,
-  повторные запросы и continuations. Они попадают в Case Store, manifest и MCP.
+  повторные запросы и continuations. `token_usage_status=available/partial/unavailable`
+  отличает нулевое потребление от отсутствующего usage. Метрики попадают в Case Store, manifest и MCP.
 - Phoenix annotations, 26 golden-сценариев и штатные Datasets/Experiments для сравнения
   моделей и версий промптов; локальная validation не запускает живые runs.
 - `Evidence` с фактическими аргументами, окном, статусом и результатом вызова.
@@ -74,15 +75,19 @@ Mars API, Aegra предоставляет API и checkpoints, Phoenix соби�
   вызовы объединяются через singleflight. `run_id` и полный набор аргументов, включая
   страницы и фильтры, входят в ключ: разные порции не склеиваются, новый run получает
   свежие данные.
-- Компактный обзор Evidence для агентов, полные записи по claims/findings для Critic
-  Evidence и весь Evidence Bundle для Critic Report. Локальный `get_evidence(id)` и
-  batch-чтение не требуют повторного MCP-запроса. `has_more=true` означает только
+- Компактный обзор Evidence для агентов, связанные с claims/findings/Markdown записи
+  для критиков. Большие коллекции передаются LLM в ограниченной проекции, полные данные
+  остаются в state и ZIP. Локальный `get_evidence(id)` и batch-чтение не требуют повторного
+  MCP-запроса. Каждый claim требует Evidence ID, а `ok` несовместим с открытыми issues.
+  `has_more=true` означает только
   подтверждённую look-ahead-запросом следующую страницу; пустая страница — `false`,
   ошибка проверки — `null` с `pagination_error`. Категоричная полнота допустима только
   при `has_more=false`; `null` запрещает её как неизвестную, а не подтверждает продолжение.
 - Детерминированные проверки отчёта: Evidence ID из Markdown, явные суммы, сумма бакетов
-  timeline, null/остаток, несоответствие `evidence_class=полный` partial/proxy Evidence и
-  ложные утверждения об отсутствии уже созданного ZIP.
+  timeline, null/остаток, `evidence_class=полный` при partial/proxy и `агрегатный` без
+  агрегатного Evidence. Массовые доли требуют общие окно/фильтр у числителя и знаменателя;
+  первое/последнее событие — доказанную границу, иначе partial. Значимый для основного
+  вывода вторичный источник профилируется без разбора всех top-N.
   Для ключевых Deep-аномалий требуются альтернативные гипотезы, дискриминирующий тест,
   профиль распределения вместо top-N и required baseline; pivot идёт по ценности для гипотез.
 - Детерминированная цепочка «задача → вызовы → окна → режимы → находки →
@@ -95,13 +100,16 @@ Mars API, Aegra предоставляет API и checkpoints, Phoenix соби�
   а не успешной доработкой. `verification_recheck` повторяет критичные запросы и сохраняет
   `matched/changed/error`, но явно остаётся same-source проверкой, а не независимым
   доказательством. Матрица по каждому claim различает «подтверждено в архиве», «вероятно»,
-  «спорно» и «не подтверждено». Manifest фиксирует фактический источник, схему и временные поля.
+  «спорно» и «не подтверждено», а ссылки `Q1…QN` ведут к воспроизводящим запросам
+  в `queries.md`. Manifest фиксирует фактический источник, схему и временные поля.
 - Проверяемый самодостаточный ZIP: `report.md`, `queries.md`, полные `evidence.jsonl`,
   аудит каждого вызова `tool_calls.jsonl`, `events.csv`, JSONL-датасеты, SQL-результаты и
   `manifest.json` с валидацией ссылок и SHA-256. Хэши ZIP и manifest хранятся также вне
   архива в state и возвращаются через MCP. В отчёте есть компактный аудит всех вызовов.
-- SeaweedFS/S3-хранение файлов по ключам `investigations/<case>/<run>/<file>`;
-  ZIP собирается во временный файл и загружается потоком, без base64 в постоянном state.
+- SeaweedFS/S3-хранение файлов по ключам
+  `investigations/<case>/<run>/<content-hash>/<file>`; новая версия не перезаписывает
+  прежний объект. ZIP собирается во временный файл и загружается потоком, без base64
+  в постоянном state.
   Отменённые вызовы попадают в аудит как `cancelled`, схема полей валидируется через
   `field_lookup`, SQL-ошибки возвращают machine-readable recovery.
 - Асинхронный MCP-интерфейс самого агента: старт, статус, результат, отмена и
@@ -211,7 +219,9 @@ docker compose up -d --build
 - `SUMMARIZATION_TRIGGER_TOKENS`, `SUMMARIZATION_KEEP_MESSAGES` — суммаризация истории;
 - `AGENT_TOOL_LIMIT_SCOUT/INVESTIGATOR/REPORTER`, `AGENT_FINALIZE_AFTER_SECONDS`,
   `AGENT_FINALIZE_ATTEMPTS`, `AGENT_FINALIZE_ATTEMPT_TIMEOUT_SECONDS`,
-  `AGENT_TIMEOUT_SECONDS`, `EXPORT_TIMEOUT_SECONDS`, `MAX_REWORK` — лимиты и таймауты;
+  `AGENT_TIMEOUT_SECONDS`, `AGENT_RUN_TIMEOUT_SECONDS`, `LLM_REQUEST_TIMEOUT_SECONDS`,
+  `EXPORT_TIMEOUT_SECONDS`, `MAX_REWORK` — лимиты и таймауты;
+  `INTENT_NEW_INVESTIGATION_MIN_CONFIDENCE=0.75` — защита текущего дела от неуверенной смены темы;
 - `CRITIC_MESSAGE_LIMIT`, `CRITIC_DIALOG_LIMIT`, `REPORT_INJECT_LIMIT` — размеры контекста;
 - `LOGIQ_URL`, `LOGIQ_USER`, `LOGIQ_PASSWORD`, `LOGIQ_TLS_VERIFY` — LogiCore;
 - `LOGIQ_API_TOKEN` — авторизация MCP streamable-http;
@@ -375,6 +385,8 @@ Quick и deep используют общие Evidence и handoff, но имею
 | Попытки structured finalization | до 10 внутри общего дедлайна |
 | Таймаут одной finalize-попытки | 300 с |
 | Общий hard timeout одной роли | 900 с |
+| Технический timeout всего run | 1800 с |
+| Таймаут одного LLM-запроса | 300 с |
 | Таймаут узла `export` | 120 с |
 | Возвраты на доработку за внешний run | 1 |
 | Work items / параллельные ветки | 5 / 2 |
@@ -408,8 +420,10 @@ Structured response получает до 10 попыток внутри общ�
 приватную историю. Повторный work item получает continuation-handoff только у Investigator;
 идентичный успешный MCP-запрос с теми же аргументами и окном переиспользует Evidence на
 любой попытке, а одновременные одинаковые вызовы объединяются через singleflight.
-Таймаут одной роли не ограничивает длительность всего run: прямые вызовы intent, chat
-и критиков отдельным таймаутом сейчас не покрыты.
+`AGENT_RUN_TIMEOUT_SECONDS=1800` задаёт технический дедлайн всего run: роли получают
+только оставшееся время, новые волны не запускаются, pending items явно становятся
+`skipped`. Прямые LLM-вызовы ограничены `LLM_REQUEST_TIMEOUT_SECONDS=300`. Это не
+пользовательский бюджет и не измеренный SLO.
 
 ## Текущие ограничения и велосипеды
 
@@ -438,7 +452,7 @@ Structured response получает до 10 попыток внутри общ�
 9. **S3-артефакты** — SeaweedFS, object keys и обновляемые signed URL.
 10. **MCP агента** — structuredContent, continuation/restart, отчёты, Evidence и отмена.
 11. **Scope и ограниченный Planner** — Discovery/Targeted/Alert, acceptance и optional.
-12. **Метрики и качество** — run/item metrics, Phoenix annotations и 24 golden-сценария.
+12. **Метрики и качество** — run/item metrics, Phoenix annotations и 26 golden-сценариев.
 13. **Упрощение архитектуры** — общие state-каналы, skill runtime и единый artifact service.
 
 Этапы 1–4 образуют MVP. Архитектура, контракты и приёмочные сценарии —

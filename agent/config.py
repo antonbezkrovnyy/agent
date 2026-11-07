@@ -52,7 +52,7 @@ class Settings(BaseSettings):
     planner_max_revisions: int = 2
     scope_discovery_max_items: int = 2
     scope_required_max_items: int = 2
-    agent_prompt_version: str = "2026-11-07.7"
+    agent_prompt_version: str = "2026-11-07.8"
 
     # Отдельные Case Store и Context Memory, не БД Aegra checkpoints
     agent_memory_database_url: str = ""
@@ -75,6 +75,9 @@ class Settings(BaseSettings):
     agent_finalize_attempts: int = 10
     agent_finalize_attempt_timeout_seconds: int = 300
     agent_timeout_seconds: int = 900
+    agent_run_timeout_seconds: int = 1800
+    llm_request_timeout_seconds: int = 300
+    intent_new_investigation_min_confidence: float = 0.75
     export_timeout_seconds: int = 120
 
     # Изолированный SQL-анализ полных выгрузок, без исполнения кода в Aegra

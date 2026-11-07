@@ -14,9 +14,12 @@ from observability import trace_config
 from progress import agent_progress, simple_progress
 from prompts import compose, intent_hint_block, system_prompt
 from artifact_store import artifact_from_data_url, artifact_url
+from config import Settings
 from reporting import build_report
 from skills import get_skill
 from state import State
+
+settings = Settings()
 
 
 def _intent_messages(state: State) -> list[BaseMessage]:
@@ -29,6 +32,10 @@ def _intent_structured(state: State) -> dict | None:
     messages = with_prompt_override(state, "intent", _intent_messages(state))
     audit_messages("intent", state, messages)
     try:
+        from deadline import run_expired
+
+        if run_expired(state):
+            return None
         decision = llm_mod.intent_llm.invoke(
             messages,
             config=trace_config("intent", state),
@@ -187,8 +194,14 @@ def node_intent(state: State) -> dict:
     """Выбрать quick/deep и автоматически обновить контекст расследования."""
     decision = _normalize_intent(_intent_structured(state) or _intent_fallback(state), state)
     transition = decision.get("new_investigation") or "continue"
-    if transition == "uncertain":
+    has_history = bool(state.get("evidence") or state.get("findings") or state.get("last_report"))
+    if transition == "uncertain" or (
+        transition == "new"
+        and has_history
+        and float(decision.get("confidence") or 0) < settings.intent_new_investigation_min_confidence
+    ):
         transition = "continue"
+        decision["confidence_guard"] = "Низкая уверенность смены темы: текущее дело сохранено."
     decision["new_investigation"] = transition
     mode = decision.get("work_mode") or "quick"
     previous_mode = state.get("work_mode")
@@ -246,7 +259,11 @@ def _archive_update(state: State) -> dict:
     if not markdown:
         return {"archive_done": 1}
     _, url, _ = build_report(title, markdown)
-    artifact = artifact_from_data_url(url, state.get("context") or {})
+    artifact = artifact_from_data_url(
+        url,
+        state.get("context") or {},
+        state.get("mcp_reuse_run_id") or "current",
+    )
     message = AIMessage(content="Прежний отчёт сохранён файлом.", name="archive")
     message.artifacts = [artifact_url(artifact)]
     return {"archive_done": 1, "artifacts": [artifact], "messages": [message]}

@@ -11,8 +11,23 @@ def test_inline_fallback_keeps_local_mode_compatible(monkeypatch):
     artifact = put_artifact("report.md", b"# report", "text/markdown", {"id": "case-1"})
 
     assert artifact["storage"] == "inline"
-    assert artifact["key"].startswith("investigations/case-1/current/report.md")
+    assert artifact["key"].startswith("investigations/case-1/current/")
+    assert artifact["key"].endswith("/report.md")
+    assert artifact["sha256"][:16] in artifact["key"]
     assert artifact_url(artifact).startswith("data:text/markdown;base64,")
+
+
+def test_artifact_keys_are_immutable_by_content_and_run(monkeypatch):
+    monkeypatch.setattr(artifacts._settings, "artifact_store_backend", "local")
+
+    first = put_artifact("report.md", b"one", "text/markdown", {"id": "case-1"}, "run-1")
+    same = put_artifact("report.md", b"one", "text/markdown", {"id": "case-1"}, "run-1")
+    changed = put_artifact("report.md", b"two", "text/markdown", {"id": "case-1"}, "run-1")
+    next_run = put_artifact("report.md", b"one", "text/markdown", {"id": "case-1"}, "run-2")
+
+    assert first["key"] == same["key"]
+    assert changed["key"] != first["key"]
+    assert next_run["key"] != first["key"]
 
 
 def test_s3_upload_returns_key_and_fresh_signed_url(monkeypatch):
@@ -49,7 +64,7 @@ def test_s3_upload_returns_key_and_fresh_signed_url(monkeypatch):
     second = artifact_url(artifact)
 
     assert artifact["storage"] == "s3"
-    assert artifact["key"] == "investigations/case/1/run-2/report.md"
+    assert artifact["key"] == f"investigations/case/1/run-2/{artifacts.hashlib.sha256(b'# report').hexdigest()[:16]}/report.md"
     assert "base64" not in str(artifact)
     assert first.startswith("http://localhost:8333/logicore-investigations/")
     assert "X-Amz-Signature=" in first
@@ -60,7 +75,7 @@ def test_s3_upload_returns_key_and_fresh_signed_url(monkeypatch):
     Clock.current += timedelta(hours=2)
     refreshed = artifact_url(artifact)
     assert refreshed != first
-    assert artifact["key"] == "investigations/case/1/run-2/report.md"
+    assert artifact["key"] == f"investigations/case/1/run-2/{artifacts.hashlib.sha256(b'# report').hexdigest()[:16]}/report.md"
     assert [item[0] for item in requests] == ["PUT", "PUT"]
 
 
@@ -117,9 +132,10 @@ def test_report_package_uses_streaming_upload(monkeypatch):
 
     uploaded = {}
 
-    def upload(filename, path, content_type, context):
+    def upload(filename, path, content_type, context, run_id):
         uploaded["filename"] = filename
         uploaded["content"] = path.read_bytes()
+        uploaded["run_id"] = run_id
         return {
             "storage": "s3",
             "key": "investigations/case-package/run/package.zip",
@@ -131,11 +147,12 @@ def test_report_package_uses_streaming_upload(monkeypatch):
 
     monkeypatch.setattr(artifact_service, "s3_enabled", lambda: True)
     monkeypatch.setattr(artifact_service, "put_artifact_file", upload)
-    state = state_with_evidence()
+    state = {**state_with_evidence(), "mcp_reuse_run_id": "run-report"}
     runtime = SimpleNamespace(state=state, tool_call_id="call-report-stream")
 
     result = save_report.func("Потоковый отчёт", "# Вывод", runtime=runtime)
 
+    assert uploaded["run_id"] == "run-report"
     assert uploaded["filename"].endswith(".zip")
     assert uploaded["content"].startswith(b"PK")
     assert result.update["artifacts"][1]["storage"] == "s3"

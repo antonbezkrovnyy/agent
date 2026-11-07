@@ -299,6 +299,7 @@ def _agent_input(state: State, work_key: str) -> dict:
         "run_metrics": list(state.get("run_metrics") or []),
         "case_task": case_task,
         "mcp_reuse_run_id": state.get("mcp_reuse_run_id") or "",
+        "run_deadline_at": state.get("run_deadline_at") or "",
         "independent_verification": state.get("independent_verification") or {},
         "verification_checks": list(state.get("verification_checks") or []),
         "tenant": state.get("tenant") or "",
@@ -527,6 +528,11 @@ def _prefer_stream_state(latest: dict, candidate: dict) -> dict:
     return latest
 
 
+def _new_evidence(before: dict, after: dict) -> list[dict]:
+    previous = {item.get("id") for item in before.get("evidence") or [] if item.get("id")}
+    return [item for item in after.get("evidence") or [] if item.get("id") not in previous]
+
+
 def _transient_model_error(exc: Exception) -> bool:
     from openai import APIError
 
@@ -628,7 +634,7 @@ async def _finalize_agent(
                 return result, calls
             except RuntimeError:
                 pass
-    fallback_reason = "provider_error" if reason == "provider_error" else "finalize_exhausted"
+    fallback_reason = reason if reason in ("provider_error", "run_timeout") else "finalize_exhausted"
     return _timeout_result(schema, result, fallback_reason), calls
 
 
@@ -637,11 +643,14 @@ async def _run_agent(agent: str, state: State, work_key: str) -> tuple[dict, lis
     import time
 
     from metrics import summarize_agent_run
+    from deadline import remaining_seconds
 
     started_at = datetime.now(UTC)
     monotonic_start = time.monotonic()
-    soft_deadline = monotonic_start + min(settings.agent_finalize_after_seconds, settings.agent_timeout_seconds)
-    hard_deadline = monotonic_start + settings.agent_timeout_seconds
+    remaining = remaining_seconds(state)
+    role_timeout = settings.agent_timeout_seconds if remaining is None else min(settings.agent_timeout_seconds, remaining)
+    soft_deadline = monotonic_start + min(settings.agent_finalize_after_seconds, role_timeout)
+    hard_deadline = monotonic_start + role_timeout
     original_input = _agent_input(state, work_key)
     agent_input = original_input
     stage_text = {
@@ -664,7 +673,11 @@ async def _run_agent(agent: str, state: State, work_key: str) -> tuple[dict, lis
         segments_used = segment + 1
         limited = False
         for attempt in range(2):
-            result, timed_out = await _stream_agent(agent, agent_input, soft_deadline)
+            if role_timeout <= 0:
+                result = _timeout_result(schema, agent_input, "run_timeout")
+                timed_out = True
+            else:
+                result, timed_out = await _stream_agent(agent, agent_input, soft_deadline)
             total_calls += (result.get("run_tool_call_count") or {}).get("__all__", 0)
             if timed_out:
                 result, finalize_calls = await _finalize_agent(agent, result, schema, hard_deadline)
@@ -683,7 +696,15 @@ async def _run_agent(agent: str, state: State, work_key: str) -> tuple[dict, lis
                 new_messages = result["messages"][len(agent_input["messages"]):]
                 if attempt == 1 or new_messages:
                     raise
-        if finalized or not limited or segment == max_continuations:
+        if finalized or not limited:
+            break
+        if agent == "investigator" and not _new_evidence(agent_input, result):
+            result["termination_reason"] = "no_progress"
+            if result.get("structured_response") is None:
+                result["structured_response"] = await _finalize_limited(agent, result, schema)
+            finalized = True
+            break
+        if segment == max_continuations:
             break
         agent_input = {
             **result,
@@ -810,7 +831,12 @@ def node_chat(state: State) -> dict:
     messages = [SystemMessage(content=system), SystemMessage(content=documentation)]
     convo = with_prompt_override(state, "chat", [*messages, *_agent_convo_messages(state)])
     audit_messages("chat", state, convo)
-    response = llm_mod.llm.invoke(convo, config=trace_config("chat", state))
+    from deadline import run_expired
+
+    if run_expired(state):
+        response = AIMessage(content="Работа остановлена по техническому таймауту расследования.")
+    else:
+        response = llm_mod.llm.invoke(convo, config=trace_config("chat", state))
     update = _agent_final(state, response, "chat")
     update["progress"] = done_progress()
     return update
@@ -826,30 +852,64 @@ async def node_investigator(state: State) -> dict:
     """Инвестигейтор: завершает работу резюмем для критика и репортёра."""
     result, new_messages, update = await _run_agent("investigator", state, INV_MSGS)
     structured = _structured_response(result, llm_mod.InvestigationResult)
+    active_item = state.get("active_work_item") or {}
+    no_progress = result.get("termination_reason") == "no_progress" or (
+        bool(active_item.get("id"))
+        and (active_item.get("attempt") or 0) > 0
+        and not _new_evidence(state, result)
+    )
+    if no_progress:
+        note = "Повторный проход не добавил новых Evidence; доработка остановлена без доказательства acceptance."
+        result["termination_reason"] = "no_progress"
+        if update.get("run_metrics"):
+            update["run_metrics"][-1]["termination_reason"] = "no_progress"
+        structured["status"] = "partial"
+        if note not in structured.setdefault("limitations", []):
+            structured["limitations"].append(note)
+        unchecked = (active_item.get("critic") or {}).get("feedback") or active_item.get("acceptance") or note
+        if unchecked not in structured.setdefault("not_checked", []):
+            structured["not_checked"].append(unchecked)
+        if structured.get("skill_run"):
+            structured["skill_run"]["status"] = "partial"
+            if unchecked not in structured["skill_run"].setdefault("not_checked", []):
+                structured["skill_run"]["not_checked"].append(unchecked)
     if structured.get("limitations") and structured.get("status") == "done":
         structured["status"] = "partial"
     final = AIMessage(content=structured["summary"], name="investigator")
     update[INV_MSGS] = [*new_messages[:-1], final]
     update["messages"] = _public_notifications(new_messages)
     update.update(_skill_run_update(state, result, structured))
-    active_item = state.get("active_work_item") or {}
     if active_item.get("id"):
         item_context = update.pop("context", result.get("context") or state.get("context") or {})
         attempt = (active_item.get("attempt") or 0) + 1
+        critic = active_item.get("critic") or {}
+        if no_progress:
+            critic = {
+                "verdict": "rework_data",
+                "feedback": note,
+                "issues": [{
+                    "claim": structured["summary"],
+                    "evidence_ids": [],
+                    "reason": note,
+                    "suggested_action": "rework_data",
+                }],
+            }
         completed_item = {
             **active_item,
-            "status": "critic_review" if settings.critic_enabled else "done",
+            "status": "failed" if no_progress else "critic_review" if settings.critic_enabled else "done",
             "attempt": attempt,
             "started_at": active_item.get("started_at") or datetime.now(UTC).isoformat(timespec="seconds"),
             "finished_at": datetime.now(UTC).isoformat(timespec="seconds"),
             "result": structured,
             "metrics": (update.get("run_metrics") or [{}])[-1],
+            "critic": critic,
             "context": item_context,
         }
         update["active_work_item"] = completed_item
         update["work_items"] = [completed_item]
         update["progress"] = simple_progress(
             "planner",
+            f"Часть {active_item['id']} остановлена без новых данных" if no_progress else
             f"Проверяю часть {active_item['id']}" if settings.critic_enabled else f"Часть {active_item['id']} готова",
         )
         return update

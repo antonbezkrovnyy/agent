@@ -117,6 +117,10 @@ class FakeAgent(FakeMessagesListChatModel):
         return self
 
     def _next(self, system):
+        import re
+
+        evidence_ids = list(dict.fromkeys(re.findall(r'"id"\s*:\s*"(call[_-][A-Za-z0-9-]+)"', system)))
+        claims = [{"text": "", "evidence_ids": evidence_ids}] if evidence_ids else []
         for role in ROLES:
             if role not in system:
                 continue
@@ -125,6 +129,7 @@ class FakeAgent(FakeMessagesListChatModel):
             message = self.by_role[role].pop(0)
             if not message.content:
                 return message
+            claims = [{**claim, "text": message.content} for claim in claims]
             if role == "Ты — скаут":
                 return ai(calls=[tc("ScoutResult", {
                     "note": message.content,
@@ -134,11 +139,11 @@ class FakeAgent(FakeMessagesListChatModel):
                 })])
             if role == "Ты — инвестигейтор":
                 return ai(calls=[tc("InvestigationResult", {
-                    "summary": message.content, "claims": [], "limitations": [],
+                    "summary": message.content, "claims": claims, "limitations": [],
                 })])
             if role == "Ты — репортёр":
                 return ai(calls=[tc("ReporterResult", {
-                    "answer": message.content, "claims": [], "limitations": [],
+                    "answer": message.content, "claims": claims, "limitations": [],
                 })])
             return message
         raise AssertionError(f"скрипт исчерпан: {system[:100]!r}")

@@ -81,14 +81,31 @@ def evidence_bundle(state: dict, evidence_ids: Iterable[str] | None = None) -> d
     }
 
 
+def _prompt_value(value, *, max_items: int = 50, max_string: int = 10000):
+    if isinstance(value, dict):
+        return {key: _prompt_value(item, max_items=max_items, max_string=max_string) for key, item in value.items()}
+    if isinstance(value, (list, tuple)):
+        items = [_prompt_value(item, max_items=max_items, max_string=max_string) for item in value[:max_items]]
+        if len(value) > max_items:
+            items.append(f"… ещё {len(value) - max_items} элементов; полные данные в evidence.jsonl")
+        return items
+    if isinstance(value, str) and len(value) > max_string:
+        return value[:max_string] + "…[truncated]"
+    return value
+
+
 def full_evidence_block(state: dict, evidence_ids: Iterable[str] | None = None) -> str:
     bundle = evidence_bundle(state, evidence_ids)
     if not bundle["items"]:
         return "Доказательства: отсутствуют."
+    bundle["items"] = [
+        {**record, "result": _prompt_value(record.get("result") or {})}
+        for record in bundle["items"]
+    ]
     title = (
-        "Фактические результаты инструментов (полный Evidence Bundle)"
+        "Evidence Bundle для LLM-проверки; большие коллекции сокращены, полные данные — в evidence.jsonl"
         if evidence_ids is None else
-        "Фактические результаты инструментов (Evidence, связанные с claims/findings)"
+        "Evidence, связанные с claims/findings/Markdown; большие коллекции сокращены"
     )
     return title + ":\n" + json_dumps(bundle, ensure_ascii=False)
 
@@ -204,6 +221,8 @@ def queries_markdown(state: dict) -> str:
     lines = ["# Запросы расследования", ""]
     for index, record in enumerate(state.get("evidence") or [], start=1):
         lines.extend([
+            f'<a id="query-{index}"></a>',
+            "",
             f"## {index}. {record.get('tool')}",
             "",
             f"- Evidence: `{record.get('id')}`",

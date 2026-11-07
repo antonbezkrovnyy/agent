@@ -173,3 +173,39 @@ def test_publish_does_not_touch_thread_with_newer_run(monkeypatch):
     assert client.posts == []
     assert item.publication_error
     assert store.published == []
+
+
+def test_evaluator_prompt_bounds_and_selects_evidence(monkeypatch):
+    class CapturingLLM(FakeLLM):
+        payload = ""
+
+        def invoke(self, messages):
+            self.payload = messages[-1].content
+            return super().invoke(messages)
+
+    model = CapturingLLM()
+    monkeypatch.setattr("evaluator._llm", lambda settings: model)
+    state = {
+        "evidence": [{
+            "id": "ev-1",
+            "status": "ok",
+            "complete": True,
+            "result": {"events": [{"uuid": f"event-{i}"} for i in range(60)]},
+        }, {
+            "id": "ev-2",
+            "status": "ok",
+            "complete": True,
+            "result": {"marker": "unrelated"},
+        }],
+        "report_result": {
+            "answer": "Вывод",
+            "claims": [{"text": "Вывод", "evidence_ids": ["ev-1"]}],
+        },
+    }
+
+    evaluate(state, trace(), Settings())
+
+    assert "event-49" in model.payload
+    assert "event-50" not in model.payload
+    assert "ещё 10 элементов" in model.payload
+    assert "unrelated" not in model.payload

@@ -10,7 +10,7 @@ from contracts import InvestigationPlan, InvestigationScope, WorkItem
 from observability import trace_config
 from progress import agent_progress, simple_progress
 from prompts import compose, context_block, structured_block, system_prompt
-from state import State
+from state import State, merge_work_items
 
 settings = Settings()
 
@@ -116,6 +116,10 @@ def node_planner(state: State) -> dict:
         messages = with_prompt_override(state, "planner", messages)
         audit_messages("planner", state, messages)
         try:
+            from deadline import run_expired
+
+            if run_expired(state):
+                raise TimeoutError("Investigation run deadline exceeded")
             response = llm_mod.planner_llm.invoke(messages, config=trace_config("planner", state))
             plan = response if isinstance(response, InvestigationPlan) else InvestigationPlan.model_validate(response)
         except Exception:
@@ -217,10 +221,15 @@ def _aggregate(state: State) -> dict:
             not_checked.append(item.get("goal") or item["id"])
         recommended = result.get("recommended_export_query") or recommended
     required_done = all(
-        item.get("status") == "done"
+        item.get("status") == "done" and (item.get("result") or {}).get("status") == "done"
         for item in items if item.get("required")
     )
-    status = "done" if items and required_done else "partial"
+    degraded = any(
+        item.get("status") in ("failed", "skipped")
+        or (item.get("result") or {}).get("status") in ("partial", "failed")
+        for item in items
+    )
+    status = "done" if items and required_done and not degraded else "partial"
     result = {
         "status": status,
         "summary": "\n".join(summaries) or "Нет завершённых work items.",
@@ -262,8 +271,13 @@ def node_collect(state: State) -> dict:
         },
     }
     blocked = _blocked_items(state)
+    aggregate_state = state
     if blocked:
         update["work_items"] = blocked
+        aggregate_state = {
+            **state,
+            "work_items": merge_work_items(items, blocked),
+        }
     replan = any(
         (item.get("result") or {}).get("replan_needed")
         and (item.get("result") or {}).get("replan_cause") in {
@@ -278,6 +292,6 @@ def node_collect(state: State) -> dict:
     elif ready_items(state):
         return update
     else:
-        update.update(_aggregate(state))
+        update.update(_aggregate(aggregate_state))
         update["progress"] = agent_progress(state, "reporter", "Формирую ответ", "reporter")
     return update

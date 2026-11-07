@@ -1,5 +1,7 @@
 """Supervisor диалога и investigation/reporting-субграфов LogiCore."""
 
+from datetime import UTC, datetime, timedelta
+
 from langchain_core.messages import HumanMessage
 from langgraph.graph import StateGraph, START, END
 from langgraph.types import Overwrite
@@ -26,6 +28,9 @@ def entry(state: State) -> dict:
     if state["messages"] and isinstance(state["messages"][-1], HumanMessage):
         return {
             "mcp_reuse_run_id": uuid4().hex,
+            "run_deadline_at": (
+                datetime.now(UTC) + timedelta(seconds=settings.agent_run_timeout_seconds)
+            ).isoformat(timespec="milliseconds"),
             "artifacts": Overwrite([]),
             "scout_msgs": Overwrite([]),
             "inv_msgs": Overwrite([]),

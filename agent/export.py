@@ -86,9 +86,11 @@ async def node_export(state: State) -> dict:
     try:
         if extract_data_tool is None:
             raise RuntimeError("Инструмент extract_data недоступен")
+        from deadline import capped_timeout
+
         raw = await asyncio.wait_for(
             extract_data_tool.ainvoke(args),
-            timeout=settings.export_timeout_seconds,
+            timeout=capped_timeout(state, settings.export_timeout_seconds),
         )
         text = _export_text(raw)
         data = json.loads(text)
@@ -149,7 +151,11 @@ async def node_export(state: State) -> dict:
         filename, url, _ = build_report("Выгрузка событий", answer)
         from artifact_store import artifact_from_data_url
 
-        artifacts.append(artifact_from_data_url(url, state.get("context") or {}))
+        artifacts.append(artifact_from_data_url(
+            url,
+            state.get("context") or {},
+            state.get("mcp_reuse_run_id") or "current",
+        ))
         update["last_report"] = {"title": "Выгрузка событий", "markdown": answer, "filename": filename}
     update["artifacts"] = artifacts
     update["progress"] = done_progress("Готово с ограничениями" if limitations else "Готово")

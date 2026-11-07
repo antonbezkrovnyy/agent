@@ -153,6 +153,65 @@ def test_updated_artifacts_stay_on_reporter_answer(monkeypatch):
     assert len(result["messages"][0].artifacts) == 2
 
 
+def test_memory_audit_preserves_verification_and_query_links(monkeypatch):
+    import base64
+    import io
+    import zipfile
+
+    from verification import _claim_statuses, verification_block
+
+    fake = FakeMemory()
+    monkeypatch.setattr(memory_mod, "memory", fake)
+    monkeypatch.setattr(
+        llm_mod,
+        "context_memory_llm",
+        FakeStructured(ContextMemoryConsolidation()),
+    )
+    claims = _claim_statuses(
+        [{"text": "Вывод", "evidence_ids": ["ev-new"], "evidence_class": "агрегатный"}],
+        [{"id": "ev-new", "status": "ok"}],
+        [],
+    )
+    verification = {
+        "status": "consistent_with_evidence",
+        "detail": "",
+        "issues": [],
+        "independent_verification": {"status": "not_performed"},
+        "claims": claims,
+    }
+    block = verification_block(
+        verification["status"],
+        [],
+        independent=verification["independent_verification"],
+        claim_statuses=claims,
+    )
+    state = {
+        **state_for_memory(),
+        "last_report": {
+            "title": "Проверка",
+            "markdown": f"Итог\n\n---\n\n{block}\n",
+            "verification": verification,
+            "revision": 3,
+        },
+        "report_result": {"answer": "Итог", "verification": verification},
+    }
+
+    result = memory_mod.node_memory_save(state, {})
+
+    assert result["last_report"]["verification"]["status"] == "consistent_with_evidence"
+    assert result["last_report"]["revision"] == 3
+    assert "Память расследования" in result["last_report"]["markdown"]
+    assert "[Q1](queries.md#query-1)" in result["last_report"]["markdown"]
+    package_url = result["artifacts"].value[1]["data_url"]
+    data = base64.b64decode(package_url.split("base64,", 1)[1].split("#", 1)[0])
+    with zipfile.ZipFile(io.BytesIO(data)) as bundle:
+        report = bundle.read("report.md").decode()
+        manifest = json.loads(bundle.read("manifest.json"))
+    assert "[Q1](queries.md#query-1)" in report
+    assert manifest["verification"]["status"] == "consistent_with_evidence"
+    assert manifest["verification"]["claims"][0]["query_refs"][0]["url"] == "queries.md#query-1"
+
+
 def test_manifest_contains_memory_audit():
     state = state_for_memory()
     state["memory_operations"] = [{

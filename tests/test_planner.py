@@ -67,13 +67,51 @@ def test_dependency_failure_skips_dependent_item(patch_llm, monkeypatch):
     statuses = {item["id"]: item["status"] for item in result_state["work_items"]}
     assert statuses == {"baseline": "failed", "report-part": "skipped"}
     assert result_state["inv_result"]["status"] == "partial"
+    assert "Work item report-part: skipped." in result_state["inv_result"]["limitations"]
+    assert "Проверить report-part" in result_state["inv_result"]["not_checked"]
     assert agent.by_role["Ты — инвестигейтор"] == []
+
+
+def test_item_critic_stops_at_rework_budget(monkeypatch):
+    import critics as critics_mod
+
+    monkeypatch.setattr(critics_mod.settings, "max_rework", 1)
+    critic = FakeStructured(CriticEvidence(verdict="rework_data", feedback="Нужны данные"))
+    monkeypatch.setattr(critics_mod.llm_mod, "critic_evidence_llm", critic)
+
+    def state(attempt, rework):
+        item = {
+            "id": "main",
+            "goal": "Проверить",
+            "acceptance": "Проверить",
+            "attempt": attempt,
+            "result": {"summary": "Недостаточно", "claims": []},
+            "status": "critic_review",
+        }
+        return {
+            "messages": [],
+            "evidence": [],
+            "active_work_item": item,
+            "work_items": [item],
+            "rework": rework,
+        }
+
+    first = critics_mod.node_critic_evidence(state(0, 0))
+    second = critics_mod.node_critic_evidence(state(1, first["rework"]))
+
+    assert first["work_items"][0]["status"] == "pending"
+    assert second["work_items"][0]["status"] == "failed"
+    assert critic.calls == 2
 
 
 def test_item_critic_retries_only_same_item(patch_llm):
     planner = FakeStructured(plan(item("baseline")))
     agent = FakeAgent({
-        "Ты — инвестигейтор": [result("Неполно"), result("Теперь доказано")],
+        "Ты — инвестигейтор": [
+            result("Неполно"),
+            ai(calls=[tc("count_events", {})]),
+            ai("Теперь доказано"),
+        ],
         "Ты — репортёр": [ai("Готово")],
     })
     critic = FakeStructured(results=[
@@ -174,3 +212,26 @@ def test_reporter_has_only_batch_evidence_reader():
     names = {tool.name for tool in reporter_tools}
     assert "get_evidence_batch" in names
     assert "get_evidence" not in names
+
+
+def test_aggregate_is_partial_when_completed_item_has_partial_result():
+    from planner import node_collect
+
+    update = node_collect({
+        "work_items": [{
+            "id": "main",
+            "goal": "Проверить",
+            "required": True,
+            "status": "done",
+            "result": {
+                "status": "partial",
+                "summary": "Ограничение инструментов",
+                "claims": [],
+                "limitations": ["Tool limit"],
+            },
+        }],
+        "investigation_plan": {"version": 1},
+        "context": {},
+    })
+
+    assert update["inv_result"]["status"] == "partial"

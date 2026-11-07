@@ -20,6 +20,7 @@ llm = init_chat_model(
     api_key=settings.llm_token,
     temperature=0.0,
     max_retries=3,
+    timeout=settings.llm_request_timeout_seconds,
 )
 
 
@@ -38,6 +39,7 @@ def model_for_role(role: str):
         api_key=settings.llm_token,
         temperature=0.0,
         max_retries=3,
+    timeout=settings.llm_request_timeout_seconds,
     )
 
 

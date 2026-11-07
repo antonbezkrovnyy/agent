@@ -187,15 +187,10 @@ def test_reporter_finalize_disables_new_mcp_calls(patch_llm, monkeypatch):
 
 
 def structured_result(text):
-    return ai(calls=[tc("InvestigationResult", {
-        "summary": text,
-        "claims": [],
-        "limitations": [],
-        "not_checked": [],
-    })])
+    return ai(text)
 
 
-def test_retry_reuses_identical_mcp_evidence_and_receives_continuation(patch_llm):
+def retry_setup(patch_llm, second_args):
     planner = FakeStructured(InvestigationPlan(
         goal="Проверить retry",
         items=[WorkItem(id="main", goal="Проверить retry")],
@@ -204,7 +199,7 @@ def test_retry_reuses_identical_mcp_evidence_and_receives_continuation(patch_llm
         "Ты — инвестигейтор": [
             ai(calls=[tc("count_events", {})]),
             structured_result("Первая попытка"),
-            ai(calls=[tc("count_events", {})]),
+            ai(calls=[tc("count_events", second_args)]),
             structured_result("Продолжение завершено"),
         ],
         "Ты — репортёр": [ai("Готово")],
@@ -219,8 +214,13 @@ def test_retry_reuses_identical_mcp_evidence_and_receives_continuation(patch_llm
         critic_evidence=critic,
         planner=planner,
     )
+    return agent, critic
 
-    result = invoke(build_graph(), "проверь retry", thread_id="runtime-retry")
+
+def test_retry_without_new_evidence_stops_as_partial(patch_llm):
+    agent, critic = retry_setup(patch_llm, {})
+
+    result = invoke(build_graph(), "проверь retry", thread_id="runtime-retry-no-progress")
 
     assert [item["tool"] for item in result["evidence"]] == ["count_events"]
     reused = [
@@ -228,8 +228,26 @@ def test_retry_reuses_identical_mcp_evidence_and_receives_continuation(patch_llm
         if isinstance(message, ToolMessage) and '"reused": true' in message.content
     ]
     assert len(reused) == 1
+    item = result["work_items"][0]
+    assert item["attempt"] == 2
+    assert item["status"] == "failed"
+    assert item["result"]["status"] == "partial"
+    assert item["metrics"]["termination_reason"] == "no_progress"
+    assert "не добавил новых Evidence" in item["result"]["limitations"][-1]
+    assert result["inv_result"]["status"] == "partial"
+    assert critic.calls == 1
+
+
+def test_retry_with_new_evidence_can_complete(patch_llm):
+    agent, critic = retry_setup(patch_llm, {"time_from": "2026-11-03T00:00:00+00:00"})
+
+    result = invoke(build_graph(), "проверь retry", thread_id="runtime-retry-progress")
+
+    assert len(result["evidence"]) == 2
     assert result["work_items"][0]["attempt"] == 2
+    assert result["work_items"][0]["status"] == "done"
     assert result["work_items"][0]["result"]["summary"] == "Продолжение завершено"
+    assert critic.calls == 2
     assert any("Continuation того же work item" in system for system in agent.systems)
     assert any(
         isinstance(message, HumanMessage) and "Продолжи main с сохранённого состояния" in message.content

@@ -189,10 +189,12 @@ def put_artifact_file(
     filename: str, path: Path, content_type: str, context: dict, run_id: str = "current",
 ) -> dict:
     safe_run = "".join(char if char.isalnum() or char in "-_" else "-" for char in run_id)
+    content_hash = _file_sha256(path)
     key = "/".join(filter(None, [
         _settings.artifact_s3_prefix.strip("/"),
         str(context.get("id") or "unassigned"),
         safe_run,
+        content_hash[:16],
         filename,
     ]))
     if _s3_enabled():
@@ -201,7 +203,7 @@ def put_artifact_file(
             return {
                 "storage": "s3", "key": key, "filename": filename,
                 "content_type": content_type, "bytes": path.stat().st_size,
-                "sha256": _file_sha256(path),
+                "sha256": content_hash,
             }
         except Exception:
             if path.stat().st_size > _settings.artifact_inline_fallback_bytes:
@@ -211,10 +213,12 @@ def put_artifact_file(
 
 def put_artifact(filename: str, data: bytes, content_type: str, context: dict, run_id: str = "current") -> dict:
     safe_run = "".join(char if char.isalnum() or char in "-_" else "-" for char in run_id)
+    content_hash = hashlib.sha256(data).hexdigest()
     key = "/".join(filter(None, [
         _settings.artifact_s3_prefix.strip("/"),
         str(context.get("id") or "unassigned"),
         safe_run,
+        content_hash[:16],
         filename,
     ]))
     if _s3_enabled():
@@ -223,7 +227,7 @@ def put_artifact(filename: str, data: bytes, content_type: str, context: dict, r
             return {
                 "storage": "s3", "key": key, "filename": filename,
                 "content_type": content_type, "bytes": len(data),
-                "sha256": hashlib.sha256(data).hexdigest(),
+                "sha256": content_hash,
             }
         except Exception:
             if len(data) > _settings.artifact_inline_fallback_bytes:
@@ -232,14 +236,14 @@ def put_artifact(filename: str, data: bytes, content_type: str, context: dict, r
     return {
         "storage": "inline", "key": key, "filename": filename,
         "content_type": content_type, "bytes": len(data),
-        "sha256": hashlib.sha256(data).hexdigest(),
+        "sha256": content_hash,
         "data_url": f"data:{content_type};base64,{encoded}#{quote(filename)}",
     }
 
 
-def artifact_from_data_url(url: str, context: dict) -> dict:
+def artifact_from_data_url(url: str, context: dict, run_id: str = "current") -> dict:
     header, encoded = url.split("base64,", 1)
     content_type = header.removeprefix("data:").removesuffix(";")
     payload, _, fragment = encoded.partition("#")
     filename = fragment or "artifact"
-    return put_artifact(filename, base64.b64decode(payload), content_type, context)
+    return put_artifact(filename, base64.b64decode(payload), content_type, context, run_id)

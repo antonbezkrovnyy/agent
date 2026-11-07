@@ -136,16 +136,50 @@ def _llm(settings) -> ChatOpenAI:
     )
 
 
+def _prompt_value(value, *, max_items: int = 50, max_string: int = 10000):
+    if isinstance(value, dict):
+        return {key: _prompt_value(item, max_items=max_items, max_string=max_string) for key, item in value.items()}
+    if isinstance(value, (list, tuple)):
+        items = [_prompt_value(item, max_items=max_items, max_string=max_string) for item in value[:max_items]]
+        if len(value) > max_items:
+            items.append(f"… ещё {len(value) - max_items} элементов; полные данные в state")
+        return items
+    if isinstance(value, str) and len(value) > max_string:
+        return value[:max_string] + "…[truncated]"
+    return value
+
+
+def _prompt_evidence(state: dict) -> list[dict]:
+    records = list(state.get("evidence") or [])
+    referenced = []
+    for key in ("inv_result", "report_result"):
+        result = state.get(key) or {}
+        referenced.extend(result.get("evidence_ids") or [])
+        for claim in result.get("claims") or []:
+            referenced.extend(claim.get("evidence_ids") or [])
+    for item in [*(state.get("findings") or []), *(state.get("hypotheses") or [])]:
+        referenced.extend(item.get("evidence_ids") or [])
+    wanted = set(referenced)
+    selected = [item for item in records if item.get("id") in wanted] if wanted else records[-20:]
+    return [
+        {**item, "result": _prompt_value(item.get("result") or {})}
+        for item in selected
+    ]
+
+
 def evaluate(state: dict, trace: dict, settings) -> EvaluationResult:
     issues, metrics = deterministic_checks(state, trace)
     payload = {
         "state": {
-            key: state.get(key)
-            for key in (
-                "intent", "work_mode", "context", "inv_result", "report_result",
-                "evidence", "findings", "hypotheses", "memory_operations",
-                "memory_error", "critic", "rework", "progress",
-            )
+            **{
+                key: state.get(key)
+                for key in (
+                    "intent", "work_mode", "context", "inv_result", "report_result",
+                    "findings", "hypotheses", "memory_operations",
+                    "memory_error", "critic", "rework", "progress",
+                )
+            },
+            "evidence": _prompt_evidence(state),
         },
         "trace": compact_trace(
             trace,
