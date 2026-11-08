@@ -157,7 +157,7 @@ def _markdown_reference_issues(state: State) -> list[CriticIssue]:
     import re
 
     records = {item.get("id") for item in state.get("evidence") or []}
-    pattern = re.compile(r"\bcall-[0-9a-fA-F]{8}(?:-[0-9a-fA-F]{4}){3}-[0-9a-fA-F]{12}\b")
+    pattern = re.compile(r"\bcall-[0-9a-fA-F]{8}(?:-[0-9a-fA-F]{4}){3}-[0-9a-fA-F]{12}\b(?!-)")
     texts = [
         str((state.get("report_result") or {}).get("answer") or ""),
         str((state.get("last_report") or {}).get("markdown") or ""),
@@ -174,99 +174,100 @@ def _markdown_reference_issues(state: State) -> list[CriticIssue]:
     )]
 
 
-def _partial_sample_issues(state: State) -> list[CriticIssue]:
+def _iter_claims(state: State):
     records = {item.get("id"): item for item in state.get("evidence") or []}
-    markers = ("выборк", "partial", "неполн", "частич", "пример", "ограничен", "не доказан")
-    issues = []
     for result_key in ("inv_result", "report_result"):
         for claim in (state.get(result_key) or {}).get("claims") or []:
-            text = str(claim.get("text") or "")
-            partial_ids = [
-                item for item in claim.get("evidence_ids") or []
-                if item in records
-                and records[item].get("tool") == "search_events"
-                and records[item].get("status") == "partial"
-            ]
-            if partial_ids and not any(marker in text.lower() for marker in markers):
-                issues.append(CriticIssue(
-                    claim=text,
-                    evidence_ids=partial_ids,
-                    reason="Claim по partial-выборке search_events не содержит локальной оговорки о выборке.",
-                    suggested_action="rework_report",
-                ))
+            yield claim, records
+
+
+def _partial_sample_issues(state: State) -> list[CriticIssue]:
+    markers = ("выборк", "partial", "неполн", "частич", "пример", "ограничен", "не доказан")
+    issues = []
+    for claim, records in _iter_claims(state):
+        text = str(claim.get("text") or "")
+        partial_ids = [
+            item for item in claim.get("evidence_ids") or []
+            if item in records
+            and records[item].get("tool") == "search_events"
+            and records[item].get("status") == "partial"
+        ]
+        if partial_ids and not any(marker in text.lower() for marker in markers):
+            issues.append(CriticIssue(
+                claim=text,
+                evidence_ids=partial_ids,
+                reason="Claim по partial-выборке search_events не содержит локальной оговорки о выборке.",
+                suggested_action="rework_report",
+            ))
     return issues
 
 
 def _completeness_issues(state: State) -> list[CriticIssue]:
-    records = {item.get("id"): item for item in state.get("evidence") or []}
     categorical = ("ровно", "все ", "полный", "полная", "полные", "каждое", "каждый")
     cautious = ("не полн", "не выполнялся", "не доказан", "ограничен", "частич", "partial")
     issues = []
-    for result_key in ("inv_result", "report_result"):
-        for claim in (state.get(result_key) or {}).get("claims") or []:
-            text = str(claim.get("text") or "")
-            lowered = text.lower()
-            if not any(word in lowered for word in categorical) or any(word in lowered for word in cautious):
+    for claim, records in _iter_claims(state):
+        text = str(claim.get("text") or "")
+        lowered = text.lower()
+        if not any(word in lowered for word in categorical) or any(word in lowered for word in cautious):
+            continue
+        incomplete = []
+        for item in claim.get("evidence_ids") or []:
+            if item not in records or records[item].get("tool") != "search_events":
                 continue
-            incomplete = []
-            for item in claim.get("evidence_ids") or []:
-                if item not in records or records[item].get("tool") != "search_events":
-                    continue
-                result = records[item].get("result") or {}
-                if result.get("has_more") is True or result.get("complete") is False:
-                    incomplete.append((item, "has_more=true"))
-                elif result.get("has_more") is None and result.get("pagination_error"):
-                    incomplete.append((item, "has_more=null"))
-            if incomplete:
-                unknown = any(kind == "has_more=null" for _, kind in incomplete)
-                reason = (
-                    "has_more=null с pagination_error означает неизвестную полноту, а не доказанное продолжение или завершение."
-                    if unknown else
-                    "has_more=true подтверждает следующую страницу и не позволяет называть выборку полной, даже при совпадении count."
-                )
-                issues.append(CriticIssue(
-                    claim=text,
-                    evidence_ids=[item for item, _ in incomplete],
-                    reason=reason,
-                    suggested_action="rework_report",
-                ))
+            result = records[item].get("result") or {}
+            if result.get("has_more") is True or result.get("complete") is False:
+                incomplete.append((item, "has_more=true"))
+            elif result.get("has_more") is None and result.get("pagination_error"):
+                incomplete.append((item, "has_more=null"))
+        if incomplete:
+            unknown = any(kind == "has_more=null" for _, kind in incomplete)
+            reason = (
+                "has_more=null с pagination_error означает неизвестную полноту, а не доказанное продолжение или завершение."
+                if unknown else
+                "has_more=true подтверждает следующую страницу и не позволяет называть выборку полной, даже при совпадении count."
+            )
+            issues.append(CriticIssue(
+                claim=text,
+                evidence_ids=[item for item, _ in incomplete],
+                reason=reason,
+                suggested_action="rework_report",
+            ))
     return issues
 
 
 def _distribution_issues(state: State) -> list[CriticIssue]:
     import re
 
-    records = {item.get("id"): item for item in state.get("evidence") or []}
     issues = []
-    for result_key in ("inv_result", "report_result"):
-        for claim in (state.get(result_key) or {}).get("claims") or []:
-            text = str(claim.get("text") or "")
-            if "%" not in text or not any(word in text.lower() for word in ("распредел", "доля", "доли")):
+    for claim, records in _iter_claims(state):
+        text = str(claim.get("text") or "")
+        if "%" not in text or not any(word in text.lower() for word in ("распредел", "доля", "доли")):
+            continue
+        for evidence_id in claim.get("evidence_ids") or []:
+            record = records.get(evidence_id) or {}
+            if record.get("tool") not in ("top_values", "top_values_batch"):
                 continue
-            for evidence_id in claim.get("evidence_ids") or []:
-                record = records.get(evidence_id) or {}
-                if record.get("tool") not in ("top_values", "top_values_batch"):
+            result = record.get("result") or {}
+            entries = result.get("fields") if isinstance(result.get("fields"), list) else [result]
+            for entry in entries:
+                field = str(entry.get("field") or "")
+                has_null = any(
+                    item.get("value") is None and (item.get("count") or 0) > 0
+                    for item in entry.get("top") or []
+                )
+                if not field or not has_null:
                     continue
-                result = record.get("result") or {}
-                entries = result.get("fields") if isinstance(result.get("fields"), list) else [result]
-                for entry in entries:
-                    field = str(entry.get("field") or "")
-                    has_null = any(
-                        item.get("value") is None and (item.get("count") or 0) > 0
-                        for item in entry.get("top") or []
-                    )
-                    if not field or not has_null:
-                        continue
-                    for match in re.finditer(re.escape(field), text, re.IGNORECASE):
-                        local = text[max(0, match.start() - 30):match.end() + 220].lower()
-                        if not any(word in local for word in ("null", "остат", "прочие", "прочих")):
-                            issues.append(CriticIssue(
-                                claim=text,
-                                evidence_ids=[evidence_id],
-                                reason=f"Распределение {field} опускает null-группу или остаток из Evidence.",
-                                suggested_action="rework_report",
-                            ))
-                        break
+                for match in re.finditer(re.escape(field), text, re.IGNORECASE):
+                    local = text[max(0, match.start() - 30):match.end() + 220].lower()
+                    if not any(word in local for word in ("null", "остат", "прочие", "прочих")):
+                        issues.append(CriticIssue(
+                            claim=text,
+                            evidence_ids=[evidence_id],
+                            reason=f"Распределение {field} опускает null-группу или остаток из Evidence.",
+                            suggested_action="rework_report",
+                        ))
+                    break
     return issues
 
 
@@ -295,47 +296,43 @@ def _aggregate_support_issues(state: State) -> list[CriticIssue]:
         "count_events", "timeline", "top_values", "top_values_batch",
         "aggregate_events", "analysis_sql",
     }
-    records = {item.get("id"): item for item in state.get("evidence") or []}
     issues = []
-    for result_key in ("inv_result", "report_result"):
-        for claim in (state.get(result_key) or {}).get("claims") or []:
-            if claim.get("evidence_class") != "агрегатный":
-                continue
-            ids = [item for item in claim.get("evidence_ids") or [] if item in records]
-            if not ids or any(records[item].get("tool") in aggregate_tools for item in ids):
-                continue
-            issues.append(CriticIssue(
-                claim=claim.get("text") or "",
-                evidence_ids=ids,
-                reason=(
-                    "Агрегатный claim обобщает наблюдения без агрегатного Evidence. "
-                    "Получи count/aggregate за то же окно и фильтр либо понизь вывод до наблюдения по выборке."
-                ),
-                suggested_action="rework_data",
-            ))
+    for claim, records in _iter_claims(state):
+        if claim.get("evidence_class") != "агрегатный":
+            continue
+        ids = [item for item in claim.get("evidence_ids") or [] if item in records]
+        if not ids or any(records[item].get("tool") in aggregate_tools for item in ids):
+            continue
+        issues.append(CriticIssue(
+            claim=claim.get("text") or "",
+            evidence_ids=ids,
+            reason=(
+                "Агрегатный claim обобщает наблюдения без агрегатного Evidence. "
+                "Получи count/aggregate за то же окно и фильтр либо понизь вывод до наблюдения по выборке."
+            ),
+            suggested_action="rework_data",
+        ))
     return issues
 
 
 def _evidence_strength_issues(state: State) -> list[CriticIssue]:
-    records = {item.get("id"): item for item in state.get("evidence") or []}
     issues = []
-    for result_key in ("inv_result", "report_result"):
-        for claim in (state.get(result_key) or {}).get("claims") or []:
-            if claim.get("evidence_class") != "полный":
-                continue
-            weak = [
-                evidence_id for evidence_id in claim.get("evidence_ids") or []
-                if evidence_id not in records
-                or records[evidence_id].get("status") != "ok"
-                or records[evidence_id].get("tool") == "field_fill_rates"
-            ]
-            if weak:
-                issues.append(CriticIssue(
-                    claim=claim.get("text") or "",
-                    evidence_ids=weak,
-                    reason="Класс «полный» недопустим по partial/error или прокси field_fill_rates; понизьте класс evidence и силу формулировки.",
-                    suggested_action="rework_report",
-                ))
+    for claim, records in _iter_claims(state):
+        if claim.get("evidence_class") != "полный":
+            continue
+        weak = [
+            evidence_id for evidence_id in claim.get("evidence_ids") or []
+            if evidence_id not in records
+            or records[evidence_id].get("status") != "ok"
+            or records[evidence_id].get("tool") == "field_fill_rates"
+        ]
+        if weak:
+            issues.append(CriticIssue(
+                claim=claim.get("text") or "",
+                evidence_ids=weak,
+                reason="Класс «полный» недопустим по partial/error или прокси field_fill_rates; понизьте класс evidence и силу формулировки.",
+                suggested_action="rework_report",
+            ))
     return issues
 
 
@@ -420,8 +417,8 @@ def _deterministic_issues(state: State) -> list[dict]:
     issues.extend(_artifact_claim_issues(state))
     unique = {}
     for issue in issues:
-        key = (issue.claim, tuple(issue.evidence_ids), issue.reason)
-        unique[key] = issue.model_dump()
+        key = (issue.claim, tuple(sorted(issue.evidence_ids)), issue.reason)
+        unique.setdefault(key, issue.model_dump())
     return list(unique.values())
 
 

@@ -157,3 +157,33 @@ def test_critic_distinguishes_unknown_and_proven_pagination_completion():
     assert any("has_more=null" in item["reason"] for item in issues)
     state["evidence"][0].update({"status": "ok", "result": {"has_more": False, "truncated": False}})
     assert not any("has_more" in item["reason"] for item in _deterministic_issues(state))
+
+
+def test_critic_deduplicates_issues_regardless_of_evidence_id_order():
+    state = {
+        "evidence": [],
+        "inv_result": {
+            "claims": [{"text": "Вывод", "evidence_ids": ["missing-b", "missing-a"]}],
+        },
+        "report_result": {
+            "claims": [{"text": "Вывод", "evidence_ids": ["missing-a", "missing-b"]}],
+        },
+    }
+
+    issues = _deterministic_issues(state)
+
+    assert len(issues) == 1
+    assert issues[0]["evidence_ids"] == ["missing-b", "missing-a"]
+
+
+def test_critic_does_not_match_prefix_of_suffixed_recheck_evidence_id():
+    from critics import _markdown_reference_issues
+
+    evidence_id = "call-cbc0553a-6b09-4885-b3db-2df8b01a4c35-1"
+    state = {
+        "evidence": [{"id": evidence_id}],
+        "report_result": {"answer": f"Recheck: `{evidence_id}`"},
+        "last_report": {"markdown": f"Recheck: `{evidence_id}`"},
+    }
+
+    assert _markdown_reference_issues(state) == []

@@ -151,9 +151,18 @@ def case_events(state: dict) -> list[dict]:
 
 def _result_values(state: dict, key: str) -> list[str]:
     values = []
-    for result_key in ("inv_result", "report_result"):
+    reporter_finished = key == "not_checked" and bool(state.get("report_result"))
+    result_keys = ("report_result",) if reporter_finished else ("inv_result", "report_result")
+    for result_key in result_keys:
         values.extend((state.get(result_key) or {}).get(key) or [])
     if key == "not_checked":
+        if reporter_finished:
+            for item in state.get("work_items") or []:
+                if item.get("status") not in ("failed", "skipped"):
+                    continue
+                result = item.get("result") or {}
+                values.extend(result.get("not_checked") or [])
+                values.append(item.get("goal") or item["id"])
         for run in state.get("skill_runs") or []:
             values.extend(run.get(key) or [])
     return list(dict.fromkeys(values))

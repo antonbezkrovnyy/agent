@@ -157,6 +157,12 @@ async def investigation_status(investigation_id: str) -> StatusResult:
         return error
     latest = run_items[0] if run_items else {}
     progress = values.get("progress") or {}
+    work_items = values.get("work_items") or []
+    completed_items = (
+        sum(item.get("status") == "done" for item in work_items)
+        if work_items else progress.get("completed_items") or 0
+    )
+    total_items = len(work_items) if work_items else progress.get("total_items") or 0
     return {
         "ok": True,
         "investigation_id": investigation_id,
@@ -169,8 +175,8 @@ async def investigation_status(investigation_id: str) -> StatusResult:
         "work_mode": values.get("work_mode") or "",
         "scope": values.get("investigation_scope") or {},
         "objective": progress.get("objective") or "",
-        "completed_items": progress.get("completed_items") or 0,
-        "total_items": progress.get("total_items") or 0,
+        "completed_items": completed_items,
+        "total_items": total_items,
         "plan_version": (values.get("investigation_plan") or {}).get("version") or 0,
         "memory_error": values.get("memory_error") or "",
         "complete": bool(values.get("report_result") or values.get("last_report")),

@@ -86,6 +86,8 @@
 - Работай только внутри InvestigationScope и acceptance текущего item. Не разбирай
   optional-направления и новые независимые аномалии: Reporter предложит их следующим
   этапом. limitations и NOT_CHECKED — границы ответа, а не обязательный backlog.
+  Не включай другие work items в NOT_CHECKED текущего item: их завершённость определяет
+  supervisor, а итоговый список формируется после выполнения всего плана.
 - replan_needed=true разрешён только с replan_cause=acceptance_failed,
   conclusion_invalid или missing_critical_evidence. Сама новая аномалия причиной не является.
 - Заверши structured response: status=done/partial/failed, summary, claims с

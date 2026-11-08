@@ -84,6 +84,28 @@ def test_status_and_result_use_current_state(monkeypatch):
     assert "url" not in result["artifacts"][0]
 
 
+def test_status_derives_item_counts_from_work_items(monkeypatch):
+    state = {"values": {
+        "progress": {"stage": "reporter", "completed_items": 0, "total_items": 0},
+        "work_items": [
+            {"id": "one", "status": "done"},
+            {"id": "two", "status": "failed"},
+            {"id": "three", "status": "pending"},
+        ],
+    }}
+
+    async def request(method, path, **kwargs):
+        if path.endswith("/runs"):
+            return Response(payload=[])
+        return Response(payload=state)
+
+    monkeypatch.setattr(agent_mcp, "_request", request)
+    status = run(agent_mcp.investigation_status("inv-" + "a" * 32))
+
+    assert status["completed_items"] == 1
+    assert status["total_items"] == 3
+
+
 def test_result_returns_fresh_s3_link(monkeypatch):
     state = {"values": {
         "last_report": {"markdown": "Отчёт"},

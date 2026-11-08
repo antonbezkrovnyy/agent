@@ -235,3 +235,38 @@ def test_aggregate_is_partial_when_completed_item_has_partial_result():
     })
 
     assert update["inv_result"]["status"] == "partial"
+
+
+def test_dependency_ids_are_normalized_together(patch_llm):
+    planner = FakeStructured(plan(
+        item("collect data"),
+        item("report part", deps=["collect data"]),
+    ))
+    agent = FakeAgent({
+        "Ты — инвестигейтор": [result("Данные собраны"), result("Отчёт готов")],
+        "Ты — репортёр": [ai("Готово")],
+    })
+    patch_llm(agent, FakeStructured(intent(mode="deep")), planner=planner)
+
+    result_state = invoke(build_graph(), "проверь нормализацию зависимостей")
+
+    statuses = {item["id"]: item["status"] for item in result_state["work_items"]}
+    assert statuses == {"collect-data": "done", "report-part": "done"}
+    assert result_state["work_items"][1]["depends_on"] == ["collect-data"]
+    assert result_state["inv_result"]["status"] == "done"
+
+
+def test_normalized_plan_preserves_reference_to_suffixed_duplicate():
+    from planner import _normalized_plan
+
+    normalized = _normalized_plan(
+        plan(item("main"), item("main"), item("report", deps=["main-2"])),
+        {
+            "messages": [],
+            "investigation_scope": {"objective": "Проверка", "max_items": 5},
+            "work_items": [],
+        },
+    )
+
+    assert [item.id for item in normalized.items] == ["main", "main-2", "report"]
+    assert normalized.items[2].depends_on == ["main-2"]

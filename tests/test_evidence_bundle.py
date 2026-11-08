@@ -153,3 +153,33 @@ def test_prompt_bundle_bounds_large_collections_without_mutating_state():
     assert "event-50" not in text
     assert "ещё 10 элементов" in text
     assert len(state["evidence"][0]["result"]["events"]) == 60
+
+
+def test_chain_uses_reporter_not_checked_without_historical_work():
+    from evidence import investigation_chain
+
+    state = state_with_evidence()
+    state["inv_result"]["not_checked"] = ["Будущая проверка, которая уже завершена"]
+    state["report_result"] = {"not_checked": ["Состав событий вне scope"]}
+
+    chain = investigation_chain(state)
+
+    assert chain["not_checked"] == ["Состав событий вне scope"]
+
+
+def test_chain_preserves_unfinished_items_after_reporter():
+    from evidence import investigation_chain
+
+    state = state_with_evidence()
+    state["inv_result"]["not_checked"] = ["Устаревшая запись"]
+    state["report_result"] = {"not_checked": []}
+    state["work_items"] = [{
+        "id": "failed-item",
+        "goal": "Проверить критический источник",
+        "status": "failed",
+        "result": {"not_checked": ["Источник недоступен"]},
+    }]
+
+    chain = investigation_chain(state)
+
+    assert chain["not_checked"] == ["Источник недоступен", "Проверить критический источник"]

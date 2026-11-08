@@ -124,7 +124,9 @@
   item-subgraphs и `asyncio.gather`, не повторяя завершённые items. Item-worker меняет
   только собственный item; Reporter имеет только `get_evidence_batch`.
 - Цепочка расследования строится детерминированно из state. LLM не добавляет в
-  неё несуществующие действия и факты.
+  неё несуществующие действия и факты. После Reporter `NOT_CHECKED` берётся из его
+  structured result с детерминированным сохранением `failed/skipped` items, а не из
+  безусловного объединения с историческим `inv_result`.
 - Гипотезы меняются только через `update_hypothesis`: `open` допускает отсутствие
   Evidence, `supported/rejected` требуют валидные ID. Чтение выполняется через
   `list_hypotheses`/`get_hypothesis`. История сохраняется в state,

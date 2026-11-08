@@ -101,11 +101,7 @@ def route_after_intent(state: State) -> str:
     return "memory_retrieve" if intent.get("needs_new_data") else route_to_work(state)
 
 
-def route_after_archive(state: State) -> str:
-    return "memory_retrieve" if (state.get("intent") or {}).get("needs_new_data") else route_to_work(state)
-
-
-def route_after_memory_load(state: State) -> str:
+def route_after_restore(state: State) -> str:
     return "memory_retrieve" if (state.get("intent") or {}).get("needs_new_data") else route_to_work(state)
 
 
@@ -162,12 +158,12 @@ def build_graph(checkpointer=None):
     )
     builder.add_conditional_edges(
         "memory_load",
-        route_after_memory_load,
+        route_after_restore,
         ["memory_retrieve", "export", "quick", "chat", "deep", "reporting"],
     )
     builder.add_conditional_edges(
         "archive",
-        route_after_archive,
+        route_after_restore,
         ["memory_retrieve", "export", "quick", "chat", "deep", "reporting"],
     )
     builder.add_conditional_edges(

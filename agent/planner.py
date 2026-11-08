@@ -59,18 +59,27 @@ def _normalized_plan(plan: InvestigationPlan, state: State) -> InvestigationPlan
     plan.goal = scope.objective
     plan.version = int(previous.get("version") or 0) + 1
     existing_ids = {item.get("id") for item in state.get("work_items") or []}
-    ids = {item.id for item in plan.items}.union(existing_ids)
     seen = set()
-    required_count = 0
+    id_map = {}
     for index, item in enumerate(plan.items, start=1):
-        base = item.id.strip().replace(" ", "-") or f"item-{index}"
+        original_id = item.id
+        base = original_id.strip().replace(" ", "-") or f"item-{index}"
         item.id = base
         suffix = 2
         while item.id in seen:
             item.id = f"{base}-{suffix}"
             suffix += 1
         seen.add(item.id)
-        item.depends_on = list(dict.fromkeys(dep for dep in item.depends_on if dep in ids))
+        id_map.setdefault(original_id, item.id)
+        if original_id.strip():
+            id_map.setdefault(original_id.strip(), item.id)
+    available_ids = seen.union(existing_ids)
+    required_count = 0
+    for item in plan.items:
+        item.depends_on = list(dict.fromkeys(
+            id_map.get(dep, dep) for dep in item.depends_on
+        ))
+        item.depends_on = [dep for dep in item.depends_on if dep in available_ids]
         if not item.requested_window:
             item.requested_window = _window(state)
         item.acceptance = item.acceptance.strip() or item.goal
