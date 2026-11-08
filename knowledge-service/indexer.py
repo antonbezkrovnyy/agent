@@ -260,7 +260,7 @@ class KnowledgeIndex:
                     model=self.settings.agent_memory_embedding_model,
                     base_url=self.settings.agent_memory_embedding_base_url or self.settings.llm_base_url,
                     api_key=self.settings.agent_memory_embedding_token or self.settings.llm_token,
-                    timeout=self.settings.knowledge_timeout_seconds,
+                    timeout=self.settings.knowledge_embedding_timeout_seconds,
                     max_retries=0,
                 )
             return self._embeddings.embed_query(text[:30000])

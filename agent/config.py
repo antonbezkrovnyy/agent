@@ -89,7 +89,8 @@ class Settings(BaseSettings):
     analysis_sql_max_attempts: int = 6
 
     knowledge_service_url: str = ""
-    knowledge_timeout_seconds: int = 5
+    knowledge_timeout_seconds: int = 20
+    knowledge_embedding_timeout_seconds: int = 5
 
     # Файлы расследований: S3 в работе, data-URL только для локального fallback
     artifact_store_backend: str = "auto"

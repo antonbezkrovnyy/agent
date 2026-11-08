@@ -42,7 +42,7 @@ curl http://localhost:2028/health
 - `POST /reindex` — немедленная переиндексация;
 - `GET /health` — число страниц, ожидающих embeddings и последняя ошибка.
 
-Индексация выполняется каждые пять секунд. Страницы со `status: published` разбиваются на заголовки и получают embeddings в существующей `agent-memory-db`. Если embedding недоступен, страница остаётся в БД со `index_status=pending`, а поиск деградирует в обычный текстовый. Вызовы embeddings ограничены `KNOWLEDGE_TIMEOUT_SECONDS` и не имеют клиентских retry.
+Индексация выполняется каждые пять секунд. Страницы со `status: published` разбиваются на заголовки и получают embeddings в существующей `agent-memory-db`. Если embedding недоступен, страница остаётся в БД со `index_status=pending`, а поиск деградирует в обычный текстовый. Вызовы embeddings ограничены `KNOWLEDGE_EMBEDDING_TIMEOUT_SECONDS` и не имеют клиентских retry. HTTP-запросы к knowledge-service имеют отдельный больший `KNOWLEDGE_TIMEOUT_SECONDS`, чтобы fallback успевал вернуться.
 
 Содержимое SilverBullet — методический контекст, а не Evidence. Агент получает только небольшие карточки и разделы, а выводы подтверждает свежими запросами LogiCore.
 
@@ -80,7 +80,8 @@ Excluded-записи не попадают в активный retrieval. Ре�
 ## Настройки
 
 - `KNOWLEDGE_SERVICE_URL` — URL для agent tools и publisher, пусто = интеграция отключена;
-- `KNOWLEDGE_TIMEOUT_SECONDS=5` — HTTP и embeddings timeout;
+- `KNOWLEDGE_TIMEOUT_SECONDS=20` — HTTP timeout;
+- `KNOWLEDGE_EMBEDDING_TIMEOUT_SECONDS=5` — embeddings timeout;
 - `KNOWLEDGE_SPACE_DIR=/space` — общий volume;
 - `KNOWLEDGE_SEED_DIR=/seed` — стартовые страницы;
 - `KNOWLEDGE_REINDEX_SECONDS=5` — период индексации;
