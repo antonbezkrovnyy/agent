@@ -39,8 +39,12 @@
 - `agent/observability.py` — OpenInference role/scope/item metadata и prompt version.
 - `agent/llm.py` — Pydantic-схемы ответов и LLM.
 - `agent/documentation.py` — полная проектная документация в system prompt Chat.
-- `litellm/config.yaml` — стабильные `logicore-*` aliases upstream-моделей для Aegra,
-  evaluator и embeddings; секреты остаются в `.env` или LiteLLM credential store.
+- `litellm/config.yaml` — стабильные `logicore-*` aliases основного DeepSeek APIGW
+  и резервные `logicore-*-jet` с автоматическим переходом APIGW → Jet после retries.
+  Embeddings используют только существующий `UPSTREAM_EMBEDDING_*`, без APIGW fallback.
+  Для structured function calling у DeepSeek отключён thinking mode через
+  `thinking.type=disabled` с `allowed_openai_params=["thinking"]`.
+  Aliases сервисов не меняются; секреты остаются в `.env` или LiteLLM credential store.
 - `agent/state.py` — общие Evidence/Case/Memory Channels и поля supervisor;
   не переносить сюда бизнес-логику и не дублировать общие каналы в двух схемах.
 - `agent/tools.py` — MCP tools, Evidence и findings; файлы создаются через artifacts.py.
@@ -76,7 +80,10 @@
   Runtime стримит native `create_agent` и события завершённых tools: технический таймаут
   не отбрасывает Evidence, findings, гипотезы, окна, артефакты и приватную историю.
   Пустой ответ модели без structured response даёт `empty_response` и partial-результат,
-  а не `RuntimeError` всего run.
+  а не `RuntimeError` всего run. Structured-result messages передаются в следующие
+  model calls как JSON-текст без `tool_calls`; оборванные настоящие вызовы получают
+  error `ToolMessage(history_incomplete=true)` без Evidence и выдуманного результата.
+  Уведомления `finding/window/hypothesis` переносятся после ToolMessage текущего шага.
   Отменённые вызовы фиксируются как `cancelled`, вложенные Evidence имеют `parent_call_id`.
 - Аналитический отчёт прикрепляется как Markdown плюс самодостаточный ZIP с `report.md`,
   `queries.md`, полными inline `evidence.jsonl`, аудитом каждого вызова `tool_calls.jsonl`,

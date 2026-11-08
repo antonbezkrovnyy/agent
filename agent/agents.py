@@ -22,12 +22,14 @@ from langchain_core.messages import (
     HumanMessage,
     RemoveMessage,
     SystemMessage,
+    ToolMessage,
     filter_messages,
 )
 
 import llm as llm_mod
 from artifact_store import artifact_url
 from config import Settings
+from contracts import json_dumps
 from observability import trace_config
 from evidence import chain_block
 from execution_audit import audit_messages
@@ -93,6 +95,16 @@ def _finalize_tool_filter(role: str):
     return middleware
 
 
+def _history_middleware():
+    @wrap_model_call
+    async def normalize_history(request, handler):
+        return await handler(request.override(
+            messages=_structured_history_messages(request.messages)
+        ))
+
+    return normalize_history
+
+
 def _middleware(role: str, prompt):
     return [
         SummarizationMiddleware(
@@ -101,6 +113,7 @@ def _middleware(role: str, prompt):
             keep=("messages", settings.summarization_keep_messages),
         ),
         prompt,
+        _history_middleware(),
         _finalize_tool_filter(role),
         normalize_tool_result,
         ToolStepMiddleware(role),
@@ -239,6 +252,59 @@ def _public_notifications(messages: list[BaseMessage]) -> list[AIMessage]:
         item for item in messages
         if isinstance(item, AIMessage) and item.name in ("finding", "window", "hypothesis")
     ]
+
+
+_STRUCTURED_RESULT_TOOLS = {"ScoutResult", "InvestigationResult", "ReporterResult"}
+
+
+def _structured_history_messages(messages: list[BaseMessage]) -> list[BaseMessage]:
+    sanitized = []
+    for index, message in enumerate(messages):
+        calls = getattr(message, "tool_calls", []) or []
+        structured = [call for call in calls if call.get("name") in _STRUCTURED_RESULT_TOOLS]
+        remaining_calls = [call for call in calls if call.get("name") not in _STRUCTURED_RESULT_TOOLS]
+        if structured:
+            content = json_dumps([
+                {"name": call["name"], "arguments": call.get("args") or {}}
+                for call in structured
+            ], ensure_ascii=False)
+            message = message.model_copy(update={
+                "content": content,
+                "tool_calls": remaining_calls,
+                "invalid_tool_calls": [],
+            })
+        sanitized.append(message)
+        for call in remaining_calls:
+            call_id = call.get("id")
+            if not call_id:
+                continue
+            paired = any(
+                isinstance(candidate, ToolMessage) and candidate.tool_call_id == call_id
+                for candidate in messages[index + 1:]
+            )
+            if not paired:
+                sanitized.append(ToolMessage(
+                    content=json_dumps({
+                        "ok": False,
+                        "error": "Tool result is not present in preserved agent history.",
+                        "history_incomplete": True,
+                    }, ensure_ascii=False),
+                    tool_call_id=call_id,
+                    name=call.get("name") or "unknown_tool",
+                    status="error",
+                ))
+    ordered = []
+    notifications = []
+    for message in sanitized:
+        if isinstance(message, AIMessage) and message.name in ("finding", "window", "hypothesis"):
+            notifications.append(message)
+            continue
+        if notifications and not isinstance(message, ToolMessage):
+            ordered.extend(notifications)
+            notifications.clear()
+        ordered.append(message)
+    ordered.extend(notifications)
+    return ordered
 
 
 def _agent_convo_messages(state: State) -> list[BaseMessage]:
@@ -407,7 +473,7 @@ async def _finalize_limited(agent: str, result: dict, schema):
     try:
         response = await structured.ainvoke([
             SystemMessage(content=system),
-            *(result.get("messages") or []),
+            *_structured_history_messages(result.get("messages") or []),
             instruction,
         ], config=trace_config(f"{agent}_fallback", result))
     except Exception:
@@ -553,6 +619,10 @@ async def _stream_agent(agent: str, agent_input: dict, deadline: float) -> tuple
     native = isinstance(runtime, CompiledStateGraph)
     if native:
         runtime = _native_agent_runtime(runtime)
+    agent_input = {
+        **agent_input,
+        "messages": _structured_history_messages(agent_input.get("messages") or []),
+    }
     latest = agent_input
     events = {}
 

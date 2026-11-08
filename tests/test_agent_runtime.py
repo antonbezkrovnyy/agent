@@ -3,13 +3,14 @@ import base64
 import io
 import json
 import zipfile
+from types import SimpleNamespace
 
 import httpx
 from openai import APIConnectionError
 
 from conftest import FakeAgent, FakeStructured, agents_mod, ai, build_graph, intent, invoke, tc
 from contracts import InvestigationPlan, WorkItem
-from langchain_core.messages import HumanMessage, ToolMessage
+from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 from llm import CriticEvidence
 from reporting import build_investigation_package
 
@@ -395,3 +396,95 @@ def test_empty_model_response_returns_partial_result_without_raising(patch_llm):
     assert result["evidence"] == state["evidence"]
     assert "пустой ответ" in new_messages[-1].content
     assert update["run_metrics"][0]["termination_reason"] == "empty_response"
+
+
+def test_structured_history_preserves_real_tool_calls():
+    message = ai(calls=[
+        tc("ScoutResult", {"note": "17 событий"}),
+        tc("count_events", {}),
+    ])
+
+    sanitized = agents_mod._structured_history_messages([message])
+
+    assert len(sanitized) == 2
+    assert [call["name"] for call in sanitized[0].tool_calls] == ["count_events"]
+    assert "ScoutResult" in sanitized[0].content
+    assert "17 событий" in sanitized[0].content
+    assert sanitized[1].status == "error"
+    assert sanitized[1].tool_call_id == message.tool_calls[1]["id"]
+
+
+def test_structured_history_completes_unpaired_tool_call():
+    first = ai(calls=[tc("top_values_batch", {}), tc("count_events", {})])
+    second = first.tool_calls[1]
+    response = ToolMessage(content="ok", tool_call_id=second["id"], name="count_events")
+
+    sanitized = agents_mod._structured_history_messages([first, response])
+
+    assert len(sanitized) == 3
+    assert sanitized[1].status == "error"
+    assert sanitized[1].tool_call_id == first.tool_calls[0]["id"]
+    assert "history_incomplete" in sanitized[1].content
+    assert sanitized[2] is response
+
+
+def test_structured_history_moves_notifications_after_tool_messages():
+    first = ai(calls=[tc("top_values_batch", {}), tc("count_events", {})])
+    first_response = ToolMessage(
+        content="ok",
+        tool_call_id=first.tool_calls[0]["id"],
+        name="top_values_batch",
+    )
+    notification = AIMessage(content="finding", name="finding")
+    second_response = ToolMessage(
+        content="ok",
+        tool_call_id=first.tool_calls[1]["id"],
+        name="count_events",
+    )
+    second_notification = AIMessage(content="finding 2", name="finding")
+
+    sanitized = agents_mod._structured_history_messages([
+        first,
+        first_response,
+        notification,
+        second_response,
+        second_notification,
+    ])
+
+    assert sanitized[:3] == [first, first_response, second_response]
+    assert [message.name for message in sanitized[3:]] == ["finding", "finding"]
+
+
+def test_history_middleware_normalizes_each_model_request():
+    first = ai(calls=[tc("top_values_batch", {}), tc("count_events", {})])
+    first_response = ToolMessage(
+        content="ok",
+        tool_call_id=first.tool_calls[0]["id"],
+        name="top_values_batch",
+    )
+    notification = AIMessage(content="finding", name="finding")
+    second_response = ToolMessage(
+        content="ok",
+        tool_call_id=first.tool_calls[1]["id"],
+        name="count_events",
+    )
+    class Request:
+        def __init__(self, messages):
+            self.messages = messages
+
+        def override(self, **kwargs):
+            self.messages = kwargs["messages"]
+            return self
+
+    request = Request([first, first_response, notification, second_response])
+    seen = []
+
+    async def handler(updated):
+        seen.append(updated)
+        return updated
+
+    result = asyncio.run(agents_mod._history_middleware().awrap_model_call(request, handler))
+
+    assert seen == [request]
+    assert result.messages[:3] == [first, first_response, second_response]
+    assert result.messages[3].name == "finding"

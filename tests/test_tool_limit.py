@@ -1,4 +1,5 @@
 from conftest import FakeAgent, FakeStructured, ai, build_graph, intent, invoke, tc
+from langchain_core.messages import AIMessage, ToolMessage
 
 
 def test_timeout_defaults_leave_one_full_finalization_attempt():
@@ -41,6 +42,15 @@ def test_tool_limit_moves_workflow_forward(patch_llm):
     ]
     assert public_answers == ["проверь события", "Ответ готов"]
     assert result["report_result"]["answer"] == "Ответ готов"
+    all_messages = [message for convo in agent.convos for message in convo]
+    for index, message in enumerate(all_messages):
+        if not isinstance(message, AIMessage):
+            continue
+        for call in message.tool_calls:
+            assert any(
+                isinstance(candidate, ToolMessage) and candidate.tool_call_id == call["id"]
+                for candidate in all_messages[index + 1:]
+            ), f"Нет ToolMessage для {call['name']}"
 
 
 def test_rework_and_new_message_reset_limit(patch_llm, monkeypatch):

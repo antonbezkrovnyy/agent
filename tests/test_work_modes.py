@@ -1,6 +1,7 @@
 import pytest
 
 from conftest import FakeAgent, FakeStructured, ai, build_graph, intent, invoke, tc
+from langchain_core.messages import AIMessage, ToolMessage
 from tools import SCOUT_MCP_TOOL_NAMES, scout_tools
 
 
@@ -72,6 +73,39 @@ def test_quick_goes_directly_to_reporter(patch_llm):
     assert len(scout_messages) == 1
     assert "17 событий" in scout_messages[0].content
     assert not scout_messages[0].tool_calls
+
+
+def test_reporter_receives_scout_result_without_dangling_tool_call(patch_llm):
+    agent = FakeAgent({
+        "Ты — скаут": [
+            ai(calls=[tc("count_events", {})]),
+            ai(calls=[tc("ScoutResult", {
+                "note": "17 событий",
+                "signals": [],
+                "evidence_ids": [],
+                "escalation": {"needed": False, "reason": "", "suggested_skill": None},
+            })]),
+        ],
+        "Ты — репортёр": [ai("Готово")],
+    })
+    patch_llm(agent, FakeStructured(intent()))
+
+    result = invoke(build_graph(), "посчитай события")
+
+    reporter_messages = [
+        message for system, convo in zip(agent.systems, agent.convos)
+        if "Ты — репортёр" in system for message in convo
+    ]
+    assert result["report_result"]["answer"] == "Готово"
+    for index, message in enumerate(reporter_messages):
+        if not isinstance(message, AIMessage):
+            continue
+        for call in message.tool_calls:
+            assert call["name"] != "ScoutResult"
+            assert any(
+                isinstance(candidate, ToolMessage) and candidate.tool_call_id == call["id"]
+                for candidate in reporter_messages[index + 1:]
+            ), f"Нет ToolMessage для {call['name']}"
 
 
 def test_deep_skips_scout(patch_llm):

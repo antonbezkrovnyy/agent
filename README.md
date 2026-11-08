@@ -63,6 +63,10 @@ Mars API, Aegra предоставляет API и checkpoints, Phoenix соби�
 - Native streaming runtime с pre/post-узлами: soft timeout переводит Scout, Investigator
   и Reporter в finalize без investigative tools. До 10 попыток structured response;
   пустой ответ модели без него даёт `empty_response` с partial-результатом вместо сбоя run.
+  Structured-result messages передаются в следующие роли как JSON-текст без `tool_calls`.
+  Оборванные настоящие вызовы получают error `ToolMessage(history_incomplete=true)`
+  без Evidence и выдуманного результата. Уведомления `finding/window/hypothesis`
+  переносятся после ToolMessage текущего шага, чтобы строгие API не видели непарных вызовов.
   Завершённые Evidence, findings, гипотезы, окна и артефакты сохраняются даже при fallback.
 - Pydantic-контракты Evidence/Finding, расширенные Scout/Intent/Reporting и
   структурированные `issues` критиков с `suggested_action`.
@@ -217,7 +221,15 @@ docker compose up -d --build
 
 Основные переменные:
 
-- `LLM_BASE_URL`, `LLM_TOKEN`, `LLM_MODEL` — upstream OpenAI-совместимого провайдера;
+- `LLM_BASE_URL`, `LLM_TOKEN`, `LLM_MODEL` — резервный upstream Jet;
+- `APIGW_BASE_URL`, `APIGW_TOKEN`, `APIGW_MODEL`, `APIGW_MODEL_FAST`,
+  `APIGW_EMBEDDING_MODEL` — основной OpenAI-совместимый upstream APIGW с DeepSeek.
+  Для chat-ролей отключён thinking mode (`thinking.type=disabled`) с
+  `allowed_openai_params=["thinking"]`, чтобы работал structured function calling.
+  Обычные chat-aliases ведут в APIGW, резервные `logicore-*-jet` — в Jet.
+  Embeddings идут только через существующий `UPSTREAM_EMBEDDING_*`, без APIGW fallback.
+  После трёх retry и cooldown LiteLLM переключает провайдера. Без APIGW-настроек
+  основной endpoint для совместимости повторяет `LLM_*`.
 - `LITELLM_MASTER_KEY` — авторизация локального proxy и UI (`admin`); Aegra и evaluator
   получают `logicore-*` aliases из `litellm/config.yaml`, реальные модели задаются там же;
 - `LITELLM_AGENT_KEY` — отдельный Virtual Key Aegra/evaluator с доступом к `logicore-*`;

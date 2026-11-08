@@ -103,6 +103,11 @@ services:
       - LITELLM_LOG=INFO
       - DATABASE_URL=postgresql://litellm:${LITELLM_POSTGRES_PASSWORD:-litellm_password}@litellm-db:5432/litellm_db
       - DIRECT_URL=postgresql://litellm:${LITELLM_POSTGRES_PASSWORD:-litellm_password}@litellm-db:5432/litellm_db
+      - APIGW_BASE_URL=${APIGW_BASE_URL:-https://aigw.inf.axel.pro/v1}
+      - APIGW_TOKEN=${APIGW_TOKEN:-${LLM_TOKEN}}
+      - APIGW_MODEL=${APIGW_MODEL:-openai/deepseek/deepseek-flash}
+      - APIGW_MODEL_FAST=${APIGW_MODEL_FAST:-openai/deepseek/deepseek-flash}
+      - APIGW_EMBEDDING_MODEL=${APIGW_EMBEDDING_MODEL:-openai/bge-m3}
     volumes:
       - ./litellm/config.yaml:/app/config.yaml:ro
     command: >

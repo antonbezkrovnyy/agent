@@ -979,6 +979,21 @@ Evaluator и default — `agent`. Публичный upstream GPTLab:
 Секреты в YAML не записываются. Для embeddings отдельные
 `AGENT_MEMORY_EMBEDDING_BASE_URL/TOKEN` имеют приоритет над основным upstream.
 
+Основной upstream APIGW подключается через `APIGW_BASE_URL/TOKEN` и модели
+`APIGW_MODEL`, `APIGW_MODEL_FAST`, `APIGW_EMBEDDING_MODEL` с provider prefix `openai/`.
+По умолчанию APIGW — `https://aigw.inf.axel.pro/v1`, модель —
+`openai/deepseek/deepseek-flash`: OpenAI prefix сохраняет полный upstream ID
+`deepseek/deepseek-flash`. Для всех chat-ролей задано `thinking.type=disabled`
+и `allowed_openai_params=["thinking"]`, поскольку thinking mode отклоняет `tool_choice`,
+а внешний LiteLLM без allowlist отклоняет сам custom-параметр.
+Для Scout/Memory модель можно переопределить через `APIGW_MODEL_FAST`.
+Обычные chat-aliases ведут в APIGW, резервные `logicore-*-jet` — в Jet.
+После трёх retry и cooldown 30 секунд выполняется автоматический переход APIGW → Jet.
+Embeddings идут отдельно через существующий `UPSTREAM_EMBEDDING_*`, без APIGW fallback:
+APIGW не предоставляет `bge-m3` для текущего ключа, поэтому он не используется для памяти.
+Без APIGW-настроек основной endpoint для обратной совместимости повторяет `LLM_*`;
+для независимого провайдера его нужно задать явно.
+
 Отдельный `litellm-db` хранит настройки, ключи и модели, добавленные через UI.
 `store_model_in_db=true`, `LITELLM_POSTGRES_PASSWORD` задаёт пароль этой БД.
 UI доступен по `http://localhost:4000/ui`: пользователь `admin`, пароль —
@@ -1065,8 +1080,9 @@ Evidence, findings, гипотезы, окна, артефакты и прива
 `termination_reason=provider_error`; после исчерпания попыток возвращается partial state.
 
 LiteLLM выполняет до трёх повторов одного deployment с паузой 2 секунды
-(`litellm_settings.num_retries/retry_after`). Это retry только сетевых и временных
-сбоев, а не автоматический fallback между моделями GPTLab.
+(`litellm_settings.num_retries/retry_after`). После исчерпания попыток и cooldown
+срабатывает соответствующее правило `litellm_settings.fallbacks`: основной
+`logicore-*` alias переключается на резервный `logicore-*-jet`. Обратного цикла нет.
 
 После soft timeout работа переходит `investigate → finalize`. Middleware удаляет
 investigative tools из model request: Scout оставляет `log_finding`; Investigator —
@@ -1106,6 +1122,11 @@ Planner, критики, Chat и Memory consolidation используют fallb
 - Отсутствие structured response превращается в явную limitation, а не скрытый parser.
   Пустой terminal-ответ модели без него получает `termination_reason=empty_response`,
   partial-результат и сохранённые Evidence/метрики вместо `RuntimeError` всего run.
+- `ScoutResult`, `InvestigationResult` и `ReporterResult` при передаче в следующие
+  model calls преобразуются в обычный JSON-текст без `tool_calls`. Настоящие MCP calls
+  и парные `ToolMessage` сохраняются. Для оборванных вызовов добавляется error
+  `ToolMessage(history_incomplete=true)` без Evidence и выдуманного результата.
+  Уведомления `finding/window/hypothesis` переносятся после ToolMessage текущего шага.
 
 ## 15. Что видит пользователь
 

@@ -1,50 +1,128 @@
 model_list:
   - model_name: logicore-default
     litellm_params:
-      model: openai/agent
-      litellm_credential_name: jet
+      model: os.environ/APIGW_MODEL
+      thinking: {"type": "disabled"}
+      allowed_openai_params: ["thinking"]
+      api_base: os.environ/APIGW_BASE_URL
+      api_key: os.environ/APIGW_TOKEN
 
   - model_name: logicore-intent
     litellm_params:
-      model: openai/agent
-      litellm_credential_name: jet
+      model: os.environ/APIGW_MODEL
+      thinking: {"type": "disabled"}
+      allowed_openai_params: ["thinking"]
+      api_base: os.environ/APIGW_BASE_URL
+      api_key: os.environ/APIGW_TOKEN
 
   - model_name: logicore-scout
     litellm_params:
-      model: openai/agent-fast
-      litellm_credential_name: jet
+      model: os.environ/APIGW_MODEL_FAST
+      thinking: {"type": "disabled"}
+      allowed_openai_params: ["thinking"]
+      api_base: os.environ/APIGW_BASE_URL
+      api_key: os.environ/APIGW_TOKEN
 
   - model_name: logicore-investigator
     litellm_params:
-      model: openai/agent
-      litellm_credential_name: jet
+      model: os.environ/APIGW_MODEL
+      thinking: {"type": "disabled"}
+      allowed_openai_params: ["thinking"]
+      api_base: os.environ/APIGW_BASE_URL
+      api_key: os.environ/APIGW_TOKEN
 
   - model_name: logicore-reporter
     litellm_params:
-      model: openai/agent
-      litellm_credential_name: jet
+      model: os.environ/APIGW_MODEL
+      thinking: {"type": "disabled"}
+      allowed_openai_params: ["thinking"]
+      api_base: os.environ/APIGW_BASE_URL
+      api_key: os.environ/APIGW_TOKEN
 
   - model_name: logicore-critic
+    litellm_params:
+      model: os.environ/APIGW_MODEL
+      thinking: {"type": "disabled"}
+      allowed_openai_params: ["thinking"]
+      api_base: os.environ/APIGW_BASE_URL
+      api_key: os.environ/APIGW_TOKEN
+
+  - model_name: logicore-memory
+    litellm_params:
+      model: os.environ/APIGW_MODEL_FAST
+      thinking: {"type": "disabled"}
+      allowed_openai_params: ["thinking"]
+      api_base: os.environ/APIGW_BASE_URL
+      api_key: os.environ/APIGW_TOKEN
+
+  - model_name: logicore-planner
+    litellm_params:
+      model: os.environ/APIGW_MODEL
+      thinking: {"type": "disabled"}
+      allowed_openai_params: ["thinking"]
+      api_base: os.environ/APIGW_BASE_URL
+      api_key: os.environ/APIGW_TOKEN
+
+  - model_name: logicore-evaluator
+    litellm_params:
+      model: os.environ/APIGW_MODEL
+      thinking: {"type": "disabled"}
+      allowed_openai_params: ["thinking"]
+      api_base: os.environ/APIGW_BASE_URL
+      api_key: os.environ/APIGW_TOKEN
+
+  - model_name: logicore-embedding
+    litellm_params:
+      model: openai/bge-m3
+      api_base: os.environ/UPSTREAM_EMBEDDING_BASE_URL
+      api_key: os.environ/UPSTREAM_EMBEDDING_TOKEN
+
+  - model_name: logicore-default-jet
     litellm_params:
       model: openai/agent
       litellm_credential_name: jet
 
-  - model_name: logicore-memory
+  - model_name: logicore-intent-jet
+    litellm_params:
+      model: openai/agent
+      litellm_credential_name: jet
+
+  - model_name: logicore-scout-jet
     litellm_params:
       model: openai/agent-fast
       litellm_credential_name: jet
 
-  - model_name: logicore-planner
+  - model_name: logicore-investigator-jet
     litellm_params:
       model: openai/agent
       litellm_credential_name: jet
 
-  - model_name: logicore-evaluator
+  - model_name: logicore-reporter-jet
     litellm_params:
       model: openai/agent
       litellm_credential_name: jet
 
-  - model_name: logicore-embedding
+  - model_name: logicore-critic-jet
+    litellm_params:
+      model: openai/agent
+      litellm_credential_name: jet
+
+  - model_name: logicore-memory-jet
+    litellm_params:
+      model: openai/agent-fast
+      litellm_credential_name: jet
+
+  - model_name: logicore-planner-jet
+    litellm_params:
+      model: openai/agent
+      litellm_credential_name: jet
+
+  - model_name: logicore-evaluator-jet
+    litellm_params:
+      model: openai/agent
+      litellm_credential_name: jet
+
+  - model_name: logicore-embedding-jet
     litellm_params:
       model: openai/bge-m3
       api_base: os.environ/UPSTREAM_EMBEDDING_BASE_URL
@@ -53,6 +131,20 @@ model_list:
 litellm_settings:
   num_retries: 3
   retry_after: 2
+  fallbacks:
+    - logicore-default: ["logicore-default-jet"]
+    - logicore-intent: ["logicore-intent-jet"]
+    - logicore-scout: ["logicore-scout-jet"]
+    - logicore-investigator: ["logicore-investigator-jet"]
+    - logicore-reporter: ["logicore-reporter-jet"]
+    - logicore-critic: ["logicore-critic-jet"]
+    - logicore-memory: ["logicore-memory-jet"]
+    - logicore-planner: ["logicore-planner-jet"]
+    - logicore-evaluator: ["logicore-evaluator-jet"]
+
+router_settings:
+  allowed_fails: 3
+  cooldown_time: 30
 
 general_settings:
   master_key: os.environ/LITELLM_MASTER_KEY
