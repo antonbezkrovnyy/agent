@@ -89,3 +89,49 @@ def test_consolidation_sanitizes_llm_dict_before_pydantic(monkeypatch):
 
     assert result["memory_facts_saved"] == 1
     assert result["memory_error"] == ""
+
+
+def test_exact_fact_lookup_normalizes_whitespace_in_sql(monkeypatch):
+    import memory_store as memory_store_mod
+
+    class Cursor:
+        query = ""
+        params = None
+
+        def execute(self, query, params):
+            self.query = query
+            self.params = params
+
+        def fetchone(self):
+            return None
+
+    class Connection:
+        cursor_instance = Cursor()
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            return None
+
+        def cursor(self):
+            connection = self
+
+            class CursorContext:
+                def __enter__(self):
+                    return connection.cursor_instance
+
+                def __exit__(self, *args):
+                    return None
+
+            return CursorContext()
+
+    connection = Connection()
+    monkeypatch.setattr(memory_store_mod.psycopg, "connect", lambda *args, **kwargs: connection)
+    store = memory_store_mod.MemoryStore("postgresql://test", 1)
+    store._ready = True
+
+    assert store.find_fact_by_statement("default", "  Факт\n  с пробелами  ") is None
+    assert "regexp_replace" in connection.cursor_instance.query
+    assert connection.cursor_instance.query.count("regexp_replace") == 2
+    assert connection.cursor_instance.params == ("default", "  Факт\n  с пробелами  ")

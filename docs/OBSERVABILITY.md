@@ -37,7 +37,7 @@ checkpoint namespace, модель, provider и токены. `agent/observabili
 - `investigation_id`, `work_item_id`, `work_item_attempt`, `skill_id`;
 - `agent_phase` — `investigate`, `finalize` или `fallback`;
 - `continuation` и `termination_reason` — `done`, `soft_timeout`, `provider_error`,
-  `finalize_exhausted`, `hard_timeout` или `running`;
+  `empty_response`, `finalize_exhausted`, `hard_timeout` или `running`;
 - `prompt_version` из `AGENT_PROMPT_VERSION`.
 
 Tags: `role:<role>`, `mode:<mode>`, `scope:<scope>`. Metadata не содержит тексты

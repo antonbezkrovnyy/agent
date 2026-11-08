@@ -422,11 +422,12 @@ async def _finalize_limited(agent: str, result: dict, schema):
 
 
 def _timeout_result(schema, state: dict, reason: str = "hard_timeout") -> dict:
-    note = (
-        "Временная ошибка LLM-провайдера: этап завершён по сохранённым данным."
-        if reason == "provider_error"
-        else "Технический таймаут: этап остановлен из-за слишком долгого ответа."
-    )
+    if reason == "provider_error":
+        note = "Временная ошибка LLM-провайдера: этап завершён по сохранённым данным."
+    elif reason == "empty_response":
+        note = "Модель вернула пустой ответ без structured response; этап завершён по сохранённым данным."
+    else:
+        note = "Технический таймаут: этап остановлен из-за слишком долгого ответа."
     if schema is llm_mod.ScoutResult:
         structured = llm_mod.ScoutResult(note=note)
     elif schema is llm_mod.InvestigationResult:
@@ -694,8 +695,10 @@ async def _run_agent(agent: str, state: State, work_key: str) -> tuple[dict, lis
                 break
             except RuntimeError:
                 new_messages = result["messages"][len(agent_input["messages"]):]
-                if attempt == 1 or new_messages:
-                    raise
+                if attempt == 0 and not new_messages:
+                    continue
+                result = _timeout_result(schema, result, "empty_response")
+                break
         if finalized or not limited:
             break
         if agent == "investigator" and not _new_evidence(agent_input, result):

@@ -32,9 +32,11 @@ Mars API, Aegra предоставляет API и checkpoints, Phoenix соби�
   Targeted (конкретная ветка) или Alert (SIEM-алерт). Required и optional разделены:
   следующие направления не раздувают текущий план.
 - Planner разбивает только включённую работу на 1–5 work items с `acceptance`,
-  приоритетом и стоимостью. Supervisor выполняет зависимые волны через item-subgraphs
-  и `asyncio.gather` (до 2 веток), с Item Critic и retry. Replan допустим только при
-  невыполненном acceptance, ошибочном выводе или отсутствии критического Evidence.
+  приоритетом и стоимостью. Циклы и self-dependency отклоняются; сбой или невалидный план
+  даёт безопасный одиночный fallback с причиной в `plan.reason`, уведомлении и логах.
+  Supervisor выполняет зависимые волны через item-subgraphs и `asyncio.gather` (до 2 веток),
+  с Item Critic и retry. Replan допустим только при невыполненном acceptance,
+  ошибочном выводе или отсутствии критического Evidence.
 - Skills `incident_dating`, `event_drilldown` и `entity_pivot` v1 автоматически
   выбираются по задаче. Есть адаптивные окна, разбор `uuid + timestamp`, typed
   anchors, дедупликация `type:value`, ограничения глубины/ширины и `NOT_CHECKED`.
@@ -60,7 +62,8 @@ Mars API, Aegra предоставляет API и checkpoints, Phoenix соби�
   в детерминированной цепочке отчёта; чтение через `list_hypotheses`/`get_hypothesis`.
 - Native streaming runtime с pre/post-узлами: soft timeout переводит Scout, Investigator
   и Reporter в finalize без investigative tools. До 10 попыток structured response;
-  завершённые Evidence, findings, гипотезы, окна и артефакты сохраняются даже при fallback.
+  пустой ответ модели без него даёт `empty_response` с partial-результатом вместо сбоя run.
+  Завершённые Evidence, findings, гипотезы, окна и артефакты сохраняются даже при fallback.
 - Pydantic-контракты Evidence/Finding, расширенные Scout/Intent/Reporting и
   структурированные `issues` критиков с `suggested_action`.
 - Модели по ролям через env; `model` и фактическая `duration_ms` в `skill_runs`.

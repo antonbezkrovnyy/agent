@@ -244,7 +244,9 @@ Scout возвращает:
 Planner без инструментов превращает included в `InvestigationPlan` с 1–5 work items.
 Каждый item содержит цель, `acceptance`, priority, estimated_cost, зависимости, required,
 item-local окно, статус, attempt, timestamps, результат, метрики и критик. Не более двух
-items считаются обязательными за проход.
+items считаются обязательными за проход. Нормализация проверяет зависимости на циклы и
+self-dependency. Ошибка LLM или невалидный граф даёт безопасный одиночный fallback;
+его причина сохраняется в `plan.reason`, публичном planner-уведомлении и стандартном `logging`.
 
 Supervisor выполняет готовые items волнами через `asyncio.gather` (до двух), затем
 объединяет только изменившийся item каждой ветки. Item-subgraph состоит из Investigator
@@ -529,7 +531,8 @@ Evidence пользовательскому факту не требуется. 
 - `observed` по умолчанию получает TTL 24 часа;
 - `update` объединяет provenance;
 - `supersede` создаёт новую версию и закрывает старую через `valid_to/superseded_by`;
-- exact duplicate и similarity ≥ 0.90 превращают insert в update;
+- exact duplicate и similarity ≥ 0.90 превращают insert в update; при exact-сравнении
+  регистр, краевые и повторные whitespace игнорируются, семантический поиск идёт через pgvector;
 - гипотезы, сырые события, счётчики и временный операционный статус не сохраняются.
 
 Каждое предложение попадает в `memory_operations`: исходное и фактическое действие,
@@ -1101,6 +1104,8 @@ Planner, критики, Chat и Memory consolidation используют fallb
 - Сбой embeddings не мешает сохранить дело, но исключает его из vector search.
 - Ошибка consolidation после сохранения дела не удаляет само дело.
 - Отсутствие structured response превращается в явную limitation, а не скрытый parser.
+  Пустой terminal-ответ модели без него получает `termination_reason=empty_response`,
+  partial-результат и сохранённые Evidence/метрики вместо `RuntimeError` всего run.
 
 ## 15. Что видит пользователь
 

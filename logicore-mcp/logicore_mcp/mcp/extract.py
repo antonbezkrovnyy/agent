@@ -54,6 +54,7 @@ async def extract_data_flow(
     complete = True
     next_page: int | None = None
     hint: str | None = None
+    pagination_error: str | None = None
     max_pages = (max_rows + PAGE_SIZE - 1) // PAGE_SIZE
 
     for current_page in range(page, page + max_pages):
@@ -91,6 +92,7 @@ async def extract_data_flow(
         if row_ids and len(row_ids) == len(rows) and row_ids.issubset(seen):
             complete = False
             next_page = None
+            pagination_error = "duplicate_page"
             hint = f"Пагинация Earth повторила страницу {current_page}; выгрузка остановлена."
             break
         seen.update(row_ids)
@@ -121,6 +123,7 @@ async def extract_data_flow(
         "returned_rows": len(events),
         "complete": complete,
         "next_page": next_page if not complete else None,
+        **({"pagination_error": pagination_error} if pagination_error else {}),
         **({"hint": hint} if hint else {}),
     }
     if groups is not None:

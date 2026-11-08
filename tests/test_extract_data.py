@@ -125,6 +125,8 @@ def test_extract_data_stops_on_repeated_page():
 
     assert result["returned_rows"] == 100
     assert result["complete"] is False
+    assert result["next_page"] is None
+    assert result["pagination_error"] == "duplicate_page"
     assert "повторила" in result["hint"]
 
 

@@ -374,7 +374,9 @@ class MemoryStore:
                            source_case_ids, evidence_ids, valid_from, valid_to,
                            superseded_by, revision, pinned, excluded, index_status, created_at, updated_at
                     FROM agent_memory.context_facts
-                    WHERE scope = %s AND lower(statement) = lower(%s)
+                    WHERE scope = %s
+                      AND lower(regexp_replace(btrim(statement), '[[:space:]]+', ' ', 'g')) =
+                          lower(regexp_replace(btrim(%s), '[[:space:]]+', ' ', 'g'))
                       AND (valid_to IS NULL OR valid_to > now()) AND superseded_by IS NULL
                       AND excluded = false
                     ORDER BY updated_at DESC

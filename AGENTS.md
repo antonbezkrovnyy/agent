@@ -75,6 +75,8 @@
   из MCP и должен совпадать с выполненным запросом, агент не генерирует его повторно.
   Runtime стримит native `create_agent` и события завершённых tools: технический таймаут
   не отбрасывает Evidence, findings, гипотезы, окна, артефакты и приватную историю.
+  Пустой ответ модели без structured response даёт `empty_response` и partial-результат,
+  а не `RuntimeError` всего run.
   Отменённые вызовы фиксируются как `cancelled`, вложенные Evidence имеют `parent_call_id`.
 - Аналитический отчёт прикрепляется как Markdown плюс самодостаточный ZIP с `report.md`,
   `queries.md`, полными inline `evidence.jsonl`, аудитом каждого вызова `tool_calls.jsonl`,
@@ -120,9 +122,10 @@
   items; required — максимум двумя. Optional попадает только в отчёт/suggestions.
   Work item содержит acceptance/priority/estimated_cost. Replan разрешён только для
   `acceptance_failed`, `conclusion_invalid` или `missing_critical_evidence`.
-- Planner делит deep на work items до Investigator. Supervisor выполняет волны через
-  item-subgraphs и `asyncio.gather`, не повторяя завершённые items. Item-worker меняет
-  только собственный item; Reporter имеет только `get_evidence_batch`.
+- Planner делит deep на work items до Investigator. Циклы и self-dependency отклоняются;
+  fallback строит одиночный план и фиксирует причину в `plan.reason`, уведомлении и логах.
+  Supervisor выполняет волны через item-subgraphs и `asyncio.gather`, не повторяя
+  завершённые items. Item-worker меняет только собственный item; Reporter имеет только `get_evidence_batch`.
 - Цепочка расследования строится детерминированно из state. LLM не добавляет в
   неё несуществующие действия и факты. После Reporter `NOT_CHECKED` берётся из его
   structured result с детерминированным сохранением `failed/skipped` items, а не из

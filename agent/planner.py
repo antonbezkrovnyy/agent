@@ -1,5 +1,7 @@
 """Планирование и выполнение Deep Investigation по work items."""
 
+import logging
+
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 
 import llm as llm_mod
@@ -12,6 +14,7 @@ from progress import agent_progress, simple_progress
 from prompts import compose, context_block, structured_block, system_prompt
 from state import State, merge_work_items
 
+logger = logging.getLogger(__name__)
 settings = Settings()
 
 
@@ -93,13 +96,44 @@ def _normalized_plan(plan: InvestigationPlan, state: State) -> InvestigationPlan
         item.metrics = {}
         item.critic = {}
         item.context = {}
+    _validate_dependency_graph(plan.items)
     return plan
+
+
+class DependencyCycleError(ValueError):
+    pass
+
+
+def _validate_dependency_graph(items: list[WorkItem]) -> None:
+    ids = {item.id for item in items}
+    dependencies = {
+        item.id: [dep for dep in item.depends_on if dep in ids]
+        for item in items
+    }
+    completed = set()
+    path = []
+
+    def visit(item_id: str) -> None:
+        if item_id in path:
+            cycle = [*path[path.index(item_id):], item_id]
+            raise DependencyCycleError("Цикл зависимостей: " + " → ".join(cycle))
+        if item_id in completed:
+            return
+        path.append(item_id)
+        for dependency in dependencies[item_id]:
+            visit(dependency)
+        path.pop()
+        completed.add(item_id)
+
+    for item_id in dependencies:
+        visit(item_id)
 
 
 def node_planner(state: State) -> dict:
     memory_control = (state.get("intent") or {}).get("memory_control_required")
     if state.get("investigation_plan") and not state.get("replan_requested") and not memory_control:
         return {}
+    fallback_reason = ""
     if not settings.investigation_planner_enabled:
         plan = _fallback_plan(state)
     else:
@@ -131,12 +165,23 @@ def node_planner(state: State) -> dict:
                 raise TimeoutError("Investigation run deadline exceeded")
             response = llm_mod.planner_llm.invoke(messages, config=trace_config("planner", state))
             plan = response if isinstance(response, InvestigationPlan) else InvestigationPlan.model_validate(response)
-        except Exception:
+        except Exception as exc:
+            fallback_reason = type(exc).__name__
+            logger.warning("Planner fallback: %s", fallback_reason, exc_info=True)
             plan = _fallback_plan(state)
-    plan = _normalized_plan(plan, state)
+    try:
+        plan = _normalized_plan(plan, state)
+    except DependencyCycleError as exc:
+        fallback_reason = str(exc)
+        logger.warning("Planner fallback: %s", fallback_reason, exc_info=True)
+        plan = _normalized_plan(_fallback_plan(state), state)
+    if fallback_reason:
+        plan.reason = f"{plan.reason}. Причина упрощения: {fallback_reason}"
     goal = plan.goal or (state.get("investigation_scope") or {}).get("objective") or "Текущее расследование"
     notification_lines = [f"План расследования (версия {plan.version}): {goal}"]
     notification_lines.extend(f"{index}. {item.goal}" for index, item in enumerate(plan.items, start=1))
+    if fallback_reason:
+        notification_lines.append(f"План упрощён: {fallback_reason}.")
     notification = AIMessage(content="\n".join(notification_lines), name="planner")
     return {
         "investigation_plan": plan.model_dump(),

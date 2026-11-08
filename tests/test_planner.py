@@ -270,3 +270,54 @@ def test_normalized_plan_preserves_reference_to_suffixed_duplicate():
 
     assert [item.id for item in normalized.items] == ["main", "main-2", "report"]
     assert normalized.items[2].depends_on == ["main-2"]
+
+
+def test_cyclic_plan_falls_back_to_single_item_with_reason(patch_llm):
+    planner = FakeStructured(plan(
+        item("first", deps=["second"]),
+        item("second", deps=["first"]),
+    ))
+    agent = FakeAgent({
+        "Ты — инвестигейтор": [result("Одиночная проверка завершена")],
+        "Ты — репортёр": [ai("Готово")],
+    })
+    patch_llm(agent, FakeStructured(intent(mode="deep")), planner=planner)
+
+    result_state = invoke(build_graph(), "проверь цикл в плане")
+
+    assert len(result_state["work_items"]) == 1
+    assert result_state["work_items"][0]["id"] == "main"
+    assert result_state["work_items"][0]["status"] == "done"
+    assert "Цикл зависимостей: first → second → first" in result_state["investigation_plan"]["reason"]
+    planner_messages = [item.content for item in result_state["messages"] if item.name == "planner"]
+    assert any("План упрощён: Цикл зависимостей" in item for item in planner_messages)
+
+
+def test_normalized_plan_rejects_self_dependency():
+    import pytest
+    from planner import DependencyCycleError, _normalized_plan
+
+    with pytest.raises(DependencyCycleError, match="self → self"):
+        _normalized_plan(
+            plan(item("self", deps=["self"])),
+            {
+                "messages": [],
+                "investigation_scope": {"objective": "Проверка", "max_items": 5},
+                "work_items": [],
+            },
+        )
+
+
+def test_planner_failure_records_fallback_reason(patch_llm):
+    planner = FakeStructured(error=RuntimeError("planner unavailable"))
+    agent = FakeAgent({
+        "Ты — инвестигейтор": [result("Одиночная проверка завершена")],
+        "Ты — репортёр": [ai("Готово")],
+    })
+    patch_llm(agent, FakeStructured(intent(mode="deep")), planner=planner)
+
+    result_state = invoke(build_graph(), "проверь fallback planner")
+
+    assert len(result_state["work_items"]) == 1
+    assert result_state["work_items"][0]["status"] == "done"
+    assert "Причина упрощения: RuntimeError" in result_state["investigation_plan"]["reason"]

@@ -371,3 +371,27 @@ def test_singleflight_shares_only_identical_calls_and_preserves_pages():
     assert same[1].update["evidence"][0]["id"] == "same-1"
     assert '"reused": true' in same[1].update["messages"][0].content
     assert [item.update["evidence"][0]["id"] for item in pages] == ["page-1", "page-2"]
+
+
+def test_empty_model_response_returns_partial_result_without_raising(patch_llm):
+    agent = FakeAgent({"Ты — инвестигейтор": [ai("")]})
+    patch_llm(agent, FakeStructured(intent()))
+    state = runtime_state()
+    state["evidence"] = [{
+        "id": "ev-before-empty",
+        "tool": "count_events",
+        "status": "ok",
+        "result": {"count": 17},
+    }]
+
+    result, new_messages, update = asyncio.run(agents_mod._run_agent(
+        "investigator", state, "inv_msgs",
+    ))
+
+    assert result["termination_reason"] == "empty_response"
+    assert result["agent_phase"] == "fallback"
+    assert result["structured_response"].status == "partial"
+    assert "пустой ответ" in result["structured_response"].summary
+    assert result["evidence"] == state["evidence"]
+    assert "пустой ответ" in new_messages[-1].content
+    assert update["run_metrics"][0]["termination_reason"] == "empty_response"
