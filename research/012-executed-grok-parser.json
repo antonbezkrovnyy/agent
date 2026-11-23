@@ -1,0 +1,468 @@
+{
+  "essence": "Хост 10.11.200.67 передаёт событие межсетевого фильтра: правило access-list CSM_FW_ACL_ отклонило (denied) TCP-соединение от Outside/131.9.85.43(14015) к PUB_DMZ/191.189.210.52(22) (порт 22, SSH). Результат — соединение не установлено; счётчик попаданий hit-cnt 1, это первое попадание (first hit); пара hex в скобках [0x6921d058, 0x00000000] сохраняется как непрозрачное значение (гипотеза: внутренние идентификаторы записи ACL). Строка передана с PRI <132> (facility 16, severity конверта 4) и тегом %ASA-4-106100 (событийная severity 4).",
+  "structure": [
+    {
+      "path": "$",
+      "format": "syslog-строка: транспортный заголовок + тегированный payload",
+      "role": "envelope",
+      "transform": null,
+      "confidence": "observed"
+    },
+    {
+      "path": "$.pri",
+      "format": "syslog PRI: десятичное число в угловых скобках",
+      "role": "envelope",
+      "transform": null,
+      "confidence": "observed"
+    },
+    {
+      "path": "$.timestamp",
+      "format": "Mmm d YYYY HH:MM:SS — BSD/RFC3164-подобный timestamp с годом",
+      "role": "envelope",
+      "transform": null,
+      "confidence": "observed"
+    },
+    {
+      "path": "$.host",
+      "format": "IPv4-литерал в слоте hostname",
+      "role": "envelope",
+      "transform": null,
+      "confidence": "observed"
+    },
+    {
+      "path": "$.sep",
+      "format": "разделитель 'пробел + двоеточие + пробел' между заголовком и payload",
+      "role": "envelope",
+      "transform": null,
+      "confidence": "observed"
+    },
+    {
+      "path": "$.payload",
+      "format": "тегированный payload вида '%<PRODUCT>-<sev>-<msgid>: <body>'",
+      "role": "payload",
+      "transform": null,
+      "confidence": "observed"
+    },
+    {
+      "path": "$.payload.tag",
+      "format": "%<PRODUCT>-<sev>-<msgid> — продуктовый тег",
+      "role": "payload",
+      "transform": null,
+      "confidence": "observed"
+    },
+    {
+      "path": "$.payload.tag.product",
+      "format": "литерал тега (служебный якорь грамматики, не выходное поле)",
+      "role": "payload",
+      "transform": null,
+      "confidence": "inferred"
+    },
+    {
+      "path": "$.payload.tag.msg_severity",
+      "format": "одна десятичная цифра — событийная severity из тега",
+      "role": "value",
+      "transform": null,
+      "confidence": "observed"
+    },
+    {
+      "path": "$.payload.tag.msg_id",
+      "format": "шесть десятичных цифр — номер сообщения, ключ Family",
+      "role": "value",
+      "transform": null,
+      "confidence": "observed"
+    },
+    {
+      "path": "$.payload.body",
+      "format": "позиционная грамматика фиксированного порядка, без key=value",
+      "role": "payload",
+      "transform": null,
+      "confidence": "observed"
+    },
+    {
+      "path": "$.payload.body.acl_name",
+      "format": "токен без пробелов (допускает завершающий '_')",
+      "role": "value",
+      "transform": null,
+      "confidence": "observed"
+    },
+    {
+      "path": "$.payload.body.action",
+      "format": "слово из ограниченного набора (denied/permitted/…)",
+      "role": "value",
+      "transform": null,
+      "confidence": "observed"
+    },
+    {
+      "path": "$.payload.body.protocol",
+      "format": "слово-протокол (tcp/udp/icmp/…)",
+      "role": "value",
+      "transform": null,
+      "confidence": "observed"
+    },
+    {
+      "path": "$.payload.body.src_iface",
+      "format": "имя интерфейса источника в endpoint-форме",
+      "role": "value",
+      "transform": null,
+      "confidence": "observed"
+    },
+    {
+      "path": "$.payload.body.src_ip",
+      "format": "IPv4-адрес источника",
+      "role": "value",
+      "transform": null,
+      "confidence": "observed"
+    },
+    {
+      "path": "$.payload.body.src_port",
+      "format": "целое в круглых скобках (может быть 0 как реальное значение)",
+      "role": "value",
+      "transform": null,
+      "confidence": "observed"
+    },
+    {
+      "path": "$.payload.body.dst_iface",
+      "format": "имя интерфейса назначения, после '->'",
+      "role": "value",
+      "transform": null,
+      "confidence": "observed"
+    },
+    {
+      "path": "$.payload.body.dst_ip",
+      "format": "IPv4-адрес назначения",
+      "role": "value",
+      "transform": null,
+      "confidence": "observed"
+    },
+    {
+      "path": "$.payload.body.dst_port",
+      "format": "целое в круглых скобках (может быть 0 как реальное значение)",
+      "role": "value",
+      "transform": null,
+      "confidence": "observed"
+    },
+    {
+      "path": "$.payload.body.hit_count",
+      "format": "целое после литерала 'hit-cnt'",
+      "role": "value",
+      "transform": null,
+      "confidence": "observed"
+    },
+    {
+      "path": "$.payload.body.hit_qualifier",
+      "format": "опциональный текст 'first hit' либо 'interval N-second'",
+      "role": "value",
+      "transform": null,
+      "confidence": "observed"
+    },
+    {
+      "path": "$.payload.body.acl_hash",
+      "format": "содержимое квадратных скобок: пара hex через запятую, не декодируется",
+      "role": "value",
+      "transform": null,
+      "confidence": "observed"
+    }
+  ],
+  "strategy": [
+    "Делить строку на три зоны: транспортный конверт, продуктовый тег, тело сообщения; первым слоем извлекать конверт и оставлять остаток целиком в payload.",
+    "Разбирать тег отдельным слоем как %<PRODUCT>-<sev>-<msgid>, тело — только следующим слоем.",
+    "Диспетчеризовать Family по msg_id (106100), а не по телу и не по имени продукта.",
+    "Держать msg_id static-элементом грамматики, а msg_severity, action и protocol — dynamic-значениями наблюдения.",
+    "Делить позиционное тело на переиспользуемые сегменты (endpoint, hit-summary) вместо одной регулярки на всю строку.",
+    "Задавать разделитель конверта как ' +: +', а разделитель тега как ': +', чтобы не зависеть от одного или двух пробелов.",
+    "Описывать опциональные сегменты 'first hit'/'interval N-second' и '[...]' независимыми необязательными группами и не подменять их отсутствие нулём.",
+    "Сохранять RAW побайтово и не переписывать его при извлечении captures; в residual попадает только фактический неразобранный остаток.",
+    "Вводить unescaping и декодирование исключительно отдельными слоями-преобразованиями при обнаружении экранированного вложения; в текущей Family таких слоёв нет.",
+    "Не выводить величины, вычисляемые из pri (facility, severity конверта), как поля события.",
+    "Оставлять литерал ASA в теге статическим якорем грамматики, а не выходным полем, при наличии отдельного static-ключа msg_id."
+  ],
+  "record_schema": [
+    {
+      "name": "raw",
+      "category": "dynamic",
+      "type": "string",
+      "required": true,
+      "source": "$"
+    },
+    {
+      "name": "pri",
+      "category": "dynamic",
+      "type": "integer",
+      "required": false,
+      "source": "$.pri"
+    },
+    {
+      "name": "timestamp",
+      "category": "dynamic",
+      "type": "string",
+      "required": false,
+      "source": "$.timestamp"
+    },
+    {
+      "name": "host",
+      "category": "dynamic",
+      "type": "string",
+      "required": false,
+      "source": "$.host"
+    },
+    {
+      "name": "msg_id",
+      "category": "static",
+      "type": "string",
+      "required": true,
+      "source": "контракт Family: литерал тега %<PRODUCT>-<sev>-106100 (ключ диспетчеризации)"
+    },
+    {
+      "name": "msg_severity",
+      "category": "dynamic",
+      "type": "integer",
+      "required": true,
+      "source": "$.payload.tag.msg_severity"
+    },
+    {
+      "name": "acl_name",
+      "category": "dynamic",
+      "type": "string",
+      "required": true,
+      "source": "$.payload.body.acl_name"
+    },
+    {
+      "name": "action",
+      "category": "dynamic",
+      "type": "string",
+      "required": true,
+      "source": "$.payload.body.action"
+    },
+    {
+      "name": "protocol",
+      "category": "dynamic",
+      "type": "string",
+      "required": true,
+      "source": "$.payload.body.protocol"
+    },
+    {
+      "name": "src_iface",
+      "category": "dynamic",
+      "type": "string",
+      "required": true,
+      "source": "$.payload.body.src_iface"
+    },
+    {
+      "name": "src_ip",
+      "category": "dynamic",
+      "type": "string",
+      "required": true,
+      "source": "$.payload.body.src_ip"
+    },
+    {
+      "name": "src_port",
+      "category": "dynamic",
+      "type": "integer",
+      "required": true,
+      "source": "$.payload.body.src_port"
+    },
+    {
+      "name": "dst_iface",
+      "category": "dynamic",
+      "type": "string",
+      "required": true,
+      "source": "$.payload.body.dst_iface"
+    },
+    {
+      "name": "dst_ip",
+      "category": "dynamic",
+      "type": "string",
+      "required": true,
+      "source": "$.payload.body.dst_ip"
+    },
+    {
+      "name": "dst_port",
+      "category": "dynamic",
+      "type": "integer",
+      "required": true,
+      "source": "$.payload.body.dst_port"
+    },
+    {
+      "name": "hit_count",
+      "category": "dynamic",
+      "type": "integer",
+      "required": true,
+      "source": "$.payload.body.hit_count"
+    },
+    {
+      "name": "hit_qualifier",
+      "category": "dynamic",
+      "type": "string",
+      "required": false,
+      "source": "$.payload.body.hit_qualifier"
+    },
+    {
+      "name": "acl_hash",
+      "category": "dynamic",
+      "type": "string",
+      "required": false,
+      "source": "$.payload.body.acl_hash"
+    }
+  ],
+  "format_features": [
+    {
+      "property": "PRI закодирован числом в угловых скобках (132 = 16*8+4), facility и severity не напечатаны по отдельности (наблюдение)",
+      "implication": "severity конверта является вычисляемой величиной и не становится полем события; событийная severity берётся только из тега"
+    },
+    {
+      "property": "Timestamp содержит 4-значный год (Feb 12 2023 13:00:30), что отличается от классического BSD-формата без года (наблюдение)",
+      "implication": "требуется составная конструкция MONTH + MONTHDAY + YEAR + TIME; встроенный SYSLOGTIMESTAMP неприменим, вариант без года — другая запись Family"
+    },
+    {
+      "property": "Между host и ':' стоит пробел: '10.11.200.67 : %ASA-...' (наблюдение)",
+      "implication": "граница конверта задаётся как ' +: +', а не одиночным двоеточием; двоеточие встречается дважды (граница конверта и конец тега), поэтому оба якоря нужны явно"
+    },
+    {
+      "property": "Severity присутствует дважды: в PRI (4) и в теге (-4-) (наблюдение)",
+      "implication": "транспортная и событийная severity — разные величины; при пересылке они могут расходиться, поле события заполняется из тега"
+    },
+    {
+      "property": "Тег %ASA-4-106100 содержит стабильный 6-значный номер сообщения (вывод)",
+      "implication": "msg_id используется как ключ диспетчеризации и точка ветвления на грамматику тела"
+    },
+    {
+      "property": "Тело позиционное, без key=value, разделители — '->' и 'hit-cnt' (наблюдение)",
+      "implication": "разбор опирается на порядок токенов и литералы-разделители, а не на поиск ключей"
+    },
+    {
+      "property": "Конечная точка записывается как <iface>/<ip>(<port>) и встречается дважды (наблюдение)",
+      "implication": "один смысловой подшаблон endpoint переиспользуется дважды, но с разными именами captures для источника и назначения"
+    },
+    {
+      "property": "Хвост попаданий вариативен: 'first hit' либо 'interval N-second', плюс необязательные [hex, hex] (наблюдение)",
+      "implication": "в грамматике два независимых опциональных сегмента, соответствующих required=false в схеме"
+    },
+    {
+      "property": "Пара hex в квадратных скобках не декодируется по правилам строки (гипотеза о смысле: внутренние идентификаторы записи ACL)",
+      "implication": "значение сохраняется как непрозрачная строка целиком, без нормализации и вычислений"
+    }
+  ],
+  "pitfalls": [
+    {
+      "name": "Двоеточие с двумя ролями",
+      "mechanism": "':' закрывает и транспортный заголовок ('host : payload'), и продуктовый тег ('%ASA-4-106100:'); разбиение по первому ':' даёт хвостовой пробел в host или обрезанный тег",
+      "remediation": "Задавать явные якоря ' +: +' на границе конверта и '%…-(?<msg_id>[0-9]{6}): +' на теге"
+    },
+    {
+      "name": "Timestamp с годом",
+      "mechanism": "Классические шаблоны SYSLOGTIMESTAMP/ISO8601 не совпадают; запись без года является другим вариантом строки",
+      "remediation": "Использовать собственную конструкцию SYSLOGTIMEWITHYEAR (MONTH + MONTHDAY + YEAR + TIME), а вариант без года описывать как отдельную запись Family"
+    },
+    {
+      "name": "Один или два пробела в разделителях",
+      "mechanism": "Разное число пробелов после тега и между токенами сдвигает позиционный разбор тела",
+      "remediation": "Описывать все разделители как ' +', а не одиночным пробелом"
+    },
+    {
+      "name": "Свободная форма имени ACL",
+      "mechanism": "Имя — непробельный токен, может оканчиваться на '_' и по виду напоминать служебное слово; при имени с пробелом или кавычками вся позиционная цепочка сдвигается",
+      "remediation": "Захватывать одним непробельным токеном; при несовпадении остатка фиксировать его в residual, а не 'дотягивать' разбор до слова denied"
+    },
+    {
+      "name": "Переменные значения action и protocol",
+      "mechanism": "Наблюдаемые denied/tcp — лишь точки из более широких наборов (denied/permitted; tcp/udp/icmp/…), жёсткий литерал сужает Family и ломает разбор",
+      "remediation": "Захватывать как токен и проверять допустимый набор на уровне значения, а не грамматики"
+    },
+    {
+      "name": "Ноль против отсутствия порта",
+      "mechanism": "Для некоторых протоколов порт печатается как 0; нуль является реальным значением, а отсутствие скобок — отсутствием значения",
+      "remediation": "Хранить 0 как целое; отсутствие конструкции трактовать как null, не приравнивая null к нулю"
+    },
+    {
+      "name": "Опциональный хвост попаданий",
+      "mechanism": "'first hit' и 'interval N-second' взаимоисключающи и могут отсутствовать; группа '[hex, hex]' также опциональна; обязательные группы ломают разбор последующих сообщений той же Family",
+      "remediation": "Делать qualifier и bracket независимыми необязательными группами, согласованными с required=false"
+    },
+    {
+      "name": "Многоролевой дефис",
+      "mechanism": "'-' разделяет элементы тега (%ASA-4-106100), входит в слово-литерал (hit-cnt) и в состав '60-second'",
+      "remediation": "Не делить строку по '-'; тег разбирать отдельной конструкцией, хвост — по пробельным разделителям"
+    },
+    {
+      "name": "Два независимых источника severity",
+      "mechanism": "Severity из PRI и severity из тега могут расходиться при пересылке или переупаковке сообщения",
+      "remediation": "Заполнять событийное поле только из тега, PRI оставлять транспортным конвертом"
+    },
+    {
+      "name": "Непрозрачное содержимое скобок",
+      "mechanism": "Внутри [0x…, 0x…] есть запятая и пробел, hex-слова могут быть разной длины; попытка разобрать их как числа навязывает неверную семантику",
+      "remediation": "Захватывать всё содержимое скобок одной строкой, без нормализации, декодирования и split по запятой"
+    }
+  ],
+  "parser": {
+    "patterns": [
+      {
+        "name": "SYSLOG_PRI",
+        "definition": "\\<(?<pri>[0-9]{1,3})\\>",
+        "description": "PRI конверта в угловых скобках; facility и severity из него вычисляются отдельно и в выходные поля не попадают"
+      },
+      {
+        "name": "SYSLOGTIMEWITHYEAR",
+        "definition": "%{MONTH} +%{MONTHDAY} +%{YEAR} +%{TIME}",
+        "description": "Собственная конструкция: BSD-подобный timestamp с 4-значным годом; встроенный %{SYSLOGTIMESTAMP} не подходит из-за года"
+      },
+      {
+        "name": "ASA_SYSLOG_HEADER",
+        "definition": "%{SYSLOG_PRI}(?<timestamp>%{SYSLOGTIMEWITHYEAR}) +(?<host>%{IPV4}) +: +(?<payload>.*)",
+        "description": "Транспортный конверт целиком: PRI, timestamp, host и разделитель ' +: +'; остаток строки уходит в payload без попытки разбора"
+      },
+      {
+        "name": "ASA_TAG",
+        "definition": "%(?<product>[A-Z]+)-(?<msg_severity>[0-9])-(?<msg_id>[0-9]{6}):",
+        "description": "Продуктовый тег: литералы '%' и '-', одноцифровой capture событийной severity и шестизначный capture msg_id (ключ диспетчеризации)"
+      },
+      {
+        "name": "ASA_TAG_LINE",
+        "definition": "%{ASA_TAG} +(?<body>.*)",
+        "description": "Тег плюс остаток тела; разделитель ' +' допускает один и два пробела перед телом"
+      },
+      {
+        "name": "ASA_SOURCE_ENDPOINT",
+        "definition": "(?<src_iface>[^/\\s]+)/(?<src_ip>%{IPV4})\\((?<src_port>[0-9]+)\\)",
+        "description": "Источник в форме интерфейс/адрес(порт); порт целочисленный, нуль сохраняется как значение"
+      },
+      {
+        "name": "ASA_DEST_ENDPOINT",
+        "definition": "(?<dst_iface>[^/\\s]+)/(?<dst_ip>%{IPV4})\\((?<dst_port>[0-9]+)\\)",
+        "description": "Назначение в той же форме, но с отдельными именами captures для источника и назначения"
+      },
+      {
+        "name": "ASA_HIT_QUALIFIER",
+        "definition": "(?<hit_qualifier>first hit|interval [0-9]+-second)",
+        "description": "Опциональный квалификатор хвоста попаданий: первое попадание либо интервальный счётчик"
+      },
+      {
+        "name": "ASA_HITSUMMARY",
+        "definition": "hit-cnt +(?<hit_count>[0-9]+)(?: +%{ASA_HIT_QUALIFIER})?(?: +\\[(?<acl_hash>[^\\]]+)\\])?",
+        "description": "Счётчик попаданий с двумя независимыми опциональными сегментами: квалификатор и непрозрачная пара hex в скобках; литерал 'hit-cnt' стабилен"
+      },
+      {
+        "name": "ASA_ACL_BODY",
+        "definition": "access-list +(?<acl_name>\\S+) +(?<action>[a-z]+) +(?<protocol>[a-z0-9]+) +%{ASA_SOURCE_ENDPOINT} +-> +%{ASA_DEST_ENDPOINT} +%{ASA_HITSUMMARY} *",
+        "description": "Позиционная грамматика тела: литералы 'access-list' и '->', всё переменное — captures; ссылается на конструкции endpoint и hit-summary"
+      }
+    ],
+    "layers": [
+      {
+        "name": "syslog_envelope",
+        "source": "raw",
+        "pattern": "^%{ASA_SYSLOG_HEADER}$"
+      },
+      {
+        "name": "asa_tag",
+        "source": "payload",
+        "pattern": "^%{ASA_TAG_LINE}$"
+      },
+      {
+        "name": "asa_acl_body",
+        "source": "body",
+        "pattern": "^%{ASA_ACL_BODY}$"
+      }
+    ]
+  }
+}

@@ -3,8 +3,11 @@ name = "log-research-agent"
 version = "0.1.0"
 requires-python = ">=3.14"
 dependencies = [
+    "ddgs>=9.16.1",
     "langchain>=1.5.2",
     "langchain-deepseek>=1.2.1",
     "langgraph>=1.2.24",
+    "openai>=3.57.0",
     "python-dotenv>=1.2.4",
+    "regex>=2026.11.19",
 ]

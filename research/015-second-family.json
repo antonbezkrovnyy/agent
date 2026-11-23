@@ -1,0 +1,455 @@
+{
+  "essence": "Источник сформировал syslog-подобное событие (pri=132) о решении фильтрации по ACL: для TCP-сессии от VQE#2-Lab:13.253.52.235/55896 (сторона src) к outside:77.53.224.176/25000 (сторона dst) правило access-group \"VQE#2-Lab\" отклонило пакет (action=Deny). Участники: устройство-источник (токен хоста в конверте этой строки отсутствует), фильтрующее устройство, две метки интерфейса (VQE#2-Lab, outside) и правило ACL; результат — соединение запрещено, в хвосте передан блок [0x0, 0x0] (обе hex-величины нулевые), при этом счётчика 'hit-cnt' и текстовой фазы, как в первой строке, здесь нет. Выбранное действие — new_family: baseline Family syslog_acl_verdict падает уже на слое конверта (нет токена хоста и разделителя ' : ') и имеет другой msg_id (106100 против 106023), а грамматика тела тоже иная ('<ACTION> <PROTO> src iface:ip/port dst iface:ip/port by access-group \"NAME\" [hex, hex]' вместо 'access-list NAME ACTION PROTO iface/ip(port) -> iface/ip(port) hit-cnt ...'); меняются конверт, ключ диспетчеризации и тело сразу, а не один слой, поэтому extend_layer неприменим.",
+  "structure": [
+    {
+      "path": "raw",
+      "format": "однострочный текст: syslog-подобный конверт + текстовый payload",
+      "role": "envelope",
+      "transform": null,
+      "confidence": "observed"
+    },
+    {
+      "path": "raw#pri",
+      "format": "'<' DEC '>' — числовой приоритет (132)",
+      "role": "envelope",
+      "transform": "десятичная строка -> целое (facility/severity из него не выводятся)",
+      "confidence": "observed"
+    },
+    {
+      "path": "raw#timestamp",
+      "format": "MMM D+ YYYY HH:MM:SS (год есть, зоны нет)",
+      "role": "envelope",
+      "transform": "разбор как локального времени источника, без приведения к UTC",
+      "confidence": "observed"
+    },
+    {
+      "path": "raw#timestamp_separator",
+      "format": "литерал ':' сразу после секунд; токена хоста между меткой времени и этим ':' в наблюдении нет",
+      "role": "envelope",
+      "transform": null,
+      "confidence": "observed"
+    },
+    {
+      "path": "raw#msg_token",
+      "format": "'%' MNEMONIC '-' SEVERITY '-' MSGID, завершён литералом ': '",
+      "role": "envelope",
+      "transform": null,
+      "confidence": "observed"
+    },
+    {
+      "path": "raw#msg_token#mnemonic",
+      "format": "литеральный тег ветки 'ASA' — служебный якорь, не выходное поле",
+      "role": "envelope",
+      "transform": null,
+      "confidence": "observed"
+    },
+    {
+      "path": "raw#msg_token#severity",
+      "format": "DEC (4)",
+      "role": "value",
+      "transform": "десятичная строка -> целое",
+      "confidence": "observed"
+    },
+    {
+      "path": "raw#msg_token#msg_id",
+      "format": "DEC (106023) — стабильный ключ диспетчеризации этой Family",
+      "role": "value",
+      "transform": "десятичная строка -> символьный ключ (без числовой арифметики)",
+      "confidence": "observed"
+    },
+    {
+      "path": "raw#body",
+      "format": "связный текст с пробельными границами: '<ACTION> <PROTO> src <ENDPOINT> dst <ENDPOINT> by access-group \"<NAME>\" [<hex>, <hex>]'",
+      "role": "payload",
+      "transform": null,
+      "confidence": "observed"
+    },
+    {
+      "path": "raw#body#action",
+      "format": "WORD в начале тела ('Deny'); регистр букв не нормализуется",
+      "role": "value",
+      "transform": null,
+      "confidence": "observed"
+    },
+    {
+      "path": "raw#body#protocol",
+      "format": "WORD ('tcp', 'udp', 'icmp' ...)",
+      "role": "value",
+      "transform": null,
+      "confidence": "observed"
+    },
+    {
+      "path": "raw#body#src_label",
+      "format": "литерал 'src' — позиционный якорь стороны",
+      "role": "payload",
+      "transform": null,
+      "confidence": "observed"
+    },
+    {
+      "path": "raw#body#src_endpoint",
+      "format": "'<интерфейс>:<IPv4>/<порт>' — левая точка трафика",
+      "role": "value",
+      "transform": null,
+      "confidence": "inferred"
+    },
+    {
+      "path": "raw#body#src_endpoint#interface",
+      "format": "токен до ':' перед IPv4; допускает '#' и '-' ('VQE#2-Lab')",
+      "role": "value",
+      "transform": null,
+      "confidence": "observed"
+    },
+    {
+      "path": "raw#body#src_endpoint#ip",
+      "format": "IPv4-литерал",
+      "role": "value",
+      "transform": null,
+      "confidence": "observed"
+    },
+    {
+      "path": "raw#body#src_endpoint#port",
+      "format": "DEC после '/' — без скобок",
+      "role": "value",
+      "transform": "десятичная строка -> целое",
+      "confidence": "observed"
+    },
+    {
+      "path": "raw#body#dst_label",
+      "format": "литерал 'dst' — позиционный якорь стороны",
+      "role": "payload",
+      "transform": null,
+      "confidence": "observed"
+    },
+    {
+      "path": "raw#body#dst_endpoint",
+      "format": "'<интерфейс>:<IPv4>/<порт>' — правая точка трафика, та же форма, что у src",
+      "role": "value",
+      "transform": null,
+      "confidence": "inferred"
+    },
+    {
+      "path": "raw#body#dst_endpoint#interface",
+      "format": "токен до ':' перед IPv4 ('outside')",
+      "role": "value",
+      "transform": null,
+      "confidence": "observed"
+    },
+    {
+      "path": "raw#body#dst_endpoint#ip",
+      "format": "IPv4-литерал",
+      "role": "value",
+      "transform": null,
+      "confidence": "observed"
+    },
+    {
+      "path": "raw#body#dst_endpoint#port",
+      "format": "DEC после '/'",
+      "role": "value",
+      "transform": "десятичная строка -> целое",
+      "confidence": "observed"
+    },
+    {
+      "path": "raw#body#acl_clause",
+      "format": "'by access-group \"<NAME>\"' — две стабильные лексемы и имя ACL в двойных кавычках",
+      "role": "payload",
+      "transform": null,
+      "confidence": "observed"
+    },
+    {
+      "path": "raw#body#acl_clause#name",
+      "format": "значение внутри кавычек ('VQE#2-Lab'); по тексту совпадает с меткой интерфейса, но это отдельное поле",
+      "role": "value",
+      "transform": "снятие двойных кавычек как синтаксиса, значение не нормализуется",
+      "confidence": "observed"
+    },
+    {
+      "path": "raw#body#tracker_block",
+      "format": "заключительный блок '[<hex>, <hex>]'",
+      "role": "payload",
+      "transform": "отбрасывание внешних '[' ']' только как границы блока",
+      "confidence": "observed"
+    },
+    {
+      "path": "raw#body#tracker_block#content",
+      "format": "'0x0, 0x0' — строка как есть; число элементов и смысл hex не подтверждены",
+      "role": "value",
+      "transform": "нет: hex не декодируется, нули не заменяются отсутствием значения",
+      "confidence": "observed"
+    }
+  ],
+  "strategy": [
+    "Диспетчеризацию вести по msg_id из токена '%<MNEMONIC>-<SEVERITY>-<MSGID>'; 106023 оформлять отдельной Family, прежнюю Family 106100 не изменять.",
+    "Границу конверт/payload проводить по литералу ': ' после закрывающего ':' токена сообщения, а не по любому двоеточию.",
+    "Для этой Family не требовать токена хоста: ':' идёт сразу после метки времени, отсутствие хоста — часть грамматики, а не пропуск поля.",
+    "pri и severity хранить как два независимых значения наблюдения, без вывода одного из другого.",
+    "Точку трафика разбирать как '<интерфейс>:<IPv4>/<порт>', определяя границу интерфейса по ':' перед IPv4-литералом.",
+    "Сторону (src/dst) фиксировать позицией относительно литеральных якорей 'src' и 'dst', а не свойствами адресов или меток интерфейса.",
+    "action и protocol брать захватами WORD; допустимый словарь значений задавать контрактом Family, а не литералами шаблона.",
+    "Имя ACL извлекать из кавычек как значение, кавычки считать синтаксисом; совпадение имени ACL с меткой интерфейса не использовать как признак.",
+    "Блок трекера захватывать целиком как строковый токен внутри '[...]', без разбиения по запятой и без hex-декодирования.",
+    "Порт в slash-форме считать обязательным по наблюдению; строку без порта разбирать «мягко» не нужно — она уходит в residual и оформляется отдельным вариантом.",
+    "Сохранять RAW без изменений: экранирования и вложенных сериализованных форматов нет, unescape и рекурсивное декодирование не применяются.",
+    "Нераспознанные остатки не додумывать полями: они остаются в residual."
+  ],
+  "record_schema": [
+    {
+      "name": "raw",
+      "category": "dynamic",
+      "type": "string",
+      "required": true,
+      "source": "raw"
+    },
+    {
+      "name": "pri",
+      "category": "dynamic",
+      "type": "integer",
+      "required": true,
+      "source": "raw#pri"
+    },
+    {
+      "name": "timestamp",
+      "category": "dynamic",
+      "type": "timestamp",
+      "required": true,
+      "source": "raw#timestamp"
+    },
+    {
+      "name": "msg_id",
+      "category": "static",
+      "type": "string",
+      "required": true,
+      "source": "контракт Family: стабильный сегмент токена '%<MNEMONIC>-<SEVERITY>-106023:' + путь raw#msg_token#msg_id"
+    },
+    {
+      "name": "severity",
+      "category": "dynamic",
+      "type": "integer",
+      "required": true,
+      "source": "raw#msg_token#severity"
+    },
+    {
+      "name": "action",
+      "category": "dynamic",
+      "type": "string",
+      "required": true,
+      "source": "raw#body#action"
+    },
+    {
+      "name": "protocol",
+      "category": "dynamic",
+      "type": "string",
+      "required": true,
+      "source": "raw#body#protocol"
+    },
+    {
+      "name": "src_interface",
+      "category": "dynamic",
+      "type": "string",
+      "required": true,
+      "source": "raw#body#src_endpoint#interface"
+    },
+    {
+      "name": "src_ip",
+      "category": "dynamic",
+      "type": "string",
+      "required": true,
+      "source": "raw#body#src_endpoint#ip"
+    },
+    {
+      "name": "src_port",
+      "category": "dynamic",
+      "type": "integer",
+      "required": true,
+      "source": "raw#body#src_endpoint#port"
+    },
+    {
+      "name": "dst_interface",
+      "category": "dynamic",
+      "type": "string",
+      "required": true,
+      "source": "raw#body#dst_endpoint#interface"
+    },
+    {
+      "name": "dst_ip",
+      "category": "dynamic",
+      "type": "string",
+      "required": true,
+      "source": "raw#body#dst_endpoint#ip"
+    },
+    {
+      "name": "dst_port",
+      "category": "dynamic",
+      "type": "integer",
+      "required": true,
+      "source": "raw#body#dst_endpoint#port"
+    },
+    {
+      "name": "acl_name",
+      "category": "dynamic",
+      "type": "string",
+      "required": true,
+      "source": "raw#body#acl_clause#name"
+    },
+    {
+      "name": "hit_tracker",
+      "category": "dynamic",
+      "type": "string",
+      "required": true,
+      "source": "raw#body#tracker_block"
+    }
+  ],
+  "format_features": [
+    {
+      "property": "Конверт этой строки не содержит токена хоста: сразу после секунд идёт ':' и пробел перед токеном '%ASA-...' — наблюдение.",
+      "implication": "Шаблон конверта предыдущей Family (с ' %{HOSTNAME:host} : ') даёт no_match на первом слое; поле host в этой Family не заводится, а если релей добавит хост — это другой вариант конверта, а не «пустой» host."
+    },
+    {
+      "property": "Идентификатор сообщения — 106023, а в первой строке источника был 106100 — наблюдение.",
+      "implication": "msg_id остаётся статическим ключом диспетчеризации, но у другой Family; тело разбирается своей грамматикой, ветвление идёт по токену, а не по форме адресных пар."
+    },
+    {
+      "property": "Точка трафика записана как '<интерфейс>:<IPv4>/<порт>' (двоеточие перед адресом, слэш перед портом, без круглых скобок) — наблюдение; в первой строке того же источника была форма '<интерфейс>/<IPv4>(<порт>)' — вывод из сравнения.",
+      "implication": "Нужна своя конструкция точки трафика; границу 'интерфейс | адрес' держит ':' непосредственно перед IPv4, а не первый '/' и не скобки."
+    },
+    {
+      "property": "Метки интерфейсов содержат '#', '-' и цифры ('VQE#2-Lab', 'outside') — наблюдение.",
+      "implication": "Символ '#' внутри тела — обычный символ токена, не начало комментария и не маркер порта; класс интерфейса должен его допускать."
+    },
+    {
+      "property": "Имя ACL в кавычках по тексту совпадает с меткой интерфейса-источника ('VQE#2-Lab' в обоих местах) — наблюдение.",
+      "implication": "Оба значения извлекаются независимо; совпадение строк не даёт права схлопывать поля, выводить одно из другого или назначать сторону по уникальности значения."
+    },
+    {
+      "property": "Глагол решения записан с заглавной ('Deny'), тогда как в первой строке был 'denied' — наблюдение; регистронезависимость словаря — гипотеза.",
+      "implication": "action остаётся dynamic-захватом WORD без приведения регистра; значения сохраняются как в RAW, а словарь допустимых решений относится к контракту Family."
+    },
+    {
+      "property": "В этой форме имя ACL заключено в двойные кавычки, а в прежней — нет — наблюдение.",
+      "implication": "Кавычки трактуются как синтаксическая рамка и не попадают в значение; захват идёт классом, исключающим кавычку."
+    },
+    {
+      "property": "Шестнадцатеричные величины записаны без ведущих нулей ('0x0'), в первой строке — с ними ('0x00000000') — наблюдение.",
+      "implication": "hex хранится строкой без числового приведения; '0x0' — значение наблюдения, а не отсутствие данных, поэтому null не подставляется."
+    },
+    {
+      "property": "Хвост 'hit-cnt' и текстовой фазы в этой строке отсутствует, сразу после имени ACL идёт блок '[...]' — наблюдение.",
+      "implication": "Поля hit_cnt/hit_phase не переносятся в эту Family; отсутствие счётчика срабатываний не заполняется нулём."
+    },
+    {
+      "property": "Порядок тела стабилен: '<ACTION> <PROTO> src <ENDPOINT> dst <ENDPOINT> by access-group \"<NAME>\" [<hex>, <hex>]' — наблюдение единственного образца, порядок как часть грамматики — гипотеза.",
+      "implication": "Разбор идёт по позициям между якорями 'src', 'dst', 'by access-group'; при отклонении формы остаток уходит в residual, а не подгоняется."
+    },
+    {
+      "property": "Экранирования, кавычек вокруг тела и вложенных сериализованных форматов (json/xml/base64) нет; кавычки есть только вокруг имени ACL — наблюдение.",
+      "implication": "Рекурсивный unescape и декодирование не применяются, отдельного 'decode'-преобразования в цепочке слоёв нет, RAW сохраняется как есть."
+    }
+  ],
+  "pitfalls": [
+    {
+      "name": "Переиспользование конверта предыдущей Family",
+      "mechanism": "После метки времени ожидался ' <host> : ', а в этой строке сразу идёт ':' без хоста; шаблон с обязательным HOSTNAME падает на первом слое, и всё тело остаётся неразобранным.",
+      "remediation": "Держать отдельный слой конверта для этой Family (метка времени + ':' + токен сообщения) и выбирать его по msg_id; отсутствие хоста считать нормой, а не ошибкой."
+    },
+    {
+      "name": "Перегрузка двоеточия",
+      "mechanism": "Двоеточия есть в метке времени ('13:21:55'), в разделителе после неё ('55:'), в токене сообщения ('%ASA-4-106023:') и внутри точки трафика ('VQE#2-Lab:13.253.52.235'); разбиение по первому или произвольному ':' режет timestamp и адресную часть.",
+      "remediation": "Разбирать последовательно якорями: TIME + ':' для конверта, '%<...>-<...>-<NUM>:' для токена, а ':' в точке трафика допускать только перед IPv4-литералом."
+    },
+    {
+      "name": "Двоеточие как граница интерфейса и адреса",
+      "mechanism": "Граница 'интерфейс | адрес' — единственное ':', но при появлении IPv6-литерала таких двоеточий станет много, и ленивый захват обрежет адрес.",
+      "remediation": "Якорить границу на IPv4-литерал (%{IPV4}); строку с несовпадающим видом адреса не разбирать частично, а фиксировать в residual и выносить в отдельный вариант."
+    },
+    {
+      "name": "'#' в имени интерфейса",
+      "mechanism": "'VQE#2-Lab' похоже на комментарий или на разделитель; шаблон, останавливающийся на '#', теряет остаток имени и сдвигает границу поля.",
+      "remediation": "Считать '#' обычным символом токена (класс, исключающий только ':' и пробельные), а границу имени задавать позицией перед ':' и IPv4."
+    },
+    {
+      "name": "Совпадение имени ACL и метки интерфейса",
+      "mechanism": "Строка 'VQE#2-Lab' встречается дважды; при разборе «по уникальности» или при повторном использовании одного имени захвата можно склеить два разных поля или перепутать сторону.",
+      "remediation": "Извлекать оба значения из своих позиций (после 'src' — метка интерфейса, внутри кавычек после 'by access-group' — имя ACL) и не выводить одно из другого."
+    },
+    {
+      "name": "Динамические слова на месте констант",
+      "mechanism": "action ('Deny'/'permitted') и protocol ('tcp'/'udp'/'icmp') — значения словаря, а не константы; жёсткий литерал 'Deny' ломает остальные варианты, а приведение регистра искажает RAW.",
+      "remediation": "Оба поля — захваты WORD без нормализации регистра; допустимый набор задаёт контракт Family, а не шаблон разбора."
+    },
+    {
+      "name": "Обязательность порта в slash-форме",
+      "mechanism": "Порт записан после '/' без скобок; для протоколов без портов такого элемента может не быть, и тогда обязательная группа съедает или теряет остаток строки.",
+      "remediation": "В наблюдённой форме порт обязателен; отсутствие порта должно давать no_match и отдельный вариант Family, а не тихую опциональность с обнулением."
+    },
+    {
+      "name": "Ноль против null в блоке трекера",
+      "mechanism": "'0x0, 0x0' легко прочитать как «нет данных» или как пустой счётчик; запись без ведущих нулей и с разным числом элементов усиливает соблазн нормализации.",
+      "remediation": "Хранить внутренность '[...]' строкой без hex-декодирования и без подстановки null; сравнение — без учёта регистра префикса, но с сохранением исходного текста."
+    },
+    {
+      "name": "Переменная арность блока '[...]'",
+      "mechanism": "Внутри блока элементы разделены ', ', и их количество не подтверждено; разбиение по запятой на фиксированные поля теряет данные при другой арности.",
+      "remediation": "Захватывать блок целиком до закрывающей ']' и хранить как одно строковое значение; при необходимости детализации — отдельный слой, а не подгонка под один образец."
+    },
+    {
+      "name": "Смещение границ при пробельных разделителях",
+      "mechanism": "Тело разделено только пробелами; при отсутствии одного элемента (метки стороны или блока '[...]') жадные захваты сдвигают поля и «успешно» разбирают неверную строку.",
+      "remediation": "Держать литеральные якоря 'src', 'dst', 'by access-group' как контрольные точки и сохранять несовпадение в residual вместо подгонки захвата."
+    },
+    {
+      "name": "Симметрия двух точек трафика",
+      "mechanism": "Обе точки имеют одинаковую форму и различаются только якорем 'src'/'dst'; метки интерфейсов и адреса могут повторяться в зеркальном трафике.",
+      "remediation": "Назначать src/dst строго по позиции относительно якорей; не различать стороны по имени интерфейса, приватности адреса или номеру порта."
+    }
+  ],
+  "parser": {
+    "patterns": [
+      {
+        "name": "SYSLOGTIMEWITHYEAR",
+        "definition": "%{MONTH} +%{MONTHDAY} %{YEAR} %{TIME}",
+        "description": "Метка времени syslog-подобного конверта с годом: 'Feb 12 2023 13:21:55'; ' +' допускает однозначный день с двойным пробелом; зоны в тексте нет (переиспользована из syslog_acl_verdict)."
+      },
+      {
+        "name": "MSGID_TOKEN",
+        "definition": "%%{WORD:mnemonic}-%{INT:severity}-%{POSINT:msg_id}",
+        "description": "Токен '%<MNEMONIC>-<SEVERITY>-<MSGID>': мнемоника-якорь, числовая severity и числовой msg_id — ключ диспетчеризации Family (переиспользована)."
+      },
+      {
+        "name": "ENDPOINT_SRC_SLASH",
+        "definition": "(?<src_interface>[^:\\s]+):%{IPV4:src_ip}/%{POSINT:src_port}",
+        "description": "Левая точка трафика '<интерфейс>:<IPv4>/<порт>': граница интерфейса — ':' перед IPv4, порт после '/', без скобок; '#' и '-' остаются частью имени интерфейса."
+      },
+      {
+        "name": "ENDPOINT_DST_SLASH",
+        "definition": "(?<dst_interface>[^:\\s]+):%{IPV4:dst_ip}/%{POSINT:dst_port}",
+        "description": "Правая точка трафика той же формы; отдельное определение, чтобы имена захватов не конфликтовали и сторона оставалась различимой."
+      },
+      {
+        "name": "ACCESSGROUP_CLAUSE",
+        "definition": "by access-group \"(?<acl_name>[^\"]+)\"",
+        "description": "Указание правила: стабильные лексемы-якоря 'by access-group' и имя ACL в двойных кавычках; кавычки — синтаксис, не значение."
+      },
+      {
+        "name": "TRACKER_BLOCK",
+        "definition": "(?<tracker_block>\\[[^\\]]+\\])",
+        "description": "Заключительный блок '[0x0, 0x0]' как единый токен-граница: внешние скобки отбрасываются, внутренность не разбивается и не декодируется."
+      }
+    ],
+    "layers": [
+      {
+        "name": "envelope_message_id",
+        "source": "raw",
+        "pattern": "^<%{POSINT:pri}>%{SYSLOGTIMEWITHYEAR:timestamp}: %{MSGID_TOKEN}: (?<body>.+)$"
+      },
+      {
+        "name": "payload_deny_by_group",
+        "source": "body",
+        "pattern": "^%{WORD:action} %{WORD:protocol} src %{ENDPOINT_SRC_SLASH} dst %{ENDPOINT_DST_SLASH} %{ACCESSGROUP_CLAUSE} %{TRACKER_BLOCK}$"
+      },
+      {
+        "name": "tracker_split",
+        "source": "tracker_block",
+        "pattern": "^\\[(?<hit_tracker>[^\\]]+)\\]$"
+      }
+    ]
+  }
+}

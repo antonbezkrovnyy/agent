@@ -1,0 +1,540 @@
+{
+  "essence": "Хост ASA 10.11.200.67 зафиксировал срабатывание запрещающего правила ACL CSM_FW_ACL_: TCP-соединение с 131.9.85.43:14015 (Outside) на 191.189.210.52:22 (PUB_DMZ) заблокировано, severity 4 (warning). hit-cnt 1 + маркер 'first hit' — это, по гипотезе, начало интервала агрегации, а не одиночный дроп: ожидается последующая сводка с растущим счётчиком. Дежурной смене смотреть на тренд hit-cnt по паре адресов и на то, что целью является SSH в DMZ из внешней зоны.",
+  "strategy": [
+    {
+      "decision": "Модель входа в три уровня: общий syslog-конверт (PRI + header) → диспетчер по msg_id → отдельный парсер тела; нормализация типов — отдельным шагом после тела",
+      "rationale": "Конверт подчиняется общему стандарту и меняется раз в годы, тела сообщений меняются при каждом обновлении прошивки: у уровней разные скорость изменения, бюджет ошибок и метрика покрытия. Разделение позволяет считать coverage и локализовать отказ по конкретному семейству сообщений, не задевая остальные",
+      "rejected_alternatives": [
+        "Одна мега-регулярка с альтернативами на все типы сообщений: комбинаторный рост backtracking на горячем пути, любое новое сообщение требует правки общего выражения и даёт регресс по всем типам, невозможно измерить покрытие по семейству, нет места для вариантов одного типа (first hit vs интервальная сводка)",
+        "Универсальный парсер key=value по всей строке: тело 106100 позиционное, а не key=value — получилась бы эвристика без контракта",
+        "Единый парсер на регулярках без слоя конверта: PRI и header пришлось бы дублировать в каждом семействе"
+      ]
+    },
+    {
+      "decision": "Ключ диспатча — msg_id (числовая часть тега %ASA-<sev>-<id>), ключ вида msg_class:msg_id, разбор тега анкоренным шаблоном с узким классом символов",
+      "rationale": "msg_id — машинный идентификатор, назначенный производителем: дискретен, стабилен, пополняется предсказуемо, по нему строится реестр семейств и метрика покрытия",
+      "rejected_alternatives": [
+        "Диспатч по подстрокам свободного текста ('denied', 'access-list'): эти слова встречаются в 106023, 313001, 710003 и др., ключ неоднозначен, а неизвестное сообщение уйдёт в чужой парсер и даст ложный успех с мусорными полями — хуже, чем явный неуспех",
+        "Диспатч по полному тегу вместе с severity: любая перенастройка severity ломает роутинг",
+        "Диспатч по позиции/длине строки: нестабильно при дрейфе формата"
+      ]
+    },
+    {
+      "decision": "Единая плоская запись фиксированной схемы на каждую входную строку: общие поля всегда заполнены, специфичные nullable, плюс raw_event, parse_success и reasons[]",
+      "rationale": "Плоская фиксированная схема — стабильный контракт для индекса/таблицы: нет union-типов, downstream не знает про семейства. raw_event делает запись воспроизводимой (replay, пересборка при дрейфе), reasons делает отказ наблюдаемым",
+      "rejected_alternatives": [
+        "Вложенный типизированный JSON на каждое семейство: десятки схем, ломающиеся даунстрим-джойны, эволюция схемы на каждое новое сообщение",
+        "Хранить только извлечённые поля без исходной строки: теряется replay и разбор инцидента по факту",
+        "Динамическая схема с произвольными полями (schema-on-read): непредсказуемые типы и невозможность валидации на входе"
+      ]
+    },
+    {
+      "decision": "Fail-open: при любом отказе сохранить RAW-строку целиком, вернуть parse_success=false с кодом в reasons[], инкрементировать метрику и отправить строку в dead-letter поток",
+      "rationale": "Строка — единственный экземпляр события; её потеря делает инцидент невидимым. Явный неуспех + метрика шумят, но не создают слепых зон, и позволяют переиграть данные после исправления парсера",
+      "rejected_alternatives": [
+        "Fail-closed (drop + ERROR в лог): теряется событие, дыра в телеметрии тише шума",
+        "Пробрасывать исключение в пайплайн: один битый пакет роняет батч/воркер и бьёт по пропускной способности всех потоков",
+        "Молчаливая частичная запись без флага неуспеха: отказ маскируется под успех, coverage врёт"
+      ]
+    },
+    {
+      "decision": "Границы нормализации: здесь — типизация, нормализация имён, разрешение severity PRI vs мнемоника, сборка event_uid/dedup_key/correlation_key, коды reasons; обогащение (инвентарь, гео, владелец адреса, интерфейс→зона) и корреляция/пороговая агрегация — downstream",
+      "rationale": "Парсер должен быть чистым и детерминированным: без сети, БД и состояния — тогда возможны горизонтальное масштабирование, идентичный replay и отдельный SLA. Обогащение на горячем пути ставит парсинг в зависимость от доступности справочников",
+      "rejected_alternatives": [
+        "Обогащать сразу в парсере, чтобы downstream не думал: скрытая связность, hot path зависит от справочников, история не переигрывается при изменении справочника",
+        "Отдать всю нормализацию downstream: типы и ключи дедупа размазываются по потребителям, каждый реализует своё правило severity",
+        "Делать корреляцию (склейку потоков) в парсере: требует состояния и ломает горизонтальное масштабирование"
+      ]
+    },
+    {
+      "decision": "Инструмент: компилируемые один раз при старте анкоренные regex с ограниченными классами символов для конверта, диспетчера и позиционного тела; для вариантов внутри семейства — небольшой детерминированный сканер по токенам. Критерии приёмки: coverage ≥99.5% по объёму с нулём FIELD_MISSING по обязательным полям и отчётом по каждому dispatch_key; бюджет µs/строка и p99, регресс >10% на bench в CI — блокер; стоимость поддержки — новое сообщение = один модуль семейства + одна запись в реестре + golden-кейсы, без правки конверта и соседних семейств",
+      "rationale": "Формат позиционный и короткий (~10 токенов), поэтому анкоренные полевые шаблоны дают предсказуемую стоимость и позволяют валидировать каждое поле отдельно. Метрики приёмки заданы так, чтобы ловить и потерю данных, и деградацию производительности, и рост стоимости поддержки",
+      "rejected_alternatives": [
+        "Полная грамматика (ANTLR/Lark/парсер-комбинаторы): избыточная сложность и латентность для позиционного формата, тяжелее эксплуатация",
+        "Готовые grok-паттерны из коробки: неявные жадные .*, непрозрачный backtracking, нет контроля per-field валидации",
+        "Формулировка 'используем regex' как ответ: это нотация, а не решение — не заданы уровни, ключ диспатча, контракт записи, политика отказа и критерии приёмки"
+      ]
+    }
+  ],
+  "record_schema": [
+    {
+      "name": "schema_version",
+      "category": "static",
+      "type": "string",
+      "required": true,
+      "source": "конфигурация сборки парсера"
+    },
+    {
+      "name": "parser_version",
+      "category": "static",
+      "type": "string",
+      "required": true,
+      "source": "конфигурация сборки парсера"
+    },
+    {
+      "name": "raw_event",
+      "category": "static",
+      "type": "string",
+      "required": true,
+      "source": "вся входная строка байт-в-байт"
+    },
+    {
+      "name": "raw_truncated",
+      "category": "derived",
+      "type": "bool",
+      "required": true,
+      "source": "признак усечения при приёме по лимиту транспорта (гипотеза о наличии лимита)"
+    },
+    {
+      "name": "ingest_ts",
+      "category": "derived",
+      "type": "ts (RFC3339, UTC)",
+      "required": true,
+      "source": "системные часы в момент приёма"
+    },
+    {
+      "name": "ingest_source",
+      "category": "dynamic",
+      "type": "ip",
+      "required": false,
+      "source": "адрес транспортного пира; отсутствует при replay из файла (гипотеза)"
+    },
+    {
+      "name": "pri",
+      "category": "dynamic",
+      "type": "uint8 (0..191)",
+      "required": true,
+      "source": "поле <132> в конверте"
+    },
+    {
+      "name": "facility",
+      "category": "derived",
+      "type": "uint8",
+      "required": true,
+      "source": "pri >> 3"
+    },
+    {
+      "name": "severity_pri",
+      "category": "derived",
+      "type": "uint8 (0..7)",
+      "required": true,
+      "source": "pri & 7"
+    },
+    {
+      "name": "msg_class",
+      "category": "dynamic",
+      "type": "string",
+      "required": true,
+      "source": "мнемоника тега (%ASA-…), поле ASA"
+    },
+    {
+      "name": "msg_id",
+      "category": "dynamic",
+      "type": "string (^[0-9]{3,6}$)",
+      "required": true,
+      "source": "числовая часть тега %ASA-<sev>-<id>; идентификатор способа парсинга"
+    },
+    {
+      "name": "dispatch_key",
+      "category": "derived",
+      "type": "string",
+      "required": true,
+      "source": "конкатенация msg_class + ':' + msg_id"
+    },
+    {
+      "name": "severity_mnemonic",
+      "category": "dynamic",
+      "type": "uint8 (0..7)",
+      "required": false,
+      "source": "<sev> из тега %ASA-4-…; источник истины для severity события"
+    },
+    {
+      "name": "severity",
+      "category": "derived",
+      "type": "uint8 (0..7)",
+      "required": true,
+      "source": "правило разрешения: severity_mnemonic, если разобран; иначе severity_pri; иначе 6 с флагом конфликта"
+    },
+    {
+      "name": "severity_source",
+      "category": "derived",
+      "type": "enum<mnemonic|pri|default>",
+      "required": true,
+      "source": "ветка правила разрешения severity"
+    },
+    {
+      "name": "severity_conflict",
+      "category": "derived",
+      "type": "bool",
+      "required": true,
+      "source": "сравнение severity_mnemonic != severity_pri"
+    },
+    {
+      "name": "ts_raw",
+      "category": "dynamic",
+      "type": "string",
+      "required": true,
+      "source": "подстрока timestamp в header"
+    },
+    {
+      "name": "ts_local",
+      "category": "derived",
+      "type": "ts_local (naive ISO, без offset)",
+      "required": false,
+      "source": "разбор ts_raw по статической таблице месяцев"
+    },
+    {
+      "name": "ts_offset_min",
+      "category": "derived",
+      "type": "int16",
+      "required": false,
+      "source": "часовой пояс источника из конфигурации потока (не из строки)"
+    },
+    {
+      "name": "ts_utc",
+      "category": "derived",
+      "type": "ts (RFC3339, UTC)",
+      "required": false,
+      "source": "ts_local + ts_offset_min; null, если offset неизвестен"
+    },
+    {
+      "name": "ts_quality",
+      "category": "derived",
+      "type": "enum<exact|year_inferred|tz_missing|unparsed>",
+      "required": true,
+      "source": "результат разбора времени и применённых дефолтов"
+    },
+    {
+      "name": "year_source",
+      "category": "derived",
+      "type": "enum<in_line|inferred_current|inferred_boundary|absent>",
+      "required": true,
+      "source": "наличие года в ts_raw и правило вывода года"
+    },
+    {
+      "name": "host_raw",
+      "category": "dynamic",
+      "type": "string",
+      "required": false,
+      "source": "токен после timestamp до ':' в header; может отсутствовать (гипотеза о вариативности)"
+    },
+    {
+      "name": "device_id",
+      "category": "derived",
+      "type": "string",
+      "required": false,
+      "source": "каскад host_raw → ingest_source → маппинг потока → 'unknown'"
+    },
+    {
+      "name": "device_id_source",
+      "category": "derived",
+      "type": "enum<header|peer|config_map|unknown>",
+      "required": true,
+      "source": "та же цепочка разрешения device_id"
+    },
+    {
+      "name": "event_class",
+      "category": "derived",
+      "type": "enum<acl_deny>",
+      "required": true,
+      "source": "реестр семейств по dispatch_key"
+    },
+    {
+      "name": "action",
+      "category": "derived",
+      "type": "enum<denied|permitted>",
+      "required": true,
+      "source": "токен тела (denied)"
+    },
+    {
+      "name": "protocol_raw",
+      "category": "dynamic",
+      "type": "string",
+      "required": true,
+      "source": "тело, токен после имени ACL"
+    },
+    {
+      "name": "protocol",
+      "category": "derived",
+      "type": "enum<tcp|udp|icmp|other>",
+      "required": true,
+      "source": "нормализация protocol_raw в lowercase с маппингом неизвестных в other"
+    },
+    {
+      "name": "acl_name",
+      "category": "dynamic",
+      "type": "string",
+      "required": true,
+      "source": "тело, токен сразу после 'access-list', берётся до пробела без trim и нормализации"
+    },
+    {
+      "name": "src_if",
+      "category": "dynamic",
+      "type": "string",
+      "required": false,
+      "source": "сегмент iface/addr(port): часть до последнего '/' (гипотеза о грамматике)"
+    },
+    {
+      "name": "src_ip",
+      "category": "dynamic",
+      "type": "ip",
+      "required": false,
+      "source": "тот же сегмент, часть после последнего '/', канонизируется; невалидное значение → reason FIELD_RANGE (гипотеза о резолве имён)"
+    },
+    {
+      "name": "src_port",
+      "category": "dynamic",
+      "type": "uint16",
+      "required": false,
+      "source": "число в скобках; 0 — валидное значение (гипотеза), отсутствие скобок — null"
+    },
+    {
+      "name": "src_port_present",
+      "category": "derived",
+      "type": "bool",
+      "required": true,
+      "source": "факт наличия скобок с портом, отличает 'нет данных' от '0'"
+    },
+    {
+      "name": "dst_if",
+      "category": "dynamic",
+      "type": "string",
+      "required": false,
+      "source": "аналогично src_if для destination"
+    },
+    {
+      "name": "dst_ip",
+      "category": "dynamic",
+      "type": "ip",
+      "required": false,
+      "source": "аналогично src_ip для destination"
+    },
+    {
+      "name": "dst_port",
+      "category": "dynamic",
+      "type": "uint16",
+      "required": false,
+      "source": "аналогично src_port для destination; 0 валиден (гипотеза)"
+    },
+    {
+      "name": "dst_port_present",
+      "category": "derived",
+      "type": "bool",
+      "required": true,
+      "source": "аналогично src_port_present"
+    },
+    {
+      "name": "hit_cnt",
+      "category": "dynamic",
+      "type": "uint32",
+      "required": false,
+      "source": "тело, hit-cnt <N> (семантика счётчика за интервал — гипотеза)"
+    },
+    {
+      "name": "interval_sec",
+      "category": "dynamic",
+      "type": "uint32",
+      "required": false,
+      "source": "тело, (<N>-second interval) (гипотеза)"
+    },
+    {
+      "name": "agg_phase",
+      "category": "derived",
+      "type": "enum<interval_start|interval_summary|single|unknown>",
+      "required": true,
+      "source": "комбинация наличия hit_cnt, маркера 'first hit' и interval_sec (гипотеза)"
+    },
+    {
+      "name": "agg_bucket_start",
+      "category": "derived",
+      "type": "ts (RFC3339, UTC)",
+      "required": false,
+      "source": "ts_utc для interval_start; ts_utc минус interval_sec для interval_summary; null при неизвестном ts_utc"
+    },
+    {
+      "name": "conn_hash1",
+      "category": "dynamic",
+      "type": "hex",
+      "required": false,
+      "source": "первый 0x… в квадратных скобках (гипотеза о назначении)"
+    },
+    {
+      "name": "conn_hash2",
+      "category": "dynamic",
+      "type": "hex",
+      "required": false,
+      "source": "второй 0x… в квадратных скобках (гипотеза)"
+    },
+    {
+      "name": "user_name",
+      "category": "dynamic",
+      "type": "string",
+      "required": false,
+      "source": "вариант тела 'for user <name>' (гипотеза); в данной строке отсутствует"
+    },
+    {
+      "name": "acl_group",
+      "category": "dynamic",
+      "type": "string",
+      "required": false,
+      "source": "вариант тела 'by access-group <name>' (гипотеза); в данной строке отсутствует"
+    },
+    {
+      "name": "unmatched_tail",
+      "category": "derived",
+      "type": "string",
+      "required": false,
+      "source": "хвост тела, не покрытый грамматикой; диагностика дрейфа формата"
+    },
+    {
+      "name": "parse_success",
+      "category": "derived",
+      "type": "bool",
+      "required": true,
+      "source": "отсутствие блокирующих кодов в reasons"
+    },
+    {
+      "name": "reasons",
+      "category": "derived",
+      "type": "array<enum>",
+      "required": true,
+      "source": "набор кодов: ENVELOPE_NO_PRI, HEADER_TS_UNPARSED, YEAR_INFERRED, TZ_MISSING, DISPATCH_UNKNOWN_MSGID, BODY_PREFIX_MISMATCH, FIELD_MISSING:<f>, FIELD_RANGE:<f>, AGG_PHASE_AMBIGUOUS, TAIL_UNPARSED, TRUNCATED, PRI_MNEMONIC_CONFLICT; пусто при успехе"
+    },
+    {
+      "name": "event_uid",
+      "category": "derived",
+      "type": "string (hex hash)",
+      "required": true,
+      "source": "hash(device_id, event_class, dedup_key, извлечённые поля, raw_event) — идентичность конкретной записи"
+    },
+    {
+      "name": "dedup_key",
+      "category": "derived",
+      "type": "string (hex hash)",
+      "required": true,
+      "source": "hash(device_id, msg_id, protocol, src_ip, src_port, dst_ip, dst_port, acl_name, agg_bucket_start) — идентичность события-факта"
+    },
+    {
+      "name": "correlation_key",
+      "category": "derived",
+      "type": "string (hex hash)",
+      "required": false,
+      "source": "hash(device_id, conn_hash1, conn_hash2, protocol, 5-tuple) — склейка строк разных msg_id об одном потоке"
+    }
+  ],
+  "format_features": [
+    {
+      "property": "Год присутствует в timestamp (Feb 12 2023), тогда как RFC 3164 год не содержит",
+      "implication": "Подтверждено стандартом (RFC 3164 без года, RFC 5424 с годом и TZ) и наблюдением в строке. Header-грамматика принимает два варианта (Mmm dd hh:mm:ss и Mmm dd yyyy hh:mm:ss); при наличии года year_source=in_line без эвристик; ts_raw сохраняется для пересчёта"
+    },
+    {
+      "property": "Host опционален, а в позиции хоста стоит IP 10.11.200.67, причём перед ':' есть пробел",
+      "implication": "Наблюдение; источник пробела (релей или шаблон устройства) — гипотеза. Header нельзя парсить как строгий RFC 3164: разбор принимает оба конверта, токен после timestamp до ':' считается host_raw, device_id определяется каскадом header → peer → config_map → unknown с явным device_id_source; пробел перед ':' входит в грамматику, иначе host_raw съест разделитель"
+    },
+    {
+      "property": "Timezone в строке отсутствует",
+      "implication": "Подтверждено наблюдением: ts_utc может быть null, абсолютное время восстанавливается только через TZ источника из конфигурации потока (ts_offset_min), а не из хоста парсера. Поток без TZ получает ts_quality=tz_missing, downstream использует ingest_ts с явным флагом; подстановка 'Z' по умолчанию запрещена"
+    },
+    {
+      "property": "Вариантность 'first hit' против интервальной сводки внутри одного msg_id",
+      "implication": "Гипотеза — документацию получить не удалось. Один dispatch_key покрывает несколько форм тела, поэтому agg_phase обязательно как derived-поле, а downstream-агрегация никогда не смешивает разные agg_phase. Семейство обязано распознать вариант либо поставить AGG_PHASE_AMBIGUOUS, а не угадывать"
+    },
+    {
+      "property": "Агрегированный hit-cnt (счётчик за интервал) рядом с interval_sec",
+      "implication": "Гипотеза. hit_cnt и interval_sec — раздельные числовые поля со своими единицами: счётчик без длины интервала не интерпретируем, поэтому для сводок обязателен agg_bucket_start; метрики считаются по hit_cnt только в разрезе (поток, интервал)"
+    },
+    {
+      "property": "Адреса и имена интерфейсов в виде iface/addr(port), где имя интерфейса может содержать '/'",
+      "implication": "Составной триплет — наблюдение, точная грамматика и возможность подстановки имени хоста вместо адреса — гипотеза. Сегмент разбирается справа: последняя ')' → порт, затем после последнего '/' → адрес, остаток → интерфейс; split по первому '/' ломает имена вида GigabitEthernet0/1.100. Поле типа ip валидируется, невалидное значение даёт reason FIELD_RANGE, но строка не теряется"
+    },
+    {
+      "property": "Порт 0 как валидное значение",
+      "implication": "Для ASA — гипотеза; базово верно для uint16. Тип uint16 плюс отдельный флаг *_port_present: '0' и 'поля нет' — разные факты, 0 нельзя использовать как sentinel отсутствия"
+    },
+    {
+      "property": "Возможный дрейф формата между версиями ПО",
+      "implication": "Гипотеза, но подтверждается структурой (уже два варианта тела). Реестр семейств версионируется; неизвестный msg_id уходит в fallback-семейство, которое извлекает только конверт и заполняет unmatched_tail, без 'примерного' заполнения типизированных полей; метрики дрейфа — coverage, TAIL_UNPARSED и unknown_msg_id"
+    },
+    {
+      "property": "Имя ACL нетипично: CSM_FW_ACL_ с завершающим подчёркиванием",
+      "implication": "Наблюдение: к acl_name нельзя применять trim или нормализацию (срезать '_' или ':'), токен берётся до пробела как есть, иначе джойн с инвентарём ACL не сойдётся. Гипотеза: допустимы дефисы и точки, поэтому класс символов шире \\w"
+    },
+    {
+      "property": "Возможные дополнительные хвосты тела ('for user', 'by access-group')",
+      "implication": "Гипотеза. Поля user_name и acl_group nullable, а нераспознанная часть после разобранного префикса складывается в unmatched_tail и не считается ошибкой при собранных обязательных полях — это даёт устойчивость к расширению формата без падения coverage"
+    }
+  ],
+  "pitfalls": [
+    {
+      "name": "Конфликт PRI и мнемоники severity",
+      "mechanism": "Facility настраивается на устройстве или перештамповывается релеем, поэтому severity_pri перестаёт совпадать с %ASA-4-…; фильтры и алерты, построенные на PRI, молча пропускают или отбрасывают целые классы событий, а severity в отчётах зависит от конфигурации, а не от события",
+      "remediation": "Хранить оба значения раздельно плюс флаг severity_conflict; единственный источник истины для события — severity_mnemonic; метрика pri_mnemonic_mismatch_total; все алерты строятся на severity, не на pri"
+    },
+    {
+      "name": "Локаль месяца",
+      "mechanism": "strptime('%b') зависит от LC_TIME: при локали контейнера не C 'Feb' не парсится или парсится в другой месяц, результат начинает зависеть от окружения, а не от данных; на разных нодах получаются разные ts для одной строки",
+      "remediation": "Статическая таблица 12 английских сокращений с ASCII-only сравнением, без locale-зависимых вызовов; при промахе — ts_quality=unparsed вместо исключения; CI-тест по всем 12 месяцам"
+    },
+    {
+      "name": "Подстановка года",
+      "mechanism": "Для yearless-варианта берётся текущий год: строки на стыке 31.12/01.01 получают год ±1, появляются отрицательные дельты и события 'из будущего', ломаются порядок и скользящие окна; при backfill старых логов все даты уезжают на годы",
+      "remediation": "Год из строки, если он есть (year_source=in_line); иначе — от референсного времени потока, а не 'сейчас' в момент парса, с правилом границы (разница больше ~6 месяцев → год минус 1); результат всегда помечается year_source=inferred_* и ts_quality=year_inferred, ts_raw сохраняется для пересчёта"
+    },
+    {
+      "name": "Отсутствие timezone",
+      "mechanism": "Наивное время интерпретируется как UTC или как время хоста парсера: сдвиг на часы, неверная склейка корреляции, события попадают не в тот интервал, на границах окон возникает двойной счёт",
+      "remediation": "TZ — свойство источника (ts_offset_min в конфигурации потока), а не хоста; при отсутствии ts_utc=null и ts_quality=tz_missing, downstream использует ingest_ts с явным флагом; правило 'по умолчанию Z' запрещено"
+    },
+    {
+      "name": "Жадные regex",
+      "mechanism": "Шаблон вида access-list (.*) denied (.*) -> (.*) при лишнем '->' в данных, пробеле в имени или скобках захватывает не ту часть, а на длинных строках даёт катастрофический backtracking — одновременно порча полей и стопор горячего пути",
+      "remediation": "Полевые шаблоны с якорями на конкретные разделители и ограниченными классами символов ([^\\s()]+), split справа для iface/addr(port), отсутствие вложенных квантификаторов, per-line бюджет времени, фаззинг на корпусе нестандартных строк"
+    },
+    {
+      "name": "Суммирование агрегатов как событий",
+      "mechanism": "hit-cnt интервальной сводки складывается с 'first hit' и с соседними интервалами: один и тот же трафик считается дважды-трижды, порог 'N deny за 5 минут' срабатывает ложно, тренды завышены, а одиночные реальные дропы теряются в шуме",
+      "remediation": "Разделять классы событий через agg_phase: сумма только по interval_summary в разрезе (поток, agg_bucket_start), interval_start — маркер склейки, а не вклад; дедуп по dedup_key плюс окно; агрегация выполняется downstream, а не в парсере"
+    },
+    {
+      "name": "Неудача без метрики",
+      "mechanism": "Строка получает parse_success=false, но счётчика нет: после обновления прошивки coverage падает с 99% до 40%, пайплайн остаётся 'зелёным', и о поломке узнают по жалобе на отсутствие событий, а не по алерту",
+      "remediation": "Таксономия reasons плюс счётчики lines_total, parsed_ok, parse_failed{reason}, unknown_msg_id по (device_id, dispatch_key); алерт на долю отказов и на появление нового msg_id; DLQ с raw_event; регулярный replay корпуса"
+    },
+    {
+      "name": "CPU на горячем пути",
+      "mechanism": "Рекомпиляция regex на каждую строку, аллоцирующая сериализация, DNS-резолв адресов или ленивая инициализация словарей дают нелинейный рост латентности на пиковом syslog-бурсте, переполнение входного буфера и потери ещё до парсера",
+      "remediation": "Компиляция паттернов один раз при старте, срезы по строке без копирования, никакого I/O и резолва имён в парсере, bench с бюджетом p99 и throughput в CI, backpressure с явной метрикой input_dropped_total вместо тихого переполнения"
+    },
+    {
+      "name": "null вместо нуля",
+      "mechanism": "0 (валидный порт, hit-cnt 0, interval 0) трактуется как отсутствие значения проверкой истинности: поле выпадает из 5-tuple, дедуп схлопывает разные события, метрики теряют записи; обратная ошибка — null превращается в 0 и портит dedup_key",
+      "remediation": "Явные nullable-типы плюс флаги src_port_present/dst_port_present, проверка присутствия, а не истинности, тесты на 0 и на отсутствие для каждого числового поля, контракт сериализации: null не равно 0"
+    }
+  ],
+  "integration": {
+    "standard_event_schema": "Отображение в ECS-совместимую схему: @timestamp/event.ingested ← ingest_ts; event.created ← ts_utc (nullable, при null fallback на @timestamp с явным тегом); event.category=network, event.type=denied, event.dataset=cisco.asa, event.action=denied, event.outcome=denied; event.code ← msg_id (106100), event.module ← msg_class, error.message/tags ← reasons; event.severity ← severity (шкала syslog 0..7); observer.name ← device_id, observer.type=firewall, log.syslog.facility.code ← facility, log.syslog.severity.code ← severity_pri; source.ip/source.port ← src_ip/src_port, destination.ip/destination.port ← dst_ip/dst_port, network.transport ← protocol, network.direction=inbound как эвристика с тегом; observer.ingress.interface.name ← src_if, observer.egress.interface.name ← dst_if; rule.name ← acl_name, rule.ruleset ← acl_group, user.name ← user_name; event.count ← hit_cnt, event.duration ← interval_sec, event.kind=event|alert по agg_phase с тегом asa.agg_phase; asa.conn_hash ← conn_hash1/conn_hash2; event.id ← event_uid",
+    "deduplication_keys": [
+      "event_uid — байтовый дубликат (retransmit UDP, двойная доставка релеем), окно — минуты",
+      "dedup_key — hash(device_id, msg_id, protocol, src_ip, src_port, dst_ip, dst_port, acl_name, agg_bucket_start); окно — длительность интервала агрегации плюс запас",
+      "correlation_key — hash(device_id, conn_hash1, conn_hash2, protocol, 5-tuple); склейка interval_start ↔ interval_summary и связывание с другими msg_id об этом же потоке"
+    ],
+    "metrics": [
+      "lines_total{source}",
+      "lines_parsed_ok{source}",
+      "lines_parse_failed{source,reason}",
+      "coverage_ratio{device_id,dispatch_key}",
+      "unknown_msg_id_total{device_id,msg_id}",
+      "pri_mnemonic_mismatch_total{device_id}",
+      "severity_source_distribution{source}",
+      "ts_quality_total{source,quality}",
+      "year_inferred_total",
+      "agg_phase_total{dispatch_key}",
+      "unmatched_tail_total{dispatch_key}",
+      "parse_latency_p50_p99_us",
+      "throughput_lines_per_sec",
+      "input_dropped_total",
+      "dlq_depth",
+      "agg_sum_source{dispatch_key}"
+    ]
+  }
+}

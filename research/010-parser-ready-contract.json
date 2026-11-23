@@ -1,0 +1,391 @@
+{
+  "essence": "Событие фиксирует срабатывание ACL: TCP-поток от Outside/131.9.85.43(14015) к PUB_DMZ/191.189.210.52(22) сопоставлен с access-list CSM_FW_ACL_ и отклонён. Указано hit-cnt 1 и opaque-ссылка first hit [0x6921d058, 0x00000000]. Источник события — хост 10.11.200.67, время в RAW — Feb 12 2023 13:00:30.",
+  "structure": [
+    {
+      "path": "$",
+      "format": "однострочный syslog-подобный текст",
+      "role": "payload",
+      "transform": null,
+      "confidence": "observed"
+    },
+    {
+      "path": "$.header.pri",
+      "format": "<132> — PRI-подобный угловой целочисленный токен",
+      "role": "envelope",
+      "transform": null,
+      "confidence": "inferred"
+    },
+    {
+      "path": "$.header.timestamp",
+      "format": "Feb 12 2023 13:00:30 — timestamp без timezone",
+      "role": "envelope",
+      "transform": null,
+      "confidence": "observed"
+    },
+    {
+      "path": "$.header.host",
+      "format": "10.11.200.67 — host-токен",
+      "role": "envelope",
+      "transform": null,
+      "confidence": "observed"
+    },
+    {
+      "path": "$.header.separator",
+      "format": "литерал \" : \"",
+      "role": "envelope",
+      "transform": null,
+      "confidence": "observed"
+    },
+    {
+      "path": "$.message",
+      "format": "текст после разделителя, начиная с %",
+      "role": "payload",
+      "transform": null,
+      "confidence": "observed"
+    },
+    {
+      "path": "$.message.mnemonic",
+      "format": "%ASA-4-106100: — тег сообщения",
+      "role": "envelope",
+      "transform": "split_tag",
+      "confidence": "observed"
+    },
+    {
+      "path": "$.message.mnemonic.severity",
+      "format": "десятичный severity-токен 4",
+      "role": "value",
+      "transform": null,
+      "confidence": "observed"
+    },
+    {
+      "path": "$.message.mnemonic.msg_id",
+      "format": "десятичный код сообщения 106100",
+      "role": "value",
+      "transform": null,
+      "confidence": "observed"
+    },
+    {
+      "path": "$.message.body",
+      "format": "keyphrase-грамматика сообщения",
+      "role": "payload",
+      "transform": null,
+      "confidence": "observed"
+    },
+    {
+      "path": "$.message.body.acl_name",
+      "format": "CSM_FW_ACL_ — токен имени ACL",
+      "role": "value",
+      "transform": null,
+      "confidence": "observed"
+    },
+    {
+      "path": "$.message.body.action",
+      "format": "denied — токен действия",
+      "role": "value",
+      "transform": null,
+      "confidence": "observed"
+    },
+    {
+      "path": "$.message.body.protocol",
+      "format": "tcp — токен протокола",
+      "role": "value",
+      "transform": null,
+      "confidence": "observed"
+    },
+    {
+      "path": "$.message.body.src_endpoint",
+      "format": "IFACE/ADDR(PORT) — вложенная конструкция",
+      "role": "payload",
+      "transform": "parse_endpoint",
+      "confidence": "observed"
+    },
+    {
+      "path": "$.message.body.src_endpoint.interface",
+      "format": "Outside",
+      "role": "value",
+      "transform": null,
+      "confidence": "observed"
+    },
+    {
+      "path": "$.message.body.src_endpoint.address",
+      "format": "131.9.85.43",
+      "role": "value",
+      "transform": null,
+      "confidence": "observed"
+    },
+    {
+      "path": "$.message.body.src_endpoint.port",
+      "format": "14015",
+      "role": "value",
+      "transform": null,
+      "confidence": "observed"
+    },
+    {
+      "path": "$.message.body.dst_endpoint",
+      "format": "IFACE/ADDR(PORT) — вложенная конструкция",
+      "role": "payload",
+      "transform": "parse_endpoint",
+      "confidence": "observed"
+    },
+    {
+      "path": "$.message.body.dst_endpoint.interface",
+      "format": "PUB_DMZ",
+      "role": "value",
+      "transform": null,
+      "confidence": "observed"
+    },
+    {
+      "path": "$.message.body.dst_endpoint.address",
+      "format": "191.189.210.52",
+      "role": "value",
+      "transform": null,
+      "confidence": "observed"
+    },
+    {
+      "path": "$.message.body.dst_endpoint.port",
+      "format": "22",
+      "role": "value",
+      "transform": null,
+      "confidence": "observed"
+    },
+    {
+      "path": "$.message.body.hit_cnt",
+      "format": "1 — десятичный счётчик после hit-cnt",
+      "role": "value",
+      "transform": null,
+      "confidence": "observed"
+    },
+    {
+      "path": "$.message.body.first_hit_ref",
+      "format": "[0x6921d058, 0x00000000] — bracketed hex-пара",
+      "role": "value",
+      "transform": null,
+      "confidence": "observed"
+    }
+  ],
+  "strategy": [
+    "Выделять Family по стабильному коду 106100.",
+    "Severity хранить отдельно от msg_id; не включать динамический severity в ключ диспетчеризации.",
+    "Считать syslog-подобный заголовок опциональным конвертом, а текст сообщения — payload.",
+    "Начинать разбор payload с якоря %<tag>-<severity>-<msg_id>:.",
+    "Разбирать body по якорям access-list, denied|permitted, protocol, ->, hit-cnt, first hit.",
+    "Разбирать endpoint IFACE/ADDR(PORT) как вложенную конструкцию.",
+    "Сохранять RAW без изменений; декодирование и unescaping выполнять только отдельными преобразованиями.",
+    "Не применять JSON/XML-декодирование или unescape без отдельного наблюдаемого слоя.",
+    "Opaque hex-пару first hit сохранять как неинтерпретированное значение.",
+    "Невыведенные элементы конверта сохранять в residual.",
+    "Не менять ACL-имя, регистр action/protocol и не подменять отсутствие нулём."
+  ],
+  "record_schema": [
+    {
+      "name": "raw",
+      "category": "dynamic",
+      "type": "string",
+      "required": true,
+      "source": "$"
+    },
+    {
+      "name": "timestamp_raw",
+      "category": "dynamic",
+      "type": "string",
+      "required": false,
+      "source": "$.header.timestamp"
+    },
+    {
+      "name": "host",
+      "category": "dynamic",
+      "type": "string",
+      "required": false,
+      "source": "$.header.host"
+    },
+    {
+      "name": "msg_id",
+      "category": "static",
+      "type": "string",
+      "required": true,
+      "source": "$.message.mnemonic.msg_id"
+    },
+    {
+      "name": "severity",
+      "category": "dynamic",
+      "type": "integer",
+      "required": true,
+      "source": "$.message.mnemonic.severity"
+    },
+    {
+      "name": "acl_name",
+      "category": "dynamic",
+      "type": "string",
+      "required": true,
+      "source": "$.message.body.acl_name"
+    },
+    {
+      "name": "action",
+      "category": "dynamic",
+      "type": "string",
+      "required": true,
+      "source": "$.message.body.action"
+    },
+    {
+      "name": "protocol",
+      "category": "dynamic",
+      "type": "string",
+      "required": true,
+      "source": "$.message.body.protocol"
+    },
+    {
+      "name": "src_interface",
+      "category": "dynamic",
+      "type": "string",
+      "required": true,
+      "source": "$.message.body.src_endpoint.interface"
+    },
+    {
+      "name": "src_address",
+      "category": "dynamic",
+      "type": "string",
+      "required": true,
+      "source": "$.message.body.src_endpoint.address"
+    },
+    {
+      "name": "src_port",
+      "category": "dynamic",
+      "type": "integer",
+      "required": true,
+      "source": "$.message.body.src_endpoint.port"
+    },
+    {
+      "name": "dst_interface",
+      "category": "dynamic",
+      "type": "string",
+      "required": true,
+      "source": "$.message.body.dst_endpoint.interface"
+    },
+    {
+      "name": "dst_address",
+      "category": "dynamic",
+      "type": "string",
+      "required": true,
+      "source": "$.message.body.dst_endpoint.address"
+    },
+    {
+      "name": "dst_port",
+      "category": "dynamic",
+      "type": "integer",
+      "required": true,
+      "source": "$.message.body.dst_endpoint.port"
+    },
+    {
+      "name": "hit_cnt",
+      "category": "dynamic",
+      "type": "integer",
+      "required": true,
+      "source": "$.message.body.hit_cnt"
+    },
+    {
+      "name": "first_hit_ref",
+      "category": "dynamic",
+      "type": "string",
+      "required": true,
+      "source": "$.message.body.first_hit_ref"
+    },
+    {
+      "name": "residual",
+      "category": "dynamic",
+      "type": "object",
+      "required": false,
+      "source": "$"
+    }
+  ],
+  "format_features": [
+    {
+      "property": "[наблюдение] Строка содержит угловой числовой префикс, timestamp, host, разделитель \" : \" и сообщение с тегом %ASA-4-106100:.",
+      "implication": "Конверт можно отделить от payload по тегу; если header отсутствует, разбор начинается с тега."
+    },
+    {
+      "property": "[вывод] В теге %ASA-4-106100: severity и msg_id относятся к разным уровням.",
+      "implication": "Диспетчеризация по 106100, severity как отдельное динамическое значение."
+    },
+    {
+      "property": "[наблюдение] Тело сообщения имеет keyphrase-структуру с access-list, action, protocol, endpoint, ->, endpoint, hit-cnt, first hit.",
+      "implication": "Нужен токенизатор по ключевым словам, а не разбор фиксированных колонок."
+    },
+    {
+      "property": "[наблюдение] Endpoint записан как IFACE/ADDR(PORT).",
+      "implication": "Разбирать endpoint как вложенную конструкцию с интерфейсом, адресом и числом в скобках."
+    },
+    {
+      "property": "[вывод] Адрес endpoint в RAW — IPv4, но тип поля не должен жёстко зависеть от одного наблюдения.",
+      "implication": "Хранить адрес строкой; IP-валидацию выполнять только при наличии отдельного контракта."
+    },
+    {
+      "property": "[наблюдение] first hit содержит пару hex-токенов в квадратных скобках.",
+      "implication": "Семантику не выводить из RAW; сохранять как opaque-ссылку до отдельного контракта."
+    },
+    {
+      "property": "[наблюдение] В строке нет escaped-последовательностей и признаков JSON/XML.",
+      "implication": "Не применять unescape и рекурсивное декодирование без отдельного наблюдаемого слоя."
+    },
+    {
+      "property": "[вывод] Timestamp не содержит timezone.",
+      "implication": "Не приписывать зону; сохранять raw timestamp и нормализовать только по контракту."
+    }
+  ],
+  "pitfalls": [
+    {
+      "name": "Двоеточия в timestamp и теге",
+      "mechanism": "Timestamp содержит двоеточия, заголовок содержит разделитель \" : \", а тег заканчивается двоеточием; деление по первому двоеточию ломает timestamp.",
+      "remediation": "Сначала опционально разбирать header, затем искать якорь %...:; при отсутствии header начинать с тега."
+    },
+    {
+      "name": "Динамический severity внутри mnemonic",
+      "mechanism": "Полный тег %ASA-4-106100 меняется при изменении severity, поэтому не является стабильным ключом целиком.",
+      "remediation": "Использовать msg_id = 106100 для диспетчеризации, severity хранить отдельным динамическим полем."
+    },
+    {
+      "name": "Дублирование severity в PRI и mnemonic",
+      "mechanism": "<132> и %ASA-4 могут численно соответствовать одному severity, но относятся к разным пространствам заголовка.",
+      "remediation": "Не сливать значения; severity брать из mnemonic, PRI сохранять в residual без декодирования."
+    },
+    {
+      "name": "Граница header и message",
+      "mechanism": "Разделитель \" : \" похож на двоеточия внутри timestamp и mnemonic, из-за чего неоднозначно определяется конец заголовка.",
+      "remediation": "Считать header опциональным и искать первый якорь %<tag>-<severity>-<msg_id>: как начало message."
+    },
+    {
+      "name": "Вложенный endpoint",
+      "mechanism": "IFACE/ADDR(PORT) содержит слеш и скобки; наивное деление по слешу или скобкам может разорвать конструкцию.",
+      "remediation": "Разбирать как interface \"/\" address \"(\" number \")\"; при несоответствии сохранять endpoint raw-токеном."
+    },
+    {
+      "name": "Имя ACL и action",
+      "mechanism": "Имя ACL может содержать подчёркивания и заканчиваться _, а action является отдельным ключевым словом.",
+      "remediation": "Брать имя между access-list и известным action-токеном, не обрезать подчёркивания и не менять регистр."
+    },
+    {
+      "name": "Opaque hex-пара",
+      "mechanism": "[0x6921d058, 0x00000000] может быть не числом, не временем и не hash без отдельного контракта.",
+      "remediation": "Хранить raw-пару или два hex-токена как неинтерпретированное значение; не декодировать предположительно."
+    },
+    {
+      "name": "hit-cnt и first hit",
+      "mechanism": "first hit — текстовый якорь, а не boolean-поле; рядом стоит отдельная hex-пара.",
+      "remediation": "hit-cnt разбирать как счётчик, hex-пару — как отдельную opaque-ссылку."
+    },
+    {
+      "name": "Семантика числа в скобках",
+      "mechanism": "Для tcp число в скобках является портом, но для других protocol-вариантов токен может иметь иную семантику.",
+      "remediation": "Интерпретировать как порт только при соответствующем protocol; иначе сохранять числовой токен и помечать семантику неизвестной."
+    },
+    {
+      "name": "Timestamp без timezone",
+      "mechanism": "Feb 12 2023 13:00:30 не содержит зоны, поэтому локальное время нельзя однозначно привести к UTC.",
+      "remediation": "Сохранять raw timestamp; не выводить timezone или UTC без отдельного контракта."
+    },
+    {
+      "name": "null против нуля",
+      "mechanism": "0x00000000, возможный port 0 и hit-cnt 0 являются значениями, а не отсутствием поля.",
+      "remediation": "Отсутствие представлять как null/absence, нулевые токены сохранять как ноль."
+    }
+  ]
+}

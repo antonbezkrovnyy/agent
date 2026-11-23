@@ -1,0 +1,56 @@
+{
+  "experiment": "R017",
+  "date": "2026-11-23",
+  "embedding": {
+    "provider": "GPT-Lab OpenAI-compatible API",
+    "endpoint": "POST /embeddings",
+    "model": "embedding",
+    "dimension": 2560,
+    "similarity": "cosine on normalized vectors"
+  },
+  "controlled_queries": {
+    "family": {
+      "query": "ASA 106023 без host, Deny по access-group, src/dst через colon и slash",
+      "results": [
+        {"family_id": "asa_106023_acl_deny", "score": 0.828938},
+        {"family_id": "asa_106100_acl_hit", "score": 0.690582}
+      ]
+    },
+    "parser": {
+      "query": "ASA 106023 без host, access-group в кавычках, src/dst interface:IP/port, ASAIFACE и ASAQSTRING",
+      "results": [
+        {"family_id": "asa_106023_acl_deny", "revision": 1, "score": 0.761389},
+        {"family_id": "asa_106100_acl_hit", "revision": 1, "score": 0.725369}
+      ]
+    },
+    "grok": {
+      "query": "Непустое содержимое внутри двойных кавычек, кавычки не входят в capture",
+      "results": [
+        {"name": "ASAQSTRING", "score": 0.821394}
+      ]
+    }
+  },
+  "agent_runs": [
+    {
+      "input": "ASA-106100",
+      "selected_family": "asa_106100_acl_hit",
+      "revision": 1,
+      "decision": "reuse",
+      "top_family_score": 0.819354,
+      "other_family_score": 0.753907,
+      "residual": "",
+      "duplicate_created": false
+    },
+    {
+      "input": "ASA-106023",
+      "selected_family": "asa_106023_acl_deny",
+      "revision": 1,
+      "decision": "reuse",
+      "top_family_score": 0.824967,
+      "other_family_score": 0.798956,
+      "residual": "",
+      "duplicate_created": false
+    }
+  ],
+  "temporary_databases_removed": true
+}

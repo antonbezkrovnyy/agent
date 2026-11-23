@@ -1,0 +1,434 @@
+{
+  "essence": "Сетевое устройство с адресом 10.11.200.67 отправило syslog-запись с PRI 132 (facility local0, severity 4): сообщение ASA-4-106100 — ACL CSM_FW_ACL_ запретил TCP-сегмент от Outside/131.9.85.43(14015) к PUB_DMZ/191.189.210.52(22), счётчик попаданий 1, признак «first», хвост ссылок [0x6921d058, 0x00000000]. Действие — deny на межсетевом экране, соединение не установлено. Решение: new_family (family_id asa_106100_acl_hit, ревизия 1) — база пуста (list_parser_families и search_grok_patterns не дали ни одной Family/конструкции), ни одна существующая Family не подходит, идентификатор сообщения 106100 и конверт новые.",
+  "structure": [
+    {
+      "path": "$",
+      "format": "syslog-строка: <PRI> + заголовок с годом + payload ASA",
+      "role": "envelope",
+      "transform": null,
+      "confidence": "observed"
+    },
+    {
+      "path": "$.header.pri",
+      "format": "«<132>», десятичный PRI = facility*8+severity",
+      "role": "value",
+      "transform": "снять угловые скобки, привести к integer",
+      "confidence": "observed"
+    },
+    {
+      "path": "$.header.timestamp",
+      "format": "«Feb 12 2023 13:00:30» — MMM DD YYYY HH:MM:SS",
+      "role": "value",
+      "transform": null,
+      "confidence": "observed"
+    },
+    {
+      "path": "$.header.host",
+      "format": "IPv4 10.11.200.67",
+      "role": "value",
+      "transform": null,
+      "confidence": "observed"
+    },
+    {
+      "path": "$.header.delimiter",
+      "format": "пробел перед двоеточием: «10.11.200.67 : »",
+      "role": "value",
+      "transform": "разделитель « +: +», не входит в поля",
+      "confidence": "observed"
+    },
+    {
+      "path": "$.payload",
+      "format": "«%ASA-<severity>-<msg_id>: <тело>»",
+      "role": "payload",
+      "transform": "отделить тег от тела по литералам «%ASA-» и «: »",
+      "confidence": "observed"
+    },
+    {
+      "path": "$.payload.severity",
+      "format": "integer в теге: 4",
+      "role": "value",
+      "transform": "привести к integer",
+      "confidence": "observed"
+    },
+    {
+      "path": "$.payload.msg_id",
+      "format": "фиксированный 106100",
+      "role": "value",
+      "transform": "привести к integer",
+      "confidence": "observed"
+    },
+    {
+      "path": "$.payload.body",
+      "format": "«access-list <acl> <action> <proto> <iface>/<ip>(<port>) -> <iface>/<ip>(<port>) hit-cnt <n> <hit> hit [0x…, 0x…]»",
+      "role": "payload",
+      "transform": "позиционный разбор по литералам access-list, « -> », hit-cnt, hit",
+      "confidence": "observed"
+    },
+    {
+      "path": "$.payload.body.acl_name",
+      "format": "имя ACL с завершающим подчёркиванием: CSM_FW_ACL_",
+      "role": "value",
+      "transform": null,
+      "confidence": "observed"
+    },
+    {
+      "path": "$.payload.body.action",
+      "format": "слово действия: denied",
+      "role": "value",
+      "transform": null,
+      "confidence": "observed"
+    },
+    {
+      "path": "$.payload.body.protocol",
+      "format": "имя протокола: tcp",
+      "role": "value",
+      "transform": null,
+      "confidence": "observed"
+    },
+    {
+      "path": "$.payload.body.src.iface",
+      "format": "имя интерфейса до «/»: Outside",
+      "role": "value",
+      "transform": "разделение endpoint по «/» и «(...)»",
+      "confidence": "observed"
+    },
+    {
+      "path": "$.payload.body.src.ip",
+      "format": "IPv4 131.9.85.43",
+      "role": "value",
+      "transform": null,
+      "confidence": "observed"
+    },
+    {
+      "path": "$.payload.body.src.port",
+      "format": "integer в скобках: 14015",
+      "role": "value",
+      "transform": "привести к integer",
+      "confidence": "observed"
+    },
+    {
+      "path": "$.payload.body.dst.iface",
+      "format": "имя интерфейса: PUB_DMZ",
+      "role": "value",
+      "transform": "разделение endpoint по «/» и «(...)»",
+      "confidence": "observed"
+    },
+    {
+      "path": "$.payload.body.dst.ip",
+      "format": "IPv4 191.189.210.52",
+      "role": "value",
+      "transform": null,
+      "confidence": "observed"
+    },
+    {
+      "path": "$.payload.body.dst.port",
+      "format": "integer в скобках: 22",
+      "role": "value",
+      "transform": "привести к integer",
+      "confidence": "observed"
+    },
+    {
+      "path": "$.payload.body.hit_cnt",
+      "format": "integer после литерала «hit-cnt »: 1",
+      "role": "value",
+      "transform": "привести к integer",
+      "confidence": "observed"
+    },
+    {
+      "path": "$.payload.body.hit_type",
+      "format": "слово перед литералом « hit»: first",
+      "role": "value",
+      "transform": null,
+      "confidence": "observed"
+    },
+    {
+      "path": "$.payload.body.entry_addr",
+      "format": "hex 0x6921d058 в квадратных скобках",
+      "role": "value",
+      "transform": "сохранить строкой как есть",
+      "confidence": "observed"
+    },
+    {
+      "path": "$.payload.body.entry_meta",
+      "format": "hex 0x00000000 в квадратных скобках",
+      "role": "value",
+      "transform": "сохранить строкой как есть, не приводить к null",
+      "confidence": "observed"
+    }
+  ],
+  "strategy": [
+    "Конверт syslog разбирается отдельным слоем syslog_envelope, payload выделяется по литералам «<PRI>», « +: +».",
+    "Payload разделяется слоем asa_tag на тег %ASA-<severity>-<msg_id>: и тело body.",
+    "Тело разбирается отдельным слоем asa_106100_body позиционно по литералам access-list, « -> », hit-cnt, hit.",
+    "Диспетчеризация выполняется по стабильному msg_id 106100 (ключ Family asa_106100_acl_hit).",
+    "pri из конверта и severity из тега ASA хранятся двумя независимыми полями, одно из другого не выводится.",
+    "Каждый следующий слой получает вход из capture предыдущего слоя: payload → body; рекурсивное вложение (json/xml) не применяется, так как во входе его нет.",
+    "RAW сохраняется без изменений в поле raw; нормализация ограничена приведением pri, severity, hit_cnt, портов к integer и hex-значений к строке.",
+    "Каждый endpoint разбирается на interface, IPv4 и port с уникальными префиксами src_/dst_.",
+    "Необязательные элементы не вводятся: опциональность в grammar Family отсутствует, все поля обязательны."
+  ],
+  "record_schema": [
+    {
+      "name": "raw",
+      "category": "dynamic",
+      "type": "string",
+      "required": true,
+      "source": "$"
+    },
+    {
+      "name": "pri",
+      "category": "dynamic",
+      "type": "integer",
+      "required": true,
+      "source": "$.header.pri"
+    },
+    {
+      "name": "timestamp",
+      "category": "dynamic",
+      "type": "timestamp",
+      "required": true,
+      "source": "$.header.timestamp"
+    },
+    {
+      "name": "host",
+      "category": "dynamic",
+      "type": "ipv4",
+      "required": true,
+      "source": "$.header.host"
+    },
+    {
+      "name": "msg_id",
+      "category": "static",
+      "type": "integer",
+      "required": true,
+      "source": "литерал 106100 в теге %ASA-<severity>-106100 (структура: $.payload.msg_id)"
+    },
+    {
+      "name": "severity",
+      "category": "dynamic",
+      "type": "integer",
+      "required": true,
+      "source": "$.payload.severity"
+    },
+    {
+      "name": "action",
+      "category": "dynamic",
+      "type": "string",
+      "required": true,
+      "source": "$.payload.body.action"
+    },
+    {
+      "name": "protocol",
+      "category": "dynamic",
+      "type": "string",
+      "required": true,
+      "source": "$.payload.body.protocol"
+    },
+    {
+      "name": "acl_name",
+      "category": "dynamic",
+      "type": "string",
+      "required": true,
+      "source": "$.payload.body.acl_name"
+    },
+    {
+      "name": "src_iface",
+      "category": "dynamic",
+      "type": "string",
+      "required": true,
+      "source": "$.payload.body.src.iface"
+    },
+    {
+      "name": "src_ip",
+      "category": "dynamic",
+      "type": "ipv4",
+      "required": true,
+      "source": "$.payload.body.src.ip"
+    },
+    {
+      "name": "src_port",
+      "category": "dynamic",
+      "type": "integer",
+      "required": true,
+      "source": "$.payload.body.src.port"
+    },
+    {
+      "name": "dst_iface",
+      "category": "dynamic",
+      "type": "string",
+      "required": true,
+      "source": "$.payload.body.dst.iface"
+    },
+    {
+      "name": "dst_ip",
+      "category": "dynamic",
+      "type": "ipv4",
+      "required": true,
+      "source": "$.payload.body.dst.ip"
+    },
+    {
+      "name": "dst_port",
+      "category": "dynamic",
+      "type": "integer",
+      "required": true,
+      "source": "$.payload.body.dst.port"
+    },
+    {
+      "name": "hit_cnt",
+      "category": "dynamic",
+      "type": "integer",
+      "required": true,
+      "source": "$.payload.body.hit_cnt"
+    },
+    {
+      "name": "hit_type",
+      "category": "dynamic",
+      "type": "string",
+      "required": true,
+      "source": "$.payload.body.hit_type"
+    },
+    {
+      "name": "entry_addr",
+      "category": "dynamic",
+      "type": "string",
+      "required": true,
+      "source": "$.payload.body.entry_addr"
+    },
+    {
+      "name": "entry_meta",
+      "category": "dynamic",
+      "type": "string",
+      "required": true,
+      "source": "$.payload.body.entry_meta"
+    }
+  ],
+  "format_features": [
+    {
+      "property": "observed: PRI стоит в угловых скобках вплотную к метке времени, без пробела",
+      "implication": "первый литерал слоя конверта — «<», затем %{INT:pri}, затем «>»"
+    },
+    {
+      "property": "observed: в метке времени год стоит после дня: MMM DD YYYY HH:MM:SS",
+      "implication": "классический RFC3164-шаблон неприменим; нужна конструкция с фиксированным порядком MMM DD YYYY HH:MM:SS"
+    },
+    {
+      "property": "observed: после IPv4 хоста стоит пробел, затем двоеточие, затем пробел («10.11.200.67 : »)",
+      "implication": "разделитель хоста задаётся как « +: +»; двоеточие не приклеивается к host и не попадает в payload"
+    },
+    {
+      "property": "observed: payload начинается тегом «%ASA-<severity>-<msg_id>:»",
+      "implication": "severity и msg_id берутся из тега; msg_id 106100 используется как ключ Family"
+    },
+    {
+      "property": "observed: PRI 132 даёт severity 4 (facility local0), и тег тоже содержит 4",
+      "implication": "два источника severity сохраняются раздельно (pri и severity), совпадение значений не используется как допущение"
+    },
+    {
+      "property": "observed: endpoint записан как <iface>/<ipv4>(<port>) и повторяется дважды через « -> »",
+      "implication": "каждый endpoint разбирается на три поля с префиксами src_/dst_, литерал « -> » фиксирует границу"
+    },
+    {
+      "property": "observed: «hit-cnt», «hit» и «[ ]» — литералы, число и признак — значения",
+      "implication": "hit_cnt — INTEGER после «hit-cnt », hit_type — WORD перед « hit», hex-хвост ограничен литералами «[» и «]»"
+    },
+    {
+      "property": "observed: имя ACL оканчивается подчёркиванием (CSM_FW_ACL_)",
+      "implication": "для acl_name используется NOTSPACE, а не шаблон только из букв и цифр"
+    },
+    {
+      "property": "observed: хвост содержит два hex-значения через «, », второе равно 0x00000000",
+      "implication": "оба значения извлекаются конструкцией HEXREF и хранятся строками; 0x00000000 — реальное значение, не отсутствие данных"
+    },
+    {
+      "property": "inferred: между конвертом и телом нет json/xml/экранирования; вложенность ограничена payload → body",
+      "implication": "достаточно трёх последовательных слоёв, рекурсивный unescape не требуется"
+    },
+    {
+      "property": "hypothesis: тот же msg_id 106100 может встречаться с «permitted» и с icmp-записями без портов и без блока «first hit [...]»",
+      "implication": "эти записи выходят за границы текущей грамматики и требуют new_variant, а не ослабления слоя asa_106100_body"
+    }
+  ],
+  "pitfalls": [
+    {
+      "name": "Год в нестандартной позиции",
+      "mechanism": "шаблон MMM DD HH:MM:SS не поглощает «2023», поэтому год попадает в host или остаётся в residual, а IPv4 хоста смещается на неверную позицию",
+      "remediation": "жёсткий порядок %{MONTH} +%{MONTHDAY} +%{YEAR} +%{TIME} в конструкции ASATIMESTAMPYEAR; вариант с годом в конце — другая Family"
+    },
+    {
+      "name": "Пробел перед двоеточием после хоста",
+      "mechanism": "шаблон с «host:» или с немедленным payload не совпадёт, а шаблон вида %{NOTSPACE} съест «:» в поле и оставит payload без разделителя",
+      "remediation": "явный литерал-разделитель « +: +»; двоеточие не входит ни в host, ни в payload"
+    },
+    {
+      "name": "Двойная запись severity",
+      "mechanism": "severity присутствует и в PRI (facility*8+severity), и в теге ASA; при расхождении значений одно из них молча теряется или подменяет другое",
+      "remediation": "pri читается только из PRI, severity только из тега %ASA-<n>-; значения не согласуются и не выводятся одно из другого"
+    },
+    {
+      "name": "Повторяющиеся sub-captures двух endpoint-ов",
+      "mechanism": "два одинаковых блока <iface>/<ip>(<port>) с одинаковыми именами capture перезаписывают друг друга, и остаётся только адрес получателя",
+      "remediation": "уникальные имена src_iface/src_ip/src_port и dst_iface/dst_ip/dst_port в одном слое"
+    },
+    {
+      "name": "Спецсимволы в имени ACL",
+      "mechanism": "ограничение класса символов буквами и цифрами обрезает «CSM_FW_ACL_» и оставляет хвост в residual, сдвигая action",
+      "remediation": "acl_name через NOTSPACE, ограниченный пробелом-разделителем"
+    },
+    {
+      "name": "Нулевое hex-значение и отсутствие данных",
+      "mechanism": "0x00000000 может быть ошибочно прочитано как отсутствующий счётчик (null) и потеряно",
+      "remediation": "HEXREF сохраняет строку как есть; null не приравнивается к нулю"
+    },
+    {
+      "name": "Границы блока счётчика попаданий",
+      "mechanism": "«hit-cnt 1 first hit […]» — число 1 и слово first легко склеиваются в одно поле, а при жадном остатке хвост в квадратных скобках теряется",
+      "remediation": "hit_cnt — %{INT} сразу после литерала «hit-cnt », hit_type — %{WORD} перед литералом « hit», хвост ограничен литералами «[» и «]»"
+    },
+    {
+      "name": "Стрелка « -> » как разделитель",
+      "mechanism": "дефис встречается и в «hit-cnt», поэтому поиск «-» без пробелов может разрезать поле в неверном месте",
+      "remediation": "разделитель endpoint-ов задаётся точным литералом « -> » с окружающими пробелами"
+    }
+  ],
+  "parser": {
+    "patterns": [
+      {
+        "name": "ASATIMESTAMPYEAR",
+        "definition": "%{MONTH} +%{MONTHDAY} +%{YEAR} +%{TIME}",
+        "description": "Метка времени syslog, где год стоит сразу после дня: «Feb 12 2023 13:00:30» (MMM DD YYYY HH:MM:SS). Границы: только этот порядок; RFC3164-варианты вне Family."
+      },
+      {
+        "name": "ASATAG",
+        "definition": "%ASA-%{INT:severity}-%{INT:msg_id}:",
+        "description": "Тег сообщения ASA в начале payload: «%ASA-4-106100:»; извлекает severity из тега и msg_id для диспетчеризации по Family. Требует завершающего двоеточия."
+      },
+      {
+        "name": "ASAPAYLOAD",
+        "definition": "[\\s\\S]+",
+        "description": "Непустой остаток строки между явными литералами-разделителями конверта и тела; используется только как содержимое слоя."
+      },
+      {
+        "name": "HEXREF",
+        "definition": "0x[0-9A-Fa-f]+",
+        "description": "Hex-значение с префиксом 0x из хвоста «[0x..., 0x...]», включая 0x00000000; сохраняется строкой."
+      }
+    ],
+    "layers": [
+      {
+        "name": "syslog_envelope",
+        "source": "raw",
+        "pattern": "<%{INT:pri}>%{ASATIMESTAMPYEAR:timestamp} +%{IPV4:host} +: +%{ASAPAYLOAD:payload}"
+      },
+      {
+        "name": "asa_tag",
+        "source": "payload",
+        "pattern": "%{ASATAG} +%{ASAPAYLOAD:body}"
+      },
+      {
+        "name": "asa_106100_body",
+        "source": "body",
+        "pattern": "access-list %{NOTSPACE:acl_name} %{WORD:action} %{WORD:protocol} %{NOTSPACE:src_iface}/%{IPV4:src_ip}\\(%{INT:src_port}\\) -> %{NOTSPACE:dst_iface}/%{IPV4:dst_ip}\\(%{INT:dst_port}\\) hit-cnt %{INT:hit_cnt} %{WORD:hit_type} hit \\[%{HEXREF:entry_addr}, %{HEXREF:entry_meta}\\]"
+      }
+    ]
+  }
+}

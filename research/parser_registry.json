@@ -1,0 +1,207 @@
+{
+  "families": {
+    "ASA-106100": {
+      "revision": 1,
+      "patterns": [
+        {
+          "name": "SYSLOG_PRI",
+          "definition": "\\<(?<pri>[0-9]{1,3})\\>",
+          "description": "PRI конверта в угловых скобках; facility и severity из него вычисляются отдельно и в выходные поля не попадают"
+        },
+        {
+          "name": "SYSLOGTIMEWITHYEAR",
+          "definition": "%{MONTH} +%{MONTHDAY} +%{YEAR} +%{TIME}",
+          "description": "Собственная конструкция: BSD-подобный timestamp с 4-значным годом; встроенный %{SYSLOGTIMESTAMP} не подходит из-за года"
+        },
+        {
+          "name": "ASA_SYSLOG_HEADER",
+          "definition": "%{SYSLOG_PRI}(?<timestamp>%{SYSLOGTIMEWITHYEAR}) +(?<host>%{IPV4}) +: +(?<payload>.*)",
+          "description": "Транспортный конверт целиком: PRI, timestamp, host и разделитель ' +: +'; остаток строки уходит в payload без попытки разбора"
+        },
+        {
+          "name": "ASA_TAG",
+          "definition": "%(?<product>[A-Z]+)-(?<msg_severity>[0-9])-(?<msg_id>[0-9]{6}):",
+          "description": "Продуктовый тег: литералы '%' и '-', одноцифровой capture событийной severity и шестизначный capture msg_id (ключ диспетчеризации)"
+        },
+        {
+          "name": "ASA_TAG_LINE",
+          "definition": "%{ASA_TAG} +(?<body>.*)",
+          "description": "Тег плюс остаток тела; разделитель ' +' допускает один и два пробела перед телом"
+        },
+        {
+          "name": "ASA_SOURCE_ENDPOINT",
+          "definition": "(?<src_iface>[^/\\s]+)/(?<src_ip>%{IPV4})\\((?<src_port>[0-9]+)\\)",
+          "description": "Источник в форме интерфейс/адрес(порт); порт целочисленный, нуль сохраняется как значение"
+        },
+        {
+          "name": "ASA_DEST_ENDPOINT",
+          "definition": "(?<dst_iface>[^/\\s]+)/(?<dst_ip>%{IPV4})\\((?<dst_port>[0-9]+)\\)",
+          "description": "Назначение в той же форме, но с отдельными именами captures для источника и назначения"
+        },
+        {
+          "name": "ASA_HIT_QUALIFIER",
+          "definition": "(?<hit_qualifier>first hit|interval [0-9]+-second)",
+          "description": "Опциональный квалификатор хвоста попаданий: первое попадание либо интервальный счётчик"
+        },
+        {
+          "name": "ASA_HITSUMMARY",
+          "definition": "hit-cnt +(?<hit_count>[0-9]+)(?: +%{ASA_HIT_QUALIFIER})?(?: +\\[(?<acl_hash>[^\\]]+)\\])?",
+          "description": "Счётчик попаданий с двумя независимыми опциональными сегментами: квалификатор и непрозрачная пара hex в скобках; литерал 'hit-cnt' стабилен"
+        },
+        {
+          "name": "ASA_ACL_BODY",
+          "definition": "access-list +(?<acl_name>\\S+) +(?<action>[a-z]+) +(?<protocol>[a-z0-9]+) +%{ASA_SOURCE_ENDPOINT} +-> +%{ASA_DEST_ENDPOINT} +%{ASA_HITSUMMARY} *",
+          "description": "Позиционная грамматика тела: литералы 'access-list' и '->', всё переменное — captures; ссылается на конструкции endpoint и hit-summary"
+        }
+      ],
+      "layers": [
+        {
+          "name": "syslog_envelope",
+          "source": "raw",
+          "pattern": "^%{ASA_SYSLOG_HEADER}$"
+        },
+        {
+          "name": "asa_tag",
+          "source": "payload",
+          "pattern": "^%{ASA_TAG_LINE}$"
+        },
+        {
+          "name": "asa_acl_body",
+          "source": "body",
+          "pattern": "^%{ASA_ACL_BODY}$"
+        }
+      ],
+      "record_schema": [
+        {
+          "name": "raw",
+          "category": "dynamic",
+          "type": "string",
+          "required": true,
+          "source": "$"
+        },
+        {
+          "name": "pri",
+          "category": "dynamic",
+          "type": "integer",
+          "required": false,
+          "source": "$.pri"
+        },
+        {
+          "name": "timestamp",
+          "category": "dynamic",
+          "type": "string",
+          "required": false,
+          "source": "$.timestamp"
+        },
+        {
+          "name": "host",
+          "category": "dynamic",
+          "type": "string",
+          "required": false,
+          "source": "$.host"
+        },
+        {
+          "name": "msg_id",
+          "category": "static",
+          "type": "string",
+          "required": true,
+          "source": "контракт Family: литерал тега %<PRODUCT>-<sev>-106100 (ключ диспетчеризации)"
+        },
+        {
+          "name": "msg_severity",
+          "category": "dynamic",
+          "type": "integer",
+          "required": true,
+          "source": "$.payload.tag.msg_severity"
+        },
+        {
+          "name": "acl_name",
+          "category": "dynamic",
+          "type": "string",
+          "required": true,
+          "source": "$.payload.body.acl_name"
+        },
+        {
+          "name": "action",
+          "category": "dynamic",
+          "type": "string",
+          "required": true,
+          "source": "$.payload.body.action"
+        },
+        {
+          "name": "protocol",
+          "category": "dynamic",
+          "type": "string",
+          "required": true,
+          "source": "$.payload.body.protocol"
+        },
+        {
+          "name": "src_iface",
+          "category": "dynamic",
+          "type": "string",
+          "required": true,
+          "source": "$.payload.body.src_iface"
+        },
+        {
+          "name": "src_ip",
+          "category": "dynamic",
+          "type": "string",
+          "required": true,
+          "source": "$.payload.body.src_ip"
+        },
+        {
+          "name": "src_port",
+          "category": "dynamic",
+          "type": "integer",
+          "required": true,
+          "source": "$.payload.body.src_port"
+        },
+        {
+          "name": "dst_iface",
+          "category": "dynamic",
+          "type": "string",
+          "required": true,
+          "source": "$.payload.body.dst_iface"
+        },
+        {
+          "name": "dst_ip",
+          "category": "dynamic",
+          "type": "string",
+          "required": true,
+          "source": "$.payload.body.dst_ip"
+        },
+        {
+          "name": "dst_port",
+          "category": "dynamic",
+          "type": "integer",
+          "required": true,
+          "source": "$.payload.body.dst_port"
+        },
+        {
+          "name": "hit_count",
+          "category": "dynamic",
+          "type": "integer",
+          "required": true,
+          "source": "$.payload.body.hit_count"
+        },
+        {
+          "name": "hit_qualifier",
+          "category": "dynamic",
+          "type": "string",
+          "required": false,
+          "source": "$.payload.body.hit_qualifier"
+        },
+        {
+          "name": "acl_hash",
+          "category": "dynamic",
+          "type": "string",
+          "required": false,
+          "source": "$.payload.body.acl_hash"
+        }
+      ],
+      "evidence": [
+        "<132>Feb 12 2023 13:00:30 10.11.200.67 : %ASA-4-106100: access-list CSM_FW_ACL_ denied tcp Outside/131.9.85.43(14015) -> PUB_DMZ/191.189.210.52(22) hit-cnt 1 first hit [0x6921d058, 0x00000000]"
+      ]
+    }
+  }
+}

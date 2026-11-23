@@ -1,0 +1,398 @@
+{
+  "essence": "Сетевой экран ASA (без поля host в конверте) зафиксировал отказ TCP-пакета 13.253.52.235:55896 → 77.53.224.176:25000 (src-интерфейс VQE#2-Lab, dst-интерфейс outside) по access-group \"VQE#2-Lab\"; результат — пакет запрещён (action=Deny), пара hex-счётчиков ACE нулевая [0x0, 0x0]. Решение: new_family — существующая Family asa_106100_acl_hit не подошла на слое syslog_envelope (в её конверте обязателен IPV4-хост, которого в RAW нет, и она фиксирует msg_id 106100 вместо обнаруженного 106023), поэтому создана Family asa_106023_acl_deny с прежней Family в роли независимого baseline.",
+  "structure": [
+    {
+      "path": "$",
+      "format": "RAW syslog-строка целиком, без изменения",
+      "role": "envelope",
+      "transform": null,
+      "confidence": "observed"
+    },
+    {
+      "path": "$.header.pri",
+      "format": "PRI в угловых скобках: <132> (facility 16, severity 4)",
+      "role": "value",
+      "transform": null,
+      "confidence": "observed"
+    },
+    {
+      "path": "$.header.timestamp",
+      "format": "MMM DD YYYY HH:MM:SS: «Feb 12 2023 13:21:55»",
+      "role": "value",
+      "transform": null,
+      "confidence": "observed"
+    },
+    {
+      "path": "$.header.boundary",
+      "format": "двоеточие сразу после секунд; поле host между timestamp и тегом отсутствует",
+      "role": "envelope",
+      "transform": "разделитель «: » с обязательным пробелом",
+      "confidence": "observed"
+    },
+    {
+      "path": "$.payload",
+      "format": "тело ASA после конверта: «%ASA-4-106023: Deny tcp src ... [0x0, 0x0]»",
+      "role": "payload",
+      "transform": "выделение по литералам <PRI>, timestamp и «: »",
+      "confidence": "observed"
+    },
+    {
+      "path": "$.payload.msg_id",
+      "format": "числовой идентификатор 106023 внутри тега %ASA-<severity>-<msg_id>:",
+      "role": "value",
+      "transform": null,
+      "confidence": "observed"
+    },
+    {
+      "path": "$.payload.severity",
+      "format": "одна цифра 4 в теге (согласуется с severity внутри PRI 132)",
+      "role": "value",
+      "transform": null,
+      "confidence": "observed"
+    },
+    {
+      "path": "$.payload.body",
+      "format": "текст после тега и пробелов: «Deny tcp src ... by access-group \"...\" [0x0, 0x0]»",
+      "role": "payload",
+      "transform": "отделение по литералу «: » после тега",
+      "confidence": "observed"
+    },
+    {
+      "path": "$.payload.body.action",
+      "format": "слово «Deny» (в 106100 пишется «denied»)",
+      "role": "value",
+      "transform": null,
+      "confidence": "observed"
+    },
+    {
+      "path": "$.payload.body.protocol",
+      "format": "имя протокола «tcp»",
+      "role": "value",
+      "transform": null,
+      "confidence": "observed"
+    },
+    {
+      "path": "$.payload.body.src.iface",
+      "format": "имя интерфейса до ':' с допустимыми '#', '-': «VQE#2-Lab»",
+      "role": "value",
+      "transform": null,
+      "confidence": "observed"
+    },
+    {
+      "path": "$.payload.body.src.ip",
+      "format": "IPv4 13.253.52.235",
+      "role": "value",
+      "transform": null,
+      "confidence": "observed"
+    },
+    {
+      "path": "$.payload.body.src.port",
+      "format": "целое после '/' в src-половине: 55896",
+      "role": "value",
+      "transform": null,
+      "confidence": "observed"
+    },
+    {
+      "path": "$.payload.body.dst.iface",
+      "format": "имя интерфейса «outside»",
+      "role": "value",
+      "transform": null,
+      "confidence": "observed"
+    },
+    {
+      "path": "$.payload.body.dst.ip",
+      "format": "IPv4 77.53.224.176",
+      "role": "value",
+      "transform": null,
+      "confidence": "observed"
+    },
+    {
+      "path": "$.payload.body.dst.port",
+      "format": "целое после '/' в dst-половине: 25000",
+      "role": "value",
+      "transform": null,
+      "confidence": "observed"
+    },
+    {
+      "path": "$.payload.body.acl_name",
+      "format": "значение в двойных кавычках после «by access-group »: VQE#2-Lab",
+      "role": "value",
+      "transform": "кавычки-литералы не входят в значение, содержимое не меняется",
+      "confidence": "observed"
+    },
+    {
+      "path": "$.payload.body.acl_hash1",
+      "format": "hex 0x0 — первый элемент «[0x0, 0x0]»",
+      "role": "value",
+      "transform": null,
+      "confidence": "observed"
+    },
+    {
+      "path": "$.payload.body.acl_hash2",
+      "format": "hex 0x0 — второй элемент «[0x0, 0x0]»",
+      "role": "value",
+      "transform": null,
+      "confidence": "observed"
+    },
+    {
+      "path": "$.payload.body.suffix",
+      "format": "описанный в документации 106023 суффикс user identity/FQDN после IP-адресов",
+      "role": "payload",
+      "transform": null,
+      "confidence": "hypothesis"
+    }
+  ],
+  "strategy": [
+    "Разделять конверт syslog и ASA-payload по литералам <PRI>, timestamp и «: »; отсутствие host в конверте считать допустимым вариантом.",
+    "Диспетчеризация по msg_id: статический литерал 106023 выбирает тело asa_106023_body, прочие msg_id в Family не принимаются.",
+    "Сохранять RAW без изменения: кавычки access-group и нулевые hex-значения не нормализовать.",
+    "Извлекать все значения только из токенов RAW; совпадение acl_name и src_iface не использовать как правило разбора.",
+    "Снимать конверт и тег отдельными слоями, тело 106023 разбирать одним слоем после них.",
+    "Не добавлять в грамматику ветви, не подтверждённые наблюдением; опциональность слоя соответствует required."
+  ],
+  "record_schema": [
+    {
+      "name": "raw",
+      "category": "dynamic",
+      "type": "string",
+      "required": true,
+      "source": "$"
+    },
+    {
+      "name": "pri",
+      "category": "dynamic",
+      "type": "integer",
+      "required": true,
+      "source": "$.header.pri"
+    },
+    {
+      "name": "timestamp",
+      "category": "dynamic",
+      "type": "timestamp",
+      "required": true,
+      "source": "$.header.timestamp"
+    },
+    {
+      "name": "msg_id",
+      "category": "static",
+      "type": "integer",
+      "required": true,
+      "source": "литерал 106023 в теге %ASA-<severity>-106023 (структура: $.payload.msg_id)"
+    },
+    {
+      "name": "severity",
+      "category": "dynamic",
+      "type": "integer",
+      "required": true,
+      "source": "$.payload.severity"
+    },
+    {
+      "name": "action",
+      "category": "dynamic",
+      "type": "string",
+      "required": true,
+      "source": "$.payload.body.action"
+    },
+    {
+      "name": "protocol",
+      "category": "dynamic",
+      "type": "string",
+      "required": true,
+      "source": "$.payload.body.protocol"
+    },
+    {
+      "name": "src_iface",
+      "category": "dynamic",
+      "type": "string",
+      "required": true,
+      "source": "$.payload.body.src.iface"
+    },
+    {
+      "name": "src_ip",
+      "category": "dynamic",
+      "type": "ipv4",
+      "required": true,
+      "source": "$.payload.body.src.ip"
+    },
+    {
+      "name": "src_port",
+      "category": "dynamic",
+      "type": "integer",
+      "required": true,
+      "source": "$.payload.body.src.port"
+    },
+    {
+      "name": "dst_iface",
+      "category": "dynamic",
+      "type": "string",
+      "required": true,
+      "source": "$.payload.body.dst.iface"
+    },
+    {
+      "name": "dst_ip",
+      "category": "dynamic",
+      "type": "ipv4",
+      "required": true,
+      "source": "$.payload.body.dst.ip"
+    },
+    {
+      "name": "dst_port",
+      "category": "dynamic",
+      "type": "integer",
+      "required": true,
+      "source": "$.payload.body.dst.port"
+    },
+    {
+      "name": "acl_name",
+      "category": "dynamic",
+      "type": "string",
+      "required": true,
+      "source": "$.payload.body.acl_name"
+    },
+    {
+      "name": "acl_hash1",
+      "category": "dynamic",
+      "type": "string",
+      "required": true,
+      "source": "$.payload.body.acl_hash1"
+    },
+    {
+      "name": "acl_hash2",
+      "category": "dynamic",
+      "type": "string",
+      "required": true,
+      "source": "$.payload.body.acl_hash2"
+    }
+  ],
+  "format_features": [
+    {
+      "property": "observed: PRI <132> присутствует, а поле host между timestamp и «:» отсутствует — разделитель «13:21:55: »",
+      "implication": "Конверт строится как <%{INT:pri}> + timestamp + «: » без обязательного IPV4-хоста; шаблон с host на этом RAW даёт no_match."
+    },
+    {
+      "property": "observed: timestamp в порядке MMM DD YYYY HH:MM:SS",
+      "implication": "Метка описывается MONTH+MONTHDAY+YEAR+TIME; порядок фиксирован, год обязателен."
+    },
+    {
+      "property": "observed: тег %ASA-<severity>-<msg_id>: содержит и severity, и msg_id",
+      "implication": "msg_id становится static-ключом Family (106023), severity — dynamic-полем; после тега обязателен хотя бы один пробел."
+    },
+    {
+      "property": "observed: тело 106023 = action + protocol + src iface:ip/port + dst iface:ip/port + by access-group \"name\" [hex, hex]; нет «access-list» и «hit-cnt»",
+      "implication": "Тело разбирается собственной грамматикой, грамматика 106100 неприменима."
+    },
+    {
+      "property": "observed: имя интерфейса содержит '#' и '-' (VQE#2-Lab) и отделено от IP двоеточием",
+      "implication": "Класс интерфейса должен исключать пробел, ':' и '/', иначе граница iface/IP/port разрушается."
+    },
+    {
+      "property": "observed: имя access-group в двойных кавычках и текстуально совпадает с src-интерфейсом",
+      "implication": "Кавычки — литералы слоя, содержимое захватывается отдельно (ASAQSTRING); совпадение значений не является условием разбора."
+    },
+    {
+      "property": "observed: хвост «[0x0, 0x0]» — ровно два hex-значения с префиксом 0x",
+      "implication": "Нужны две независимые hex-группы; 0x0 — валидное значение, а не отсутствие данных."
+    },
+    {
+      "property": "observed: severity 4 в теге согласуется с PRI 132 (facility 16, severity 4)",
+      "implication": "Оба значения извлекаются каждый из своего места; согласованность не заменяет извлечение."
+    },
+    {
+      "property": "hypothesis: документация 106023 допускает дополнительный суффикс user identity/FQDN после IP-адресов",
+      "implication": "В наблюдении суффикса нет; грамматика его не покрывает, появление такого суффикса даст residual и потребует расширения Family."
+    }
+  ],
+  "pitfalls": [
+    {
+      "name": "Конверт без host",
+      "mechanism": "Ожидание IPV4-хоста между timestamp и «:» даёт no_match на первом слое, а «:» после секунд легко принять за начало поля хоста.",
+      "remediation": "Разбирать конверт как <%{INT:pri}> + timestamp + «: » + остаток; host не предполагать, остаток передавать слою тега."
+    },
+    {
+      "name": "Двойное двоеточие timestamp и тега",
+      "mechanism": "В строке два двоеточия подряд с пробелом («13:21:55: %ASA-...»); неаккуратная граница относит «%ASA-4-106023» ко времени или теряет разделитель.",
+      "remediation": "TIME захватывается строго до первого «:», разделитель — литерал «: » с обязательным пробелом, остаток — ASAPAYLOAD."
+    },
+    {
+      "name": "Совпадение имени интерфейса и access-group",
+      "mechanism": "VQE#2-Lab встречается дважды; при объединении полей одно значение маскирует другое, а нестрогий класс символов уводит часть имени в IP.",
+      "remediation": "Извлекать src_iface и acl_name независимыми captures с разными границами (':' против кавычек); равенство значений не считать условием."
+    },
+    {
+      "name": "Граница iface:ip/port",
+      "mechanism": "Имя интерфейса содержит '#' и '-', IP — точки; при классе [^ ]+ двоеточие и слэш поглощаются, и IP/порт перестают извлекаться.",
+      "remediation": "Класс ASAIFACE исключает пробел, ':' и '/'; после ':' обязателен IPV4, после '/' — INT."
+    },
+    {
+      "name": "Нулевые hex-значения",
+      "mechanism": "0x0 внешне похож на отсутствующее значение и легко нормализуется в null или 0 без основания.",
+      "remediation": "Сохранять acl_hash1/acl_hash2 как строки «0x0» из RAW; null не приравнивать к нулю."
+    },
+    {
+      "name": "Кавычки access-group",
+      "mechanism": "Кавычки — синтаксис, а не часть имени; захват вместе с кавычками делает acl_name несравнимым с другими записями.",
+      "remediation": "Кавычки оставлять литералами слоя, содержимое захватывать как [^\"]+."
+    },
+    {
+      "name": "Вариант записи действия",
+      "mechanism": "106100 пишет «denied», 106023 — «Deny»; перенесённый шаблон не совпадёт, а регистронезависимое сравнение склеит разные формы.",
+      "remediation": "Считать action dynamic-полем со значением из RAW (WORD), не подставлять литерал и не менять регистр."
+    },
+    {
+      "name": "Диспетчеризация по msg_id",
+      "mechanism": "106023 и 106100 имеют разные тела и разные конверты; разбор без выбора по msg_id даёт частичное совпадение или чужую грамматику.",
+      "remediation": "Фиксировать msg_id статическим литералом Family и выбирать тело по нему; несовпадение msg_id — отказ Family, а не ослабление шаблона."
+    }
+  ],
+  "parser": {
+    "patterns": [
+      {
+        "name": "ASATIMESTAMPYEAR",
+        "definition": "%{MONTH} +%{MONTHDAY} +%{YEAR} +%{TIME}",
+        "description": "Метка времени syslog с годом после дня: «Feb 12 2023 13:21:55» (MMM DD YYYY HH:MM:SS). Границы: только этот порядок; RFC3164 без года не покрывает."
+      },
+      {
+        "name": "ASATAG",
+        "definition": "%ASA-%{INT:severity}-%{INT:msg_id}:",
+        "description": "Тег сообщения ASA «%ASA-4-106023:»; извлекает severity и msg_id, msg_id — ключ Family."
+      },
+      {
+        "name": "ASAPAYLOAD",
+        "definition": "[\\s\\S]+",
+        "description": "Непустой остаток строки между явными литералами конверта и тега; используется только как содержимое слоя."
+      },
+      {
+        "name": "ASAIFACE",
+        "definition": "[^\\s:/]+",
+        "description": "Имя интерфейса ASA в теле 106023 («VQE#2-Lab», «outside»); исключает пробел, ':' и '/', чтобы граница интерфейс/IP/порт была однозначной."
+      },
+      {
+        "name": "ASAQSTRING",
+        "definition": "[^\"]+",
+        "description": "Непустое содержимое двойных кавычек в теле 106023 (имя access-group); кавычки остаются литералами слоя."
+      },
+      {
+        "name": "HEXREF",
+        "definition": "0x[0-9A-Fa-f]+",
+        "description": "Hex-значение с префиксом 0x из хвоста «[0x0, 0x0]», включая нулевые 0x0."
+      }
+    ],
+    "layers": [
+      {
+        "name": "syslog_envelope",
+        "source": "raw",
+        "pattern": "<%{INT:pri}>%{ASATIMESTAMPYEAR:timestamp}: +%{ASAPAYLOAD:payload}"
+      },
+      {
+        "name": "asa_tag",
+        "source": "payload",
+        "pattern": "%{ASATAG} +%{ASAPAYLOAD:body}"
+      },
+      {
+        "name": "asa_106023_body",
+        "source": "body",
+        "pattern": "%{WORD:action} %{WORD:protocol} src %{ASAIFACE:src_iface}:%{IPV4:src_ip}/%{INT:src_port} dst %{ASAIFACE:dst_iface}:%{IPV4:dst_ip}/%{INT:dst_port} by access-group \"%{ASAQSTRING:acl_name}\" \\[%{HEXREF:acl_hash1}, %{HEXREF:acl_hash2}\\]"
+      }
+    ]
+  }
+}

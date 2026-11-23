@@ -1,0 +1,186 @@
+{
+  "total_lines": 1763,
+  "revisions": [
+    {
+      "revision": "asa_acl_106023_deny@5",
+      "coverage": 1729,
+      "unique_coverage": 766,
+      "layers": [
+        "syslog_envelope_106023",
+        "asa_106023_acl_deny_body_v5"
+      ],
+      "schema_fields": 20,
+      "pattern_count": 24
+    },
+    {
+      "revision": "asa_acl_106023_deny@4",
+      "coverage": 963,
+      "unique_coverage": 0,
+      "layers": [
+        "syslog_envelope_106023",
+        "asa_106023_acl_deny_body_v4"
+      ],
+      "schema_fields": 19,
+      "pattern_count": 23
+    },
+    {
+      "revision": "asa_acl_106023_deny@3",
+      "coverage": 961,
+      "unique_coverage": 0,
+      "layers": [
+        "syslog_envelope_106023",
+        "asa_106023_acl_deny_body_v3"
+      ],
+      "schema_fields": 19,
+      "pattern_count": 22
+    },
+    {
+      "revision": "asa_acl_106023_deny@2",
+      "coverage": 913,
+      "unique_coverage": 0,
+      "layers": [
+        "syslog_envelope_106023",
+        "asa_106023_acl_deny_body"
+      ],
+      "schema_fields": 17,
+      "pattern_count": 21
+    },
+    {
+      "revision": "asa_acl_106023_deny@1",
+      "coverage": 903,
+      "unique_coverage": 0,
+      "layers": [
+        "syslog_envelope_106023",
+        "asa_106023_acl_deny_body"
+      ],
+      "schema_fields": 16,
+      "pattern_count": 19
+    },
+    {
+      "revision": "asa_acl_106100_verdict@3",
+      "coverage": 30,
+      "unique_coverage": 4,
+      "layers": [
+        "syslog_envelope",
+        "asa_acl_verdict_header",
+        "asa_conn_detail"
+      ],
+      "schema_fields": 19,
+      "pattern_count": 24
+    },
+    {
+      "revision": "asa_acl_106100_verdict@2",
+      "coverage": 26,
+      "unique_coverage": 0,
+      "layers": [
+        "syslog_envelope",
+        "asa_acl_verdict_header",
+        "asa_conn_detail"
+      ],
+      "schema_fields": 19,
+      "pattern_count": 23
+    },
+    {
+      "revision": "asa_acl_106100_verdict@1",
+      "coverage": 22,
+      "unique_coverage": 0,
+      "layers": [
+        "syslog_envelope",
+        "asa_acl_verdict_header",
+        "asa_conn_detail"
+      ],
+      "schema_fields": 19,
+      "pattern_count": 23
+    },
+    {
+      "revision": "firepower_connection_event_ipssi@1",
+      "coverage": 4,
+      "unique_coverage": 4,
+      "layers": [
+        "syslog_envelope_ipssi",
+        "ipssi_connection_kv"
+      ],
+      "schema_fields": 31,
+      "pattern_count": 14
+    }
+  ],
+  "match_multiplicity": {
+    "1": 774,
+    "2": 6,
+    "3": 70,
+    "4": 10,
+    "5": 903
+  },
+  "same_family_pair_overlaps": [
+    {
+      "left": "asa_acl_106023_deny@5",
+      "right": "asa_acl_106023_deny@4",
+      "count": 963
+    },
+    {
+      "left": "asa_acl_106023_deny@5",
+      "right": "asa_acl_106023_deny@3",
+      "count": 961
+    },
+    {
+      "left": "asa_acl_106023_deny@5",
+      "right": "asa_acl_106023_deny@2",
+      "count": 913
+    },
+    {
+      "left": "asa_acl_106023_deny@5",
+      "right": "asa_acl_106023_deny@1",
+      "count": 903
+    },
+    {
+      "left": "asa_acl_106023_deny@4",
+      "right": "asa_acl_106023_deny@3",
+      "count": 961
+    },
+    {
+      "left": "asa_acl_106023_deny@4",
+      "right": "asa_acl_106023_deny@2",
+      "count": 913
+    },
+    {
+      "left": "asa_acl_106023_deny@4",
+      "right": "asa_acl_106023_deny@1",
+      "count": 903
+    },
+    {
+      "left": "asa_acl_106023_deny@3",
+      "right": "asa_acl_106023_deny@2",
+      "count": 913
+    },
+    {
+      "left": "asa_acl_106023_deny@3",
+      "right": "asa_acl_106023_deny@1",
+      "count": 903
+    },
+    {
+      "left": "asa_acl_106023_deny@2",
+      "right": "asa_acl_106023_deny@1",
+      "count": 903
+    },
+    {
+      "left": "asa_acl_106100_verdict@3",
+      "right": "asa_acl_106100_verdict@2",
+      "count": 26
+    },
+    {
+      "left": "asa_acl_106100_verdict@3",
+      "right": "asa_acl_106100_verdict@1",
+      "count": 22
+    },
+    {
+      "left": "asa_acl_106100_verdict@2",
+      "right": "asa_acl_106100_verdict@1",
+      "count": 22
+    }
+  ],
+  "capture_conflicts": [],
+  "capture_conflict_count": 0,
+  "distinct_family_multiplicity": {
+    "1": 1763
+  }
+}

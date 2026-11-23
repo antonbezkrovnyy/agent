@@ -1,0 +1,550 @@
+{
+  "essence": "Событие с устройства 10.11.200.67 (тег сообщения ASA, уровень 4, внутренний идентификатор 106100) фиксирует решение политики доступа по TCP-потоку: правило ACL с именем CSM_FW_ACL_ (подчёркивание — часть имени) запретило (denied) соединение от источника 131.9.85.43:14015 на метке интерфейса Outside к назначению 191.189.210.52:22 на метке PUB_DMZ. Результат — соединение не установлено. Счётчик попаданий по этому потоку равен 1 и помечен как первое попадание (first hit), то есть это первое событие серии с последующей агрегацией; в хвосте приложены два 32-битных hex-идентификатора 0x6921d058 и 0x00000000 (семантика по строке не определима — гипотеза: служебные маркеры/хеши потока; нулевое значение не означает отсутствие значения).",
+  "structure": [
+    {
+      "path": "$",
+      "format": "одна текстовая строка, позиционная (space-delimited), без key=value",
+      "role": "payload",
+      "transform": null,
+      "confidence": "observed"
+    },
+    {
+      "path": "$.hdr.pri",
+      "format": "syslog PRI-токен <POSINT>",
+      "role": "envelope",
+      "transform": null,
+      "confidence": "observed"
+    },
+    {
+      "path": "$.hdr.timestamp",
+      "format": "дата-время MMM DD YYYY HH:MM:SS (BSD-подобный вариант с годом в середине)",
+      "role": "envelope",
+      "transform": null,
+      "confidence": "observed"
+    },
+    {
+      "path": "$.hdr.origin",
+      "format": "IPv4 dotted-quad в роли адреса отправителя/релея",
+      "role": "envelope",
+      "transform": null,
+      "confidence": "observed"
+    },
+    {
+      "path": "$.hdr.sep",
+      "format": "разделитель-пунктуация ' : ' между origin и текстом сообщения",
+      "role": "envelope",
+      "transform": null,
+      "confidence": "hypothesis"
+    },
+    {
+      "path": "$.payload",
+      "format": "текст сообщения от '%' до конца строки, без экранирования и без вложенных форматов",
+      "role": "payload",
+      "transform": null,
+      "confidence": "observed"
+    },
+    {
+      "path": "$.payload.mnemonic",
+      "format": "самоописывающийся префикс %TAG-severity-msg_id:",
+      "role": "envelope",
+      "transform": null,
+      "confidence": "observed"
+    },
+    {
+      "path": "$.payload.mnemonic.severity",
+      "format": "целое 0-7 внутри mnemonic",
+      "role": "value",
+      "transform": null,
+      "confidence": "observed"
+    },
+    {
+      "path": "$.payload.mnemonic.msg_id",
+      "format": "цифровой идентификатор события фиксированной ширины",
+      "role": "value",
+      "transform": null,
+      "confidence": "observed"
+    },
+    {
+      "path": "$.payload.body",
+      "format": "позиционная грамматика: поля разделены пробелами и пунктуацией, без имён полей",
+      "role": "payload",
+      "transform": null,
+      "confidence": "observed"
+    },
+    {
+      "path": "$.payload.body.acl_name",
+      "format": "непробельный opaque-токен",
+      "role": "value",
+      "transform": null,
+      "confidence": "observed"
+    },
+    {
+      "path": "$.payload.body.action",
+      "format": "слово из закрытого набора denied/permitted",
+      "role": "value",
+      "transform": null,
+      "confidence": "observed"
+    },
+    {
+      "path": "$.payload.body.protocol",
+      "format": "слово-протокол",
+      "role": "value",
+      "transform": null,
+      "confidence": "observed"
+    },
+    {
+      "path": "$.payload.body.src_endpoint.iface",
+      "format": "метка интерфейса, может содержать '/'",
+      "role": "value",
+      "transform": null,
+      "confidence": "observed"
+    },
+    {
+      "path": "$.payload.body.src_endpoint.ip",
+      "format": "IPv4",
+      "role": "value",
+      "transform": null,
+      "confidence": "observed"
+    },
+    {
+      "path": "$.payload.body.src_endpoint.port",
+      "format": "целое в круглых скобках",
+      "role": "value",
+      "transform": null,
+      "confidence": "observed"
+    },
+    {
+      "path": "$.payload.body.dst_endpoint.iface",
+      "format": "метка интерфейса, может содержать '/'",
+      "role": "value",
+      "transform": null,
+      "confidence": "observed"
+    },
+    {
+      "path": "$.payload.body.dst_endpoint.ip",
+      "format": "IPv4",
+      "role": "value",
+      "transform": null,
+      "confidence": "observed"
+    },
+    {
+      "path": "$.payload.body.dst_endpoint.port",
+      "format": "целое в круглых скобках",
+      "role": "value",
+      "transform": null,
+      "confidence": "observed"
+    },
+    {
+      "path": "$.payload.body.hit_count",
+      "format": "целое после литерала hit-cnt",
+      "role": "value",
+      "transform": null,
+      "confidence": "observed"
+    },
+    {
+      "path": "$.payload.body.hit_marker",
+      "format": "вариантный текстовый маркер режима счётчика (first hit / <n>-second burst)",
+      "role": "value",
+      "transform": null,
+      "confidence": "inferred"
+    },
+    {
+      "path": "$.payload.body.hex_ids[0]",
+      "format": "hex-литерал 0x[0-9A-Fa-f]+",
+      "role": "value",
+      "transform": null,
+      "confidence": "observed"
+    },
+    {
+      "path": "$.payload.body.hex_ids[1]",
+      "format": "hex-литерал 0x[0-9A-Fa-f]+, значение 0 не равно отсутствию значения",
+      "role": "value",
+      "transform": null,
+      "confidence": "observed"
+    }
+  ],
+  "strategy": [
+    "Границу конверт/payload проводить по появлению префикса %TAG-severity-msg_id:; всё до него — конверт, всё от него — payload.",
+    "Конверт разбирать отдельным слоем и сохранять его поля (PRI-токен, timestamp, origin) без декодирования и без нормализации времени.",
+    "Разделитель между origin и сообщением делать опциональным и относить к residual, а не к обязательным полям.",
+    "Диспетчеризацию выполнять по msg_id из mnemonic; тег устройства считать литералом семейства, а не переменным полем.",
+    "Тело разбирать позиционно, составными именованными конструкциями (ACL-заголовок, endpoint, счётчик, hex-пара), а не одной регуляркой.",
+    "Endpoint моделировать как составное значение метка/адрес(порт) с опциональным портом и правым якорем на адрес.",
+    "RAW хранить дословно и неизменно; cast чисел, unescape и decode выполнять только отдельными явными шагами поверх копии.",
+    "Unescape/decode-слои подключать только при фактическом наличии экранирования или вложенного формата; при отсутствии фиксировать transform=null.",
+    "Hex-идентификаторы сохранять строкой в исходной записи, без приведения к числу.",
+    "Счётчик попаданий и порты хранить числом только после захвата исходного токена; 0 и null не смешивать.",
+    "Поля, отсутствие которых допускается вариантом грамматики (метки интерфейсов, порты, hex-пара, элементы конверта), помечать необязательными.",
+    "Незахваченные литералы и пунктуацию относить в residual, но не терять из RAW."
+  ],
+  "record_schema": [
+    {
+      "name": "raw",
+      "category": "dynamic",
+      "type": "string",
+      "required": true,
+      "source": "$"
+    },
+    {
+      "name": "msg_id",
+      "category": "static",
+      "type": "string",
+      "required": true,
+      "source": "$.payload.mnemonic.msg_id"
+    },
+    {
+      "name": "severity",
+      "category": "dynamic",
+      "type": "integer",
+      "required": true,
+      "source": "$.payload.mnemonic.severity"
+    },
+    {
+      "name": "origin_host",
+      "category": "dynamic",
+      "type": "string",
+      "required": false,
+      "source": "$.hdr.origin"
+    },
+    {
+      "name": "timestamp_raw",
+      "category": "dynamic",
+      "type": "string",
+      "required": false,
+      "source": "$.hdr.timestamp"
+    },
+    {
+      "name": "pri_token",
+      "category": "dynamic",
+      "type": "integer",
+      "required": false,
+      "source": "$.hdr.pri"
+    },
+    {
+      "name": "action",
+      "category": "dynamic",
+      "type": "string",
+      "required": true,
+      "source": "$.payload.body.action"
+    },
+    {
+      "name": "protocol",
+      "category": "dynamic",
+      "type": "string",
+      "required": true,
+      "source": "$.payload.body.protocol"
+    },
+    {
+      "name": "acl_name",
+      "category": "dynamic",
+      "type": "string",
+      "required": true,
+      "source": "$.payload.body.acl_name"
+    },
+    {
+      "name": "src_iface",
+      "category": "dynamic",
+      "type": "string",
+      "required": false,
+      "source": "$.payload.body.src_endpoint.iface"
+    },
+    {
+      "name": "src_ip",
+      "category": "dynamic",
+      "type": "string",
+      "required": true,
+      "source": "$.payload.body.src_endpoint.ip"
+    },
+    {
+      "name": "src_port",
+      "category": "dynamic",
+      "type": "integer",
+      "required": false,
+      "source": "$.payload.body.src_endpoint.port"
+    },
+    {
+      "name": "dst_iface",
+      "category": "dynamic",
+      "type": "string",
+      "required": false,
+      "source": "$.payload.body.dst_endpoint.iface"
+    },
+    {
+      "name": "dst_ip",
+      "category": "dynamic",
+      "type": "string",
+      "required": true,
+      "source": "$.payload.body.dst_endpoint.ip"
+    },
+    {
+      "name": "dst_port",
+      "category": "dynamic",
+      "type": "integer",
+      "required": false,
+      "source": "$.payload.body.dst_endpoint.port"
+    },
+    {
+      "name": "hit_count",
+      "category": "dynamic",
+      "type": "integer",
+      "required": true,
+      "source": "$.payload.body.hit_count"
+    },
+    {
+      "name": "hit_marker",
+      "category": "dynamic",
+      "type": "string",
+      "required": false,
+      "source": "$.payload.body.hit_marker"
+    },
+    {
+      "name": "hex_id_1",
+      "category": "dynamic",
+      "type": "string",
+      "required": false,
+      "source": "$.payload.body.hex_ids[0]"
+    },
+    {
+      "name": "hex_id_2",
+      "category": "dynamic",
+      "type": "string",
+      "required": false,
+      "source": "$.payload.body.hex_ids[1]"
+    }
+  ],
+  "format_features": [
+    {
+      "property": "Плоская позиционная строка: поля разделены только пробелами и пунктуацией, без key=value (наблюдение)",
+      "implication": "Смысл поля определяется позицией относительно соседних литералов; разбор обязан быть позиционным и анкоренным на литералы."
+    },
+    {
+      "property": "Присутствует PRI-конверт в угловых скобках как упакованное число (наблюдение)",
+      "implication": "PRI хранится как сырой токен; декодирование facility/severity в базовом разборе не выполняется."
+    },
+    {
+      "property": "Timestamp содержит год в середине записи (наблюдение)",
+      "implication": "Нужен отдельный составной шаблон с годом в этой позиции; год нельзя подставлять из времени приёма, альтернативу без года описывать отдельно."
+    },
+    {
+      "property": "Есть самоописывающийся mnemonic %TAG-severity-msg_id: (наблюдение)",
+      "implication": "Появляется единственный стабильный идентификатор семейства, пригодный для диспетчеризации до разбора тела."
+    },
+    {
+      "property": "Severity кодируется дважды: в PRI и в mnemonic (вывод)",
+      "implication": "Два независимых источника; severity извлекается из mnemonic, PRI не сверяется и не перезаписывается."
+    },
+    {
+      "property": "Составные адреса вида iface/ip(port) с двумя внутренними разделителями (наблюдение)",
+      "implication": "Границы значения неоднозначны; требуется правый якорь на IPv4 и опциональную скобочную группу порта."
+    },
+    {
+      "property": "Хвост — ограниченная скобками пара hex-литералов (наблюдение)",
+      "implication": "Хвост надёжно отделяется от свободного текста, но остаётся опциональным; hex сохраняется строкой в исходном регистре."
+    },
+    {
+      "property": "Отсутствуют экранирование, кавычки, вложенные json/xml/base64 (наблюдение)",
+      "implication": "Unescape/decode-слои неприменимы, фиксируется transform=null и отсутствие рекурсивного разбора."
+    },
+    {
+      "property": "Разделитель между origin и mnemonic может быть вкладом релея (гипотеза)",
+      "implication": "Разделитель опционален и уходит в residual; диспетчеризация идёт по mnemonic, а не по позиции разделителя."
+    },
+    {
+      "property": "Счётчик попаданий подразумевает серию событий по одному потоку (гипотеза)",
+      "implication": "Сообщение может быть агрегатом, а не единичным drop-событием; маркер режима счётчика — вариантная часть, а не константа."
+    }
+  ],
+  "pitfalls": [
+    {
+      "name": "Дублирование severity",
+      "mechanism": "PRI-число и -<sev>- в mnemonic кодируют severity дважды и в общем случае могут расходиться.",
+      "remediation": "severity брать только из mnemonic; PRI хранить как сырой токен без декодирования и без сверки."
+    },
+    {
+      "name": "Слэш внутри метки интерфейса",
+      "mechanism": "Метка вида GigabitEthernet0/1 содержит '/', который неотличим от разделителя iface/ip, из-за чего граница значения размывается.",
+      "remediation": "Правый якорь на %{IPV4} с последующей опциональной скобочной группой порта; метку захватывать как последовательность непробельных сегментов через '/'."
+    },
+    {
+      "name": "Опциональность порта",
+      "mechanism": "Для протоколов без портов скобочная группа отсутствует; скобки могут нести иной смысл.",
+      "remediation": "Порт оформлять опциональной группой и помечать required=false; отдельно не подставлять 0 при отсутствии."
+    },
+    {
+      "name": "Границы ACL-имени",
+      "mechanism": "Имя отделяется пробелом и может оканчиваться знаком подчёркивания или содержать иные символы, что провоцирует обрезку токена или захват соседнего поля.",
+      "remediation": "Имя — непробельный opaque-токен, без trim, без нормализации регистра и без снятия подчёркивания."
+    },
+    {
+      "name": "Разделитель origin и сообщения",
+      "mechanism": "Разделитель может отсутствовать, быть другим по виду или быть добавленным релеем; origin может быть именем хоста.",
+      "remediation": "Опциональная группа разделителя; диспетчеризация по mnemonic, origin — необязательное поле."
+    },
+    {
+      "name": "Timestamp: год и вариант записи",
+      "mechanism": "Возможны варианты с годом в середине строки, без года и ISO-подобные; локаль месяца влияет на разбор.",
+      "remediation": "Отдельный шаблон с обязательным годом в этой позиции плюс альтернатива без года; год не выводить из времени приёма и не нормализовать в TZ."
+    },
+    {
+      "name": "Агрегация счётчика",
+      "mechanism": "Рядом с hit-cnt стоит текстовый маркер, который сам содержит цифры (n-second burst), из-за чего цифры маркера могут попасть в счётчик.",
+      "remediation": "Сначала захватывать hit-cnt с целым, затем маркер как отдельный необязательный текстовый capture."
+    },
+    {
+      "name": "Ноль против отсутствия",
+      "mechanism": "hit-cnt 0 и hex 0x00000000 — валидные значения, которые легко спутать с отсутствием данных.",
+      "remediation": "Числовые поля хранить числом; отсутствие выражать только null и никогда не подменять нулём."
+    },
+    {
+      "name": "Необязательный hex-хвост",
+      "mechanism": "Скобочная пара может отсутствовать; различаются регистр 0x/0X и количество пробелов после запятой.",
+      "remediation": "Хвост оформлять опциональной группой, hex сохранять строкой в исходном виде."
+    },
+    {
+      "name": "Направление потока",
+      "mechanism": "Единственный маркер направления — стрелка; при иных отступах шаблоны источника и назначения слипаются.",
+      "remediation": "Литерал стрелки с допуском пробелов вокруг; сторона определяется позицией относительно него."
+    },
+    {
+      "name": "Литерал процента и Grok-синтаксис",
+      "mechanism": "Начальный '%' mnemonic конфликтует с синтаксисом %{...}, что ломает шаблон.",
+      "remediation": "Экранировать процент (%%), а mnemonic выносить в отдельный слой с анкором начала строки."
+    },
+    {
+      "name": "Ширина msg_id",
+      "mechanism": "Идентификатор выглядит фиксированной ширины, но у других семейств длина иная, возможны ведущие нули.",
+      "remediation": "msg_id хранить строкой переменной ширины, без int-cast и без хардкода ширины."
+    },
+    {
+      "name": "Переменные пробелы и свободный текст",
+      "mechanism": "Между токенами возможны несколько подряд идущих пробелов и нестандартные отступы.",
+      "remediation": "Все разделители оформлять через допуск пробелов; capture-поля не включают пробельные символы."
+    }
+  ],
+  "parser": {
+    "patterns": [
+      {
+        "name": "SYSLOGPRI",
+        "definition": "<%{POSINT:priority}>",
+        "description": "PRI-конверт как сырой токен; facility/severity не декодируются."
+      },
+      {
+        "name": "SYSLOGTIMEWITHYEAR",
+        "definition": "%{MONTH} +%{MONTHDAY} %{YEAR} %{TIME}",
+        "description": "Timestamp с годом в середине строки — вариант, отсутствующий во встроенном SYSLOGTIMESTAMP."
+      },
+      {
+        "name": "ORIGINADDR",
+        "definition": "(?:%{IPV4}|%{HOSTNAME})",
+        "description": "Адрес отправителя/релея: IPv4 или имя хоста."
+      },
+      {
+        "name": "ENVELOPESEP",
+        "definition": "\\s*:\\s*",
+        "description": "Необязательный разделитель между origin и сообщением; в результат не выводится."
+      },
+      {
+        "name": "MNEMONIC",
+        "definition": "%%(?<vendor_tag>[A-Za-z]+)-(?<severity>%{INT})-(?<msg_id>[0-9]+):",
+        "description": "Самоописывающийся префикс сообщения: тег, severity, msg_id; литеральный процент записан как %%."
+      },
+      {
+        "name": "ACLHEAD",
+        "definition": "access-list %{NOTSPACE:acl_name} %{WORD:action} %{WORD:protocol}",
+        "description": "Заголовок тела: имя ACL, решение, протокол."
+      },
+      {
+        "name": "IFACEPATH",
+        "definition": "[^/\\s]+(?:/[^/\\s]+)*",
+        "description": "Метка интерфейса, допускающая '/' внутри, но не заходящая на разделитель iface/ip."
+      },
+      {
+        "name": "SRCENDPOINT",
+        "definition": "%{IFACEPATH:src_iface}/%{IPV4:src_ip}(?:\\(%{INT:src_port}\\))?",
+        "description": "Источник: интерфейс, адрес и опциональный порт."
+      },
+      {
+        "name": "DSTENDPOINT",
+        "definition": "%{IFACEPATH:dst_iface}/%{IPV4:dst_ip}(?:\\(%{INT:dst_port}\\))?",
+        "description": "Назначение: та же структура с отдельными именами полей."
+      },
+      {
+        "name": "FLOWARROW",
+        "definition": "->",
+        "description": "Литерал направления потока."
+      },
+      {
+        "name": "HITMARKER",
+        "definition": "first hit|[0-9]+-second burst",
+        "description": "Вариантный текстовый маркер режима счётчика."
+      },
+      {
+        "name": "HITBLOCK",
+        "definition": "hit-cnt %{INT:hit_count}(?: +%{HITMARKER:hit_marker})?",
+        "description": "Счётчик попаданий и опциональный маркер."
+      },
+      {
+        "name": "HEXTOKEN",
+        "definition": "0[xX][0-9A-Fa-f]+",
+        "description": "Hex-литерал, сохраняемый строкой в исходном виде."
+      },
+      {
+        "name": "HEXPAIR",
+        "definition": "\\[%{HEXTOKEN:hex_id_1}, *%{HEXTOKEN:hex_id_2}\\]",
+        "description": "Опциональная скобочная пара hex-идентификаторов."
+      },
+      {
+        "name": "BODY106100",
+        "definition": "%{ACLHEAD} %{SRCENDPOINT} +%{FLOWARROW} +%{DSTENDPOINT} +%{HITBLOCK}(?: +%{HEXPAIR})?",
+        "description": "Композиция тела семейства из вложенных конструкций — эквивалент последовательности слоёв разбора тела."
+      }
+    ],
+    "layers": [
+      {
+        "name": "envelope_pri",
+        "source": "raw",
+        "pattern": "^%{SYSLOGPRI}(?<l1_rest>.+)$"
+      },
+      {
+        "name": "envelope_timestamp",
+        "source": "l1_rest",
+        "pattern": "^%{SYSLOGTIMEWITHYEAR:timestamp_raw}(?<l2_rest>.+)$"
+      },
+      {
+        "name": "envelope_origin",
+        "source": "l2_rest",
+        "pattern": "^(?:%{ORIGINADDR:origin_host})?(?:%{ENVELOPESEP}:sep)?\\s*(?<l3_rest>%%.*)$"
+      },
+      {
+        "name": "message_mnemonic",
+        "source": "l3_rest",
+        "pattern": "^%{MNEMONIC}\\s*(?<l4_rest>.+)$"
+      },
+      {
+        "name": "body_aclhead",
+        "source": "l4_rest",
+        "pattern": "^%{ACLHEAD}\\s+(?<l5_rest>.+)$"
+      },
+      {
+        "name": "body_src_endpoint",
+        "source": "l5_rest",
+        "pattern": "^%{SRCENDPOINT}\\s*%{FLOWARROW}\\s*(?<l6_rest>.+)$"
+      },
+      {
+        "name": "body_dst_endpoint",
+        "source": "l6_rest",
+        "pattern": "^%{DSTENDPOINT}\\s+(?<l7_rest>.+)$"
+      },
+      {
+        "name": "body_hitblock",
+        "source": "l7_rest",
+        "pattern": "^%{HITBLOCK}\\s*(?<l8_rest>.*)$"
+      },
+      {
+        "name": "body_hexpair",
+        "source": "l8_rest",
+        "pattern": "^(?:%{HEXPAIR})?$"
+      }
+    ]
+  }
+}

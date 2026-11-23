@@ -1,0 +1,389 @@
+{
+  "essence": "Событие фильтрации трафика на сетевом шлюзе: TCP-пакет от 131.9.85.43:14015 (зона/интерфейс Outside) в адрес 191.189.210.52:22 (зона PUB_DMZ) не был пропущен правилом списка доступа CSM_FW_ACL_ (действие denied). Счётчик попаданий в это правило равен 1 и зафиксировано первое попадание; в конце — непрозрачная пара hex-значений. Участники: устройство-источник записи (10.11.200.67), правило ACL (CSM_FW_ACL_), инициатор соединения (src), получатель (dst). Результат: соединение отклонено; метка события — severity 4 (warning), время записи 2023-02-12 13:00:30 без указания зоны.",
+  "structure": [
+    {
+      "path": "$",
+      "format": "одна строка, syslog-подобная запись без предположения о производителе",
+      "role": "envelope",
+      "transform": null,
+      "confidence": "observed"
+    },
+    {
+      "path": "$.pri",
+      "format": "<N> — десятичный PRI",
+      "role": "envelope",
+      "transform": "int-parse; facility = N >> 3; severity = N & 7 (132 → facility 16, severity 4)",
+      "confidence": "observed"
+    },
+    {
+      "path": "$.timestamp",
+      "format": "BSD/RFC3164-подобный timestamp с 4-значным годом: Mmm DD YYYY HH:MM:SS, без TZ и долей секунды",
+      "role": "envelope",
+      "transform": "разбор по явному шаблону Mmm DD YYYY HH:MM:SS → naive datetime, зона unknown",
+      "confidence": "observed"
+    },
+    {
+      "path": "$.host",
+      "format": "IPv4-литерал в слоте hostname",
+      "role": "envelope",
+      "transform": null,
+      "confidence": "hypothesis"
+    },
+    {
+      "path": "$.sep",
+      "format": "разделитель « : » (двоеточие с пробелами)",
+      "role": "envelope",
+      "transform": null,
+      "confidence": "observed"
+    },
+    {
+      "path": "$.header",
+      "format": "%TAG-SEV-MSGID: — трёхчастный заголовок сообщения",
+      "role": "envelope",
+      "transform": "split по '-', отбрасывание ведущего '%' и завершающего ':'",
+      "confidence": "observed"
+    },
+    {
+      "path": "$.body",
+      "format": "неструктурированный текст с фиксированным порядком ключевых слов и позиционных полей (грамматика конкретного msg_id)",
+      "role": "payload",
+      "transform": null,
+      "confidence": "inferred"
+    },
+    {
+      "path": "$.body.kw_acl",
+      "format": "литеральное ключевое слово access-list",
+      "role": "value",
+      "transform": null,
+      "confidence": "observed"
+    },
+    {
+      "path": "$.body.acl_name",
+      "format": "идентификатор (буквы/цифры/подчёркивание, в т.ч. конечный '_')",
+      "role": "value",
+      "transform": null,
+      "confidence": "observed"
+    },
+    {
+      "path": "$.body.action",
+      "format": "литерал из перечня действий (denied)",
+      "role": "value",
+      "transform": null,
+      "confidence": "inferred"
+    },
+    {
+      "path": "$.body.protocol",
+      "format": "имя протокола (возможна числовая форма)",
+      "role": "value",
+      "transform": null,
+      "confidence": "observed"
+    },
+    {
+      "path": "$.body.src_endpoint",
+      "format": "составное поле ifname/addr(port)",
+      "role": "value",
+      "transform": "split на interface, ip, port по последнему '/' и по скобкам",
+      "confidence": "inferred"
+    },
+    {
+      "path": "$.body.direction",
+      "format": "литеральный маркер направления '->'",
+      "role": "value",
+      "transform": null,
+      "confidence": "observed"
+    },
+    {
+      "path": "$.body.dst_endpoint",
+      "format": "составное поле ifname/addr(port)",
+      "role": "value",
+      "transform": "split на interface, ip, port по последнему '/' и по скобкам",
+      "confidence": "inferred"
+    },
+    {
+      "path": "$.body.hit",
+      "format": "пара «ключ hit-cnt + целое число»",
+      "role": "value",
+      "transform": "int-parse значения после ключа",
+      "confidence": "inferred"
+    },
+    {
+      "path": "$.body.hit_scope",
+      "format": "вариативный текстовый квалификатор попаданий (first hit либо N second interval)",
+      "role": "value",
+      "transform": null,
+      "confidence": "hypothesis"
+    },
+    {
+      "path": "$.body.opaque_ids",
+      "format": "квадратные скобки, два 32-битных hex через запятую и пробел",
+      "role": "value",
+      "transform": null,
+      "confidence": "observed"
+    }
+  ],
+  "strategy": [
+    "Хранить RAW неизменным, фиксируя PRI-декод, разбор timestamp и любой unescaping как отдельные именованные преобразования со ссылкой на RAW.",
+    "Границу конверта определять по маркеру начала payload '%TAG-', а не по фиксированным смещениям.",
+    "Разделитель хост/payload считать вариативным по пробелам вокруг ':'.",
+    "Заголовок %TAG-SEV-MSGID: разбирать на три компонента и использовать msg_id как ключ диспетчеризации грамматики тела.",
+    "Severity из PRI и severity из заголовка хранить как независимые поля и отражать расхождение явно.",
+    "Использовать набор альтернативных шаблонов timestamp с явным признаком «зона unknown» вместо одного парсера.",
+    "Тело разбирать позиционно-грамматически по msg_id, не ожидая key=value.",
+    "Порты и содержимое скобок типизировать только после разрешения протокола, иначе сохранять raw-токен.",
+    "Неопознаваемый скобочный хвост сохранять как единый raw-остаток без интерпретации.",
+    "Нормализовать только подтверждённые поля (ip, protocol, счётчик, severity, время), имена ACL и интерфейсов оставлять verbatim.",
+    "Рекурсивный разбор payload не включать по умолчанию; повторный вход выполнять только при обнаружении вложенного конверта внутри тела.",
+    "Различать отсутствие значения и нулевое значение отдельными состояниями."
+  ],
+  "record_schema": [
+    {
+      "name": "raw",
+      "category": "static",
+      "type": "string",
+      "required": true,
+      "source": "$"
+    },
+    {
+      "name": "prival",
+      "category": "derived",
+      "type": "integer",
+      "required": true,
+      "source": "$.pri"
+    },
+    {
+      "name": "pri_severity",
+      "category": "derived",
+      "type": "integer",
+      "required": true,
+      "source": "$.pri"
+    },
+    {
+      "name": "header_severity",
+      "category": "derived",
+      "type": "integer",
+      "required": true,
+      "source": "$.header"
+    },
+    {
+      "name": "event_time",
+      "category": "dynamic",
+      "type": "datetime (naive, зона unknown)",
+      "required": true,
+      "source": "$.timestamp"
+    },
+    {
+      "name": "origin_host",
+      "category": "dynamic",
+      "type": "string (IPv4-литерал)",
+      "required": false,
+      "source": "$.host"
+    },
+    {
+      "name": "vendor_tag",
+      "category": "static",
+      "type": "string",
+      "required": true,
+      "source": "$.header"
+    },
+    {
+      "name": "message_id",
+      "category": "dynamic",
+      "type": "string",
+      "required": true,
+      "source": "$.header"
+    },
+    {
+      "name": "acl_name",
+      "category": "dynamic",
+      "type": "string",
+      "required": true,
+      "source": "$.body.acl_name"
+    },
+    {
+      "name": "action",
+      "category": "dynamic",
+      "type": "string (enum denied/permitted)",
+      "required": true,
+      "source": "$.body.action"
+    },
+    {
+      "name": "protocol",
+      "category": "dynamic",
+      "type": "string",
+      "required": true,
+      "source": "$.body.protocol"
+    },
+    {
+      "name": "src_interface",
+      "category": "dynamic",
+      "type": "string",
+      "required": false,
+      "source": "$.body.src_endpoint"
+    },
+    {
+      "name": "src_ip",
+      "category": "dynamic",
+      "type": "ip",
+      "required": true,
+      "source": "$.body.src_endpoint"
+    },
+    {
+      "name": "src_port",
+      "category": "dynamic",
+      "type": "integer",
+      "required": false,
+      "source": "$.body.src_endpoint"
+    },
+    {
+      "name": "dst_interface",
+      "category": "dynamic",
+      "type": "string",
+      "required": false,
+      "source": "$.body.dst_endpoint"
+    },
+    {
+      "name": "dst_ip",
+      "category": "dynamic",
+      "type": "ip",
+      "required": true,
+      "source": "$.body.dst_endpoint"
+    },
+    {
+      "name": "dst_port",
+      "category": "dynamic",
+      "type": "integer",
+      "required": false,
+      "source": "$.body.dst_endpoint"
+    },
+    {
+      "name": "hit_count",
+      "category": "dynamic",
+      "type": "integer",
+      "required": true,
+      "source": "$.body.hit"
+    },
+    {
+      "name": "hit_scope",
+      "category": "dynamic",
+      "type": "string",
+      "required": false,
+      "source": "$.body.hit_scope"
+    },
+    {
+      "name": "opaque_ids",
+      "category": "dynamic",
+      "type": "array<string>",
+      "required": false,
+      "source": "$.body.opaque_ids"
+    }
+  ],
+  "format_features": [
+    {
+      "property": "PRI задан в десятичной записи в угловых скобках; вычисленные facility=16 и severity=4 совпадают с severity в заголовке (%TAG-4-) — наблюдение",
+      "implication": "severity имеет два независимых источника, что даёт основу для перекрёстной проверки и создаёт возможность конфликта, который нужно отражать, а не разрешать молча"
+    },
+    {
+      "property": "timestamp содержит 4-значный год в порядке Mmm DD YYYY HH:MM:SS, без TZ и без долей секунды — наблюдение",
+      "implication": "шаблон «по умолчанию» без года даст неверный разбор; зона времени невыводима из строки"
+    },
+    {
+      "property": "в слоте hostname находится IPv4-литерал, а не имя — наблюдение",
+      "implication": "группировка по hostname даст «источник-адрес»; роль поля (адрес устройства, релея или интерфейса) из строки не доказуема"
+    },
+    {
+      "property": "разделитель между хостом и payload записан как « : » с пробелами с обеих сторон — наблюдение",
+      "implication": "границу «хост / payload» нельзя задавать как позицию первого ':'"
+    },
+    {
+      "property": "заголовок трёхчастный, с числовым msg_id и завершающим двоеточием — наблюдение",
+      "implication": "появляется стабильный идентификатор, пригодный ключом диспетчеризации грамматик тела"
+    },
+    {
+      "property": "тело не самоописательно: имена полей отсутствуют, семантика задаётся позицией и ключевыми словами (access-list, denied, hit-cnt) — вывод",
+      "implication": "разбор возможен только совместно с таблицей грамматик по msg_id"
+    },
+    {
+      "property": "составное поле endpoint объединяет ifname, IP-адрес и порт в один токен без кавычек — вывод",
+      "implication": "границы подполей выводятся, а не читаются, и требуют грамматического разбора, а не деления по разделителю"
+    },
+    {
+      "property": "квалификатор после счётчика попаданий вариативен («first hit» либо «N second interval») — гипотеза по документации, не из строки",
+      "implication": "после hit-cnt необходим необязательный сегмент, отсутствие которого не является ошибкой"
+    },
+    {
+      "property": "хвост в квадратных скобках содержит два 32-битных hex-значения — наблюдение по форме; их смысл из строки не выводится — гипотеза",
+      "implication": "хвост сохраняется как непрозрачный остаток, не используется как смысловой ключ и не декодируется"
+    },
+    {
+      "property": "запись содержит один уровень конверта, без кавычек, обратных слэшей и XML/JSON-экранирования — наблюдение",
+      "implication": "unescaping и рекурсивный разбор для этого RAW не применяются и не должны включаться на всякий случай"
+    }
+  ],
+  "pitfalls": [
+    {
+      "name": "Неоднозначная граница хост / payload",
+      "mechanism": "сепаратор « : » вариативен по пробелам и опционален, а IPv4-хост морфологически неотличим от обычного токена",
+      "remediation": "привязывать начало payload к маркеру %TAG-; при его отсутствии оставлять границу unknown и сохранять хвост как raw"
+    },
+    {
+      "name": "Timestamp без года против timestamp с годом",
+      "mechanism": "оба варианта используют один визуальный стиль, и при пропуске года дата разбирается со сдвигом",
+      "remediation": "набор явных альтернативных шаблонов; при несовпадении — raw-значение и признак unknown для времени"
+    },
+    {
+      "name": "Отсутствие TZ и долей секунды",
+      "mechanism": "зона устройства невыводима из строки, поэтому события из разных зон несравнимы",
+      "remediation": "хранить naive-время с флагом «зона unknown» и не подставлять UTC молча"
+    },
+    {
+      "name": "Конфликтующие обозначения severity",
+      "mechanism": "две независимые кодировки — PRI и числовое поле заголовка — могут расходиться",
+      "remediation": "хранить оба поля раздельно и отражать конфликт явно, не перезаписывая одно другим"
+    },
+    {
+      "name": "Слэш внутри имени интерфейса",
+      "mechanism": "сабинтерфейсы вида Outside/1.100 дают лишние разделители при делении токена",
+      "remediation": "делить по последнему '/', либо проверять правую часть как валидный IP-литерал с бэктрекингом"
+    },
+    {
+      "name": "Двоеточие внутри IPv6-литерала",
+      "mechanism": "конфликт с разделителем хоста и с внутренними разделителями составного поля",
+      "remediation": "разбирать endpoint грамматически по позиции и скобкам, а не делением строки по ':'"
+    },
+    {
+      "name": "Скобки как порт против ICMP type/code",
+      "mechanism": "содержимое скобок у tcp/udp — порт, у icmp — тип/код, синтаксис одинаков",
+      "remediation": "типизировать содержимое скобок только после разрешения протокола, иначе сохранять raw-токен"
+    },
+    {
+      "name": "Опциональность портов",
+      "mechanism": "у протоколов без портов скобочная часть отсутствует, и позиционный разбор сдвигается",
+      "remediation": "делать скобочную часть необязательным элементом и разбирать токен с конца"
+    },
+    {
+      "name": "Вариативность записи квалификатора попаданий",
+      "mechanism": "после счётчика следует либо «first hit», либо «N second interval», либо иной текст",
+      "remediation": "сначала читать число, затем необязательный сегмент-квалификатор; его отсутствие не считать ошибкой"
+    },
+    {
+      "name": "Вариативность хвоста идентификаторов",
+      "mechanism": "меняются наличие скобок, число hex-значений, порядок и пробелы после запятой",
+      "remediation": "захватывать весь хвост целиком как один непрозрачный остаток"
+    },
+    {
+      "name": "Конечный подчёркивающий символ в имени ACL",
+      "mechanism": "символ допустим в идентификаторе и неотличим от артефакта усечения или маскирования",
+      "remediation": "хранить имя verbatim и не применять к нему очистку"
+    },
+    {
+      "name": "null против нуля",
+      "mechanism": "0x00000000 — валидный нулевой идентификатор, а не отсутствие значения; отсутствие скобочной пары — другое состояние",
+      "remediation": "различать состояния absent и present_zero, не сводя нулевое значение к отсутствию"
+    },
+    {
+      "name": "Неоднозначность семантики хоста",
+      "mechanism": "IPv4 в слоте hostname может быть адресом устройства, адресом релея или адресом интерфейса источника",
+      "remediation": "помечать роль как hypothesis и не использовать поле единственным ключом идентичности"
+    }
+  ]
+}

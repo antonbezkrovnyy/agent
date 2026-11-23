@@ -1,0 +1,469 @@
+{
+  "essence": "Устройство 10.11.200.67 сформировало syslog-подобное событие о решении фильтрации: правило access-list 'CSM_FW_ACL_' заблокировало (action=denied) TCP-сессию от 131.9.85.43:14015 в интерфейсе/зоне Outside к 191.189.210.52:22 в интерфейсе/зоне PUB_DMZ. Счётчик срабатывания равен 1 и помечен как первое попадание; дополнительно передана пара hex-величин (трекер). Итог события: соединение отклонено, зафиксировано первое срабатывание правила.",
+  "structure": [
+    {
+      "path": "raw",
+      "format": "однострочный текст: syslog-подобный конверт + текстовый payload",
+      "role": "envelope",
+      "transform": null,
+      "confidence": "observed"
+    },
+    {
+      "path": "raw#pri",
+      "format": "'<' DEC '>' — числовой приоритет (132)",
+      "role": "envelope",
+      "transform": "десятичная строка -> целое (без вывода facility/severity)",
+      "confidence": "observed"
+    },
+    {
+      "path": "raw#timestamp",
+      "format": "MMM D+ YYYY HH:MM:SS (год есть, зоны нет)",
+      "role": "envelope",
+      "transform": "разбор в timestamp как локальное время, без приведения к UTC",
+      "confidence": "observed"
+    },
+    {
+      "path": "raw#host",
+      "format": "IPv4-литерал (в других записях — имя узла)",
+      "role": "envelope",
+      "transform": null,
+      "confidence": "observed"
+    },
+    {
+      "path": "raw#separator",
+      "format": "литерал ' : ' (пробел, двоеточие, пробел)",
+      "role": "envelope",
+      "transform": null,
+      "confidence": "observed"
+    },
+    {
+      "path": "raw#msg_token",
+      "format": "'%' MNEMONIC '-' SEVERITY '-' MSGID",
+      "role": "envelope",
+      "transform": null,
+      "confidence": "observed"
+    },
+    {
+      "path": "raw#msg_token#mnemonic",
+      "format": "литеральный тег ветки 'ASA' — служебный якорь, не выходное поле",
+      "role": "envelope",
+      "transform": null,
+      "confidence": "observed"
+    },
+    {
+      "path": "raw#msg_token#severity",
+      "format": "DEC (4)",
+      "role": "value",
+      "transform": "десятичная строка -> целое",
+      "confidence": "observed"
+    },
+    {
+      "path": "raw#msg_token#msg_id",
+      "format": "DEC (106100) — стабильный ключ диспетчеризации Family",
+      "role": "value",
+      "transform": "десятичная строка -> символьный ключ (без числовой арифметики)",
+      "confidence": "observed"
+    },
+    {
+      "path": "raw#body",
+      "format": "связный текст с пробельными границами: 'access-list <NAME> <ACTION> <PROTO> <PAIR> -> <PAIR> hit-cnt ...'",
+      "role": "payload",
+      "transform": null,
+      "confidence": "observed"
+    },
+    {
+      "path": "raw#body#acl_name",
+      "format": "один непробельный токен 'CSM_FW_ACL_'",
+      "role": "value",
+      "transform": null,
+      "confidence": "observed"
+    },
+    {
+      "path": "raw#body#action",
+      "format": "WORD из словаря решений ('denied')",
+      "role": "value",
+      "transform": null,
+      "confidence": "observed"
+    },
+    {
+      "path": "raw#body#protocol",
+      "format": "WORD ('tcp', 'icmp', 'udp' ...)",
+      "role": "value",
+      "transform": null,
+      "confidence": "observed"
+    },
+    {
+      "path": "raw#body#src_pair",
+      "format": "'<интерфейс>/<IPv4>(<порт>)' — левая пара",
+      "role": "value",
+      "transform": null,
+      "confidence": "inferred"
+    },
+    {
+      "path": "raw#body#src_pair#interface",
+      "format": "токен до последнего '/' перед IPv4; сам может содержать '/'",
+      "role": "value",
+      "transform": null,
+      "confidence": "observed"
+    },
+    {
+      "path": "raw#body#src_pair#ip",
+      "format": "IPv4-литерал",
+      "role": "value",
+      "transform": null,
+      "confidence": "observed"
+    },
+    {
+      "path": "raw#body#src_pair#port",
+      "format": "DEC в круглых скобках, без пробела после адреса",
+      "role": "value",
+      "transform": "десятичная строка -> целое",
+      "confidence": "observed"
+    },
+    {
+      "path": "raw#body#direction",
+      "format": "литеральная стрелка ' -> '",
+      "role": "payload",
+      "transform": null,
+      "confidence": "observed"
+    },
+    {
+      "path": "raw#body#dst_pair",
+      "format": "'<интерфейс>/<IPv4>(<порт>)' — правая пара",
+      "role": "value",
+      "transform": null,
+      "confidence": "inferred"
+    },
+    {
+      "path": "raw#body#dst_pair#interface",
+      "format": "токен до последнего '/' перед IPv4",
+      "role": "value",
+      "transform": null,
+      "confidence": "observed"
+    },
+    {
+      "path": "raw#body#dst_pair#ip",
+      "format": "IPv4-литерал",
+      "role": "value",
+      "transform": null,
+      "confidence": "observed"
+    },
+    {
+      "path": "raw#body#dst_pair#port",
+      "format": "DEC в круглых скобках",
+      "role": "value",
+      "transform": "десятичная строка -> целое",
+      "confidence": "observed"
+    },
+    {
+      "path": "raw#body#hit_tail",
+      "format": "'hit-cnt' DEC [ фаза ] [ '[hex, hex]' ]",
+      "role": "payload",
+      "transform": null,
+      "confidence": "observed"
+    },
+    {
+      "path": "raw#body#hit_tail#hit_cnt",
+      "format": "DEC (1)",
+      "role": "value",
+      "transform": "десятичная строка -> целое",
+      "confidence": "observed"
+    },
+    {
+      "path": "raw#body#hit_tail#hit_phase",
+      "format": "1-3 слова, в наблюдении 'first hit'",
+      "role": "value",
+      "transform": null,
+      "confidence": "inferred"
+    },
+    {
+      "path": "raw#body#hit_tail#hit_tracker",
+      "format": "'0x…, 0x…' — пара hex-величин внутри '[...]'",
+      "role": "value",
+      "transform": "нет: строковое значение, hex не декодируется",
+      "confidence": "observed"
+    }
+  ],
+  "strategy": [
+    "Границу конверта и payload проводить по единственному литералу ' : ', а не по любому двоеточию.",
+    "Извлекать msg_id и severity из токена '%<MNEMONIC>-<SEVERITY>-<MSGID>' до разбора payload и использовать msg_id как ключ диспетчеризации текущей Family.",
+    "Хранить pri и severity как два независимых значения наблюдения, без вывода одного из другого и без нормализации.",
+    "Мнемонический тег токена и литералы 'access-list', '->', 'hit-cnt' использовать как стабильные якоря, не превращая их в выходные поля.",
+    "Изменяемые слова payload (action, protocol, acl_name) брать захватами, а не литералами шаблона.",
+    "Адресную пару разбирать как '<интерфейс>/<IPv4>(<порт>)', определяя границу интерфейса по последнему '/', за которым стоит IPv4.",
+    "Порт в круглых скобках считать опциональным независимо для каждой стороны.",
+    "Хвост счётчика выделять в отдельный вложенный слой разбора (hit_tail -> hit_cnt / hit_phase / hit_tracker).",
+    "Фазу счётчика и блок '[hex, hex]' считать опциональными, внутренность скобок захватывать строкой целиком.",
+    "hex-величины сохранять строкой, не приводя к целым и не подменяя отсутствием при нулевом значении.",
+    "Сохранять RAW без изменений: экранирования и вложенных сериализованных форматов нет, поэтому unescape и рекурсивное декодирование не применяются.",
+    "Нераспознанные остатки не додумывать полями: они остаются в residual."
+  ],
+  "record_schema": [
+    {
+      "name": "raw",
+      "category": "dynamic",
+      "type": "string",
+      "required": true,
+      "source": "raw"
+    },
+    {
+      "name": "pri",
+      "category": "dynamic",
+      "type": "integer",
+      "required": true,
+      "source": "raw#pri"
+    },
+    {
+      "name": "timestamp",
+      "category": "dynamic",
+      "type": "timestamp",
+      "required": true,
+      "source": "raw#timestamp"
+    },
+    {
+      "name": "host",
+      "category": "dynamic",
+      "type": "string",
+      "required": true,
+      "source": "raw#host"
+    },
+    {
+      "name": "msg_id",
+      "category": "static",
+      "type": "string",
+      "required": true,
+      "source": "контракт Family: стабильный сегмент токена '%<MNEMONIC>-<SEVERITY>-106100:' и путь raw#msg_token#msg_id"
+    },
+    {
+      "name": "severity",
+      "category": "dynamic",
+      "type": "integer",
+      "required": true,
+      "source": "raw#msg_token#severity"
+    },
+    {
+      "name": "action",
+      "category": "dynamic",
+      "type": "string",
+      "required": true,
+      "source": "raw#body#action"
+    },
+    {
+      "name": "protocol",
+      "category": "dynamic",
+      "type": "string",
+      "required": true,
+      "source": "raw#body#protocol"
+    },
+    {
+      "name": "acl_name",
+      "category": "dynamic",
+      "type": "string",
+      "required": true,
+      "source": "raw#body#acl_name"
+    },
+    {
+      "name": "src_interface",
+      "category": "dynamic",
+      "type": "string",
+      "required": true,
+      "source": "raw#body#src_pair#interface"
+    },
+    {
+      "name": "src_ip",
+      "category": "dynamic",
+      "type": "string",
+      "required": true,
+      "source": "raw#body#src_pair#ip"
+    },
+    {
+      "name": "src_port",
+      "category": "dynamic",
+      "type": "integer",
+      "required": false,
+      "source": "raw#body#src_pair#port"
+    },
+    {
+      "name": "dst_interface",
+      "category": "dynamic",
+      "type": "string",
+      "required": true,
+      "source": "raw#body#dst_pair#interface"
+    },
+    {
+      "name": "dst_ip",
+      "category": "dynamic",
+      "type": "string",
+      "required": true,
+      "source": "raw#body#dst_pair#ip"
+    },
+    {
+      "name": "dst_port",
+      "category": "dynamic",
+      "type": "integer",
+      "required": false,
+      "source": "raw#body#dst_pair#port"
+    },
+    {
+      "name": "hit_cnt",
+      "category": "dynamic",
+      "type": "integer",
+      "required": true,
+      "source": "raw#body#hit_tail#hit_cnt"
+    },
+    {
+      "name": "hit_phase",
+      "category": "dynamic",
+      "type": "string",
+      "required": false,
+      "source": "raw#body#hit_tail#hit_phase"
+    },
+    {
+      "name": "hit_tracker",
+      "category": "dynamic",
+      "type": "string",
+      "required": false,
+      "source": "raw#body#hit_tail#hit_tracker"
+    }
+  ],
+  "format_features": [
+    {
+      "property": "Важность закодирована дважды: числовой приоритет в угловых скобках ('<132>') и числовая severity внутри токена сообщения ('…-4-…') — наблюдение.",
+      "implication": "pri и severity остаются независимыми значениями наблюдения; ни одно не выводится из другого, расхождение не «исправляется» парсером."
+    },
+    {
+      "property": "Конверт отделён от payload связкой ' : ' — пробел перед двоеточием — наблюдение.",
+      "implication": "Разделитель ищется как ' : ', а не как ':' вообще; иначе метка времени '13:00:30' становится ложной границей слоёв."
+    },
+    {
+      "property": "Метка времени содержит год, но не содержит зоны или смещения — наблюдение.",
+      "implication": "Время трактуется как локальное время источника; никаких derived-полей со сдвигом и абсолютной UTC-меткой не создаётся."
+    },
+    {
+      "property": "Идентификатор события — составной токен '%<MNEMONIC>-<SEVERITY>-<MSGID>' с дефисными разделителями — наблюдение; ортогональность трёх частей — вывод.",
+      "implication": "msg_id пригоден как ключ диспетчеризации Family, severity извлекается отдельно, мнемоника служит якорем ветки."
+    },
+    {
+      "property": "Payload — не JSON/XML, а связный английский текст с пробельными границами и без кавычек — наблюдение.",
+      "implication": "Значения извлекаются грамматикой и словарём, а не декодированием; многозначные токены требуют якорных литералов по краям поля."
+    },
+    {
+      "property": "Направление задано литеральной стрелкой ' -> ' между двумя однотипными адресными парами — наблюдение.",
+      "implication": "Сторона (src/dst) определяется позицией относительно стрелки; порядок пар — часть грамматики, а не декорация."
+    },
+    {
+      "property": "Адресная пара имеет вид '<интерфейс>/<IPv4>(<порт>)'; порт в круглых скобках без пробела — наблюдение; имя интерфейса само может содержать '/' — вывод, проверен вариантом записи.",
+      "implication": "Границу 'интерфейс | адрес' нельзя брать по первому '/', нужен якорь на IPv4-литерал; порт опционален независимо для каждой стороны."
+    },
+    {
+      "property": "Хвост срабатывания содержит числовой счётчик, текстовую фазу ('first hit') и блок '[0x…, 0x…]' — наблюдение; опциональность фазы и блока — гипотеза.",
+      "implication": "Все три элемента — отдельные поля; внутренность скобок захватывается строкой целиком, поскольку арность списка внутри '[...]' не подтверждена."
+    },
+    {
+      "property": "Числа записаны в двух системах: десятичные (severity, порты, hit-cnt) и hex с префиксом '0x' (трекер) — наблюдение.",
+      "implication": "hex-величины не приводятся к целым; '0x00000000' — значение счётчика, а не отсутствие данных, поэтому null не подставляется."
+    },
+    {
+      "property": "Экранирования, кавычек и вложенных сериализованных форматов в строке нет — наблюдение.",
+      "implication": "Рекурсивный unescape/декодирование не применяется, отдельного преобразования 'decode' в цепочке слоёв не появляется, RAW сохраняется как есть."
+    }
+  ],
+  "pitfalls": [
+    {
+      "name": "Двоеточие внутри метки времени",
+      "mechanism": "Конверт содержит '13:00:30', а разделитель конверт/payload выглядит как ' : ' с пробелом перед двоеточием; разбиение по любому ':' даёт ложные границы и разрезает timestamp.",
+      "remediation": "Искать единственный литерал ' : ' либо якорить метку времени шаблоном TIME и вести разбор от конца конверта, а не от первого двоеточия."
+    },
+    {
+      "name": "Две записи важности",
+      "mechanism": "Приоритет PRI и числовой сегмент токена сообщения оба кодируют severity; они могут расходиться, если PRI переписан релеем или агрегатором.",
+      "remediation": "Хранить pri и severity раздельно, не выводить одно из другого и не выбирать «правильное» молча; расхождение — наблюдаемое состояние, а не ошибка разбора."
+    },
+    {
+      "name": "Неоднозначная граница 'интерфейс/адрес'",
+      "mechanism": "Имя интерфейса может содержать '/', поэтому первый слэш не является границей; в варианте с IPv6 к этому добавляется конфликт ':' адреса с ':' после интерфейса.",
+      "remediation": "Якорить границу на IPv4-литерал — разделителем считается последний '/', за которым стоит адрес; порт брать только из круглых скобок, не после ':'."
+    },
+    {
+      "name": "Опциональные порты",
+      "mechanism": "Для протоколов без портов пара выглядит как '<интерфейс>/<адрес> -> <интерфейс>/<адрес>'; шаблон с обязательными скобками теряет всю оставшуюся часть строки.",
+      "remediation": "Группа порта опциональна и независима для каждой стороны; отсутствие порта не заполняется нулём и не считается ошибкой."
+    },
+    {
+      "name": "Переменная арность хвоста срабатывания",
+      "mechanism": "После 'hit-cnt N' может присутствовать текстовая фаза и/или блок '[0x…, 0x…]' с переменным числом элементов через ', '; жёсткая фиксированная форма ломает разбор.",
+      "remediation": "Выносить хвост в отдельный слой, фазу и блок делать опциональными, внутренность скобок захватывать строкой до закрывающей ']'."
+    },
+    {
+      "name": "hex-литералы: регистр и ведущие нули",
+      "mechanism": "'0x00000000' легко принять за null, пустое значение или литерал-заглушку; запись '0x'/'0X' и количество ведущих нулей могут различаться.",
+      "remediation": "Трактовать как строковое значение наблюдения без числового приведения и без подстановки null; сравнение — без учёта регистра префикса."
+    },
+    {
+      "name": "Динамические слова на месте констант",
+      "mechanism": "action ('denied'/'permitted') и protocol ('tcp'/'icmp'/'udp') — значения словаря, а не константы Family; жёсткий литерал 'denied' ломает вторую половину вариантов.",
+      "remediation": "Оба поля — захваты WORD; допустимый набор задаётся контрактом Family, а не шаблоном разбора."
+    },
+    {
+      "name": "Пробельные, а не сепараторные границы полей",
+      "mechanism": "Имя ACL, action и protocol разделены только пробелами; при имени с пробелом или отсутствующем action жадный/ленивый захват сдвигает границы соседних полей.",
+      "remediation": "Имя ACL захватывать как один непробельный токен и удерживать литералы-якоря 'access-list', '->', 'hit-cnt' как контрольные точки; при несовпадении фиксировать остаток в residual вместо подгонки захвата."
+    },
+    {
+      "name": "Симметрия адресных пар",
+      "mechanism": "Обе пары имеют одинаковую форму, различает их только ' -> ', а интерфейсы и адреса могут повторяться в зеркальном трафике.",
+      "remediation": "Назначать src/dst строго по позиции относительно стрелки; не различать стороны по имени интерфейса, приватности адреса или номеру порта."
+    }
+  ],
+  "parser": {
+    "patterns": [
+      {
+        "name": "SYSLOGTIMEWITHYEAR",
+        "definition": "%{MONTH} +%{MONTHDAY} %{YEAR} %{TIME}",
+        "description": "Метка времени syslog-подобного конверта с годом: 'Feb 12 2023 13:00:30'; ' +' допускает однозначный день с двойным пробелом; зоны в тексте нет."
+      },
+      {
+        "name": "MSGID_TOKEN",
+        "definition": "%%{WORD:mnemonic}-%{INT:severity}-%{POSINT:msg_id}",
+        "description": "Токен '%<MNEMONIC>-<SEVERITY>-<MSGID>': мнемоника-якорь, числовая severity и числовой msg_id — ключ диспетчеризации Family."
+      },
+      {
+        "name": "IFACE_SRC_ADDR_PORT",
+        "definition": "(?<src_interface>.+?)/%{IPV4:src_ip}(?:\\(%{POSINT:src_port}\\))?",
+        "description": "Левая адресная пара '<интерфейс>/<IPv4>(<порт>)': ленивый захват интерфейса, поэтому имена со слэшами не ломают границу; порт опционален."
+      },
+      {
+        "name": "IFACE_DST_ADDR_PORT",
+        "definition": "(?<dst_interface>.+?)/%{IPV4:dst_ip}(?:\\(%{POSINT:dst_port}\\))?",
+        "description": "Правая адресная пара; отдельное определение, чтобы имена захватов не конфликтовали и сторона оставалась различимой."
+      },
+      {
+        "name": "HIT_TAIL",
+        "definition": "(?<hit_tail>hit-cnt [^\\n]+)",
+        "description": "Хвост счётчика срабатываний как одна граница перехода к вложенному слою разбора."
+      },
+      {
+        "name": "HIT_PHASE",
+        "definition": "(?<hit_phase>[A-Za-z]+(?: [A-Za-z]+){0,2})",
+        "description": "Опциональная текстовая фаза счётчика (в наблюдении 'first hit'), обобщённо 1-3 слова; цифры и скобки в класс не входят, поэтому трекер не съедается."
+      }
+    ],
+    "layers": [
+      {
+        "name": "envelope_message_id",
+        "source": "raw",
+        "pattern": "^<%{POSINT:pri}>%{SYSLOGTIMEWITHYEAR:timestamp} %{HOSTNAME:host} : %{MSGID_TOKEN}: (?<body>.+)$"
+      },
+      {
+        "name": "payload_acl_verdict",
+        "source": "body",
+        "pattern": "^access-list %{NOTSPACE:acl_name} %{WORD:action} %{WORD:protocol} %{IFACE_SRC_ADDR_PORT} -> %{IFACE_DST_ADDR_PORT} %{HIT_TAIL}$"
+      },
+      {
+        "name": "hit_counter_tail",
+        "source": "hit_tail",
+        "pattern": "^hit-cnt %{INT:hit_cnt}(?: %{HIT_PHASE})?(?: \\[(?<hit_tracker>[^\\]]+)\\])?$"
+      }
+    ]
+  }
+}

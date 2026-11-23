@@ -1,0 +1,14 @@
+{
+  "file": "data\\artifact_cisco_firewall.log",
+  "database": "research\\r018-cisco-corpus.db",
+  "total_lines": 1763,
+  "covered_without_model": 1754,
+  "researched_with_model": 9,
+  "uncovered_lines": [],
+  "families": 3,
+  "parser_revisions": 9,
+  "grok_patterns": 48,
+  "research_results": 9,
+  "duration_seconds": 822.382,
+  "completed_at": "2026-11-23T17:30:24.534556+00:00"
+}
