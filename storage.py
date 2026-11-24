@@ -31,6 +31,7 @@ def db_connect() -> Iterator[sqlite3.Connection]:
             revision INTEGER NOT NULL,
             patterns_json TEXT NOT NULL,
             layers_json TEXT NOT NULL,
+            stages_json TEXT NOT NULL DEFAULT '[]',
             record_schema_json TEXT NOT NULL,
             evidence_json TEXT NOT NULL,
             family_description_json TEXT NOT NULL,
@@ -60,9 +61,9 @@ def db_connect() -> Iterator[sqlite3.Connection]:
     columns = {
         row[1] for row in connection.execute("PRAGMA table_info(parser_families)").fetchall()
     }
-    for column in ("family_description_json", "parser_description_json", "constraints_json"):
+    for column in ("family_description_json", "parser_description_json", "constraints_json", "stages_json"):
         if column not in columns:
-            default = "[]" if column == "constraints_json" else "{}"
+            default = "[]" if column in ("constraints_json", "stages_json") else "{}"
             connection.execute(
                 f"ALTER TABLE parser_families ADD COLUMN {column} TEXT NOT NULL DEFAULT '{default}'"
             )
@@ -181,11 +182,12 @@ def save_family(
     family_description: dict,
     parser_description: dict,
     constraints: list[dict],
+    stages: list[dict] | None = None,
 ) -> dict:
     with db_connect() as connection:
         existing = connection.execute(
             "SELECT patterns_json, layers_json, record_schema_json, evidence_json, "
-            "family_description_json, parser_description_json, constraints_json "
+            "family_description_json, parser_description_json, constraints_json, stages_json "
             "FROM parser_families WHERE family_id = ? AND revision = ?",
             (family_id, revision),
         ).fetchone()
@@ -197,6 +199,7 @@ def save_family(
             json.dumps(family_description, ensure_ascii=False),
             json.dumps(parser_description, ensure_ascii=False),
             json.dumps(constraints, ensure_ascii=False),
+            json.dumps(stages or [], ensure_ascii=False),
         )
         if existing and existing != payload:
             return {
@@ -211,8 +214,8 @@ def save_family(
         connection.execute(
             "INSERT INTO parser_families ("
             "family_id, revision, patterns_json, layers_json, record_schema_json, evidence_json, "
-            "family_description_json, parser_description_json, constraints_json, created_at"
-            ") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            "family_description_json, parser_description_json, constraints_json, stages_json, created_at"
+            ") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             (family_id, revision, *payload, datetime.now(timezone.utc).isoformat()),
         )
     return {"ok": True, "family_id": family_id, "revision": revision, "status": "saved"}
@@ -256,14 +259,14 @@ def get_family(family_id: str, revision: int | None = None) -> dict:
         if revision is None:
             row = connection.execute(
                 "SELECT revision, patterns_json, layers_json, record_schema_json, evidence_json, "
-                "family_description_json, parser_description_json, constraints_json "
+                "family_description_json, parser_description_json, constraints_json, stages_json "
                 "FROM parser_families WHERE family_id = ? ORDER BY revision DESC LIMIT 1",
                 (family_id,),
             ).fetchone()
         else:
             row = connection.execute(
                 "SELECT revision, patterns_json, layers_json, record_schema_json, evidence_json, "
-                "family_description_json, parser_description_json, constraints_json "
+                "family_description_json, parser_description_json, constraints_json, stages_json "
                 "FROM parser_families WHERE family_id = ? AND revision = ?",
                 (family_id, revision),
             ).fetchone()
@@ -287,6 +290,7 @@ def get_family(family_id: str, revision: int | None = None) -> dict:
             "family_description": json.loads(row[5]),
             "parser_description": json.loads(row[6]),
             "constraints": json.loads(row[7]),
+            "stages": json.loads(row[8]),
         },
     }
 

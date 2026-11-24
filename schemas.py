@@ -1,6 +1,6 @@
 from typing import Annotated, Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 
 class SchemaModel(BaseModel):
@@ -26,7 +26,7 @@ class StructureLayer(SchemaModel):
 class RecordField(SchemaModel):
     """Поле минимального контракта результата детерминированного разбора одной Family."""
 
-    name: str = Field(description="Имя выходного поля; должно совпадать с именем Grok capture, если поле извлекается.")
+    name: str = Field(description="Имя выходного поля; должно совпадать с именем Grok capture или поля pipeline, если извлекается.")
     category: Literal["static", "dynamic"] = Field(
         description="static — стабильная грамматика Family; dynamic — значение конкретного наблюдения."
     )
@@ -85,9 +85,13 @@ class GrokLayer(SchemaModel):
 
 
 class FieldConstraint(SchemaModel):
-    """Ограничение присутствия capture в зависимости от значений других captures."""
+    """Ограничение значения или присутствия capture в зависимости от других captures."""
 
-    field: str = Field(description="Имя capture, к которому применяется ограничение.")
+    field: str = Field(description="Имя capture или pipeline-поля, к которому применяется ограничение.")
+    equals: str | int | float | bool | None = Field(
+        default=None,
+        description="Если задано, поле обязано точно равняться значению; используется как детерминированный ключ dispatch.",
+    )
     allowed_when: dict[str, list[str]] = Field(
         default_factory=dict,
         description="Если field присутствует, перечисленные captures должны иметь одно из допустимых значений.",
@@ -99,19 +103,64 @@ class FieldConstraint(SchemaModel):
     description: str = Field(description="Смысловое обоснование ограничения и наблюдения, на которых оно основано.")
 
 
-class ParserDefinition(SchemaModel):
-    """Набор именованных конструкций, порядок разбора и межполевые ограничения."""
+class PipelineStage(SchemaModel):
+    """Одна детерминированная стадия разбора с явным источником входа."""
 
-    patterns: list[GrokPattern] = Field(description="Пользовательские Grok-конструкции, необходимые этому парсеру.")
-    layers: list[GrokLayer] = Field(description="Слои разбора от raw к вложенным данным в порядке исполнения.")
-    constraints: list[FieldConstraint] = Field(
-        default_factory=list,
-        description="Межполевые ограничения, которые невозможно выразить одной Grok-конструкцией без ложных комбинаций.",
+    name: str = Field(description="Уникальное имя стадии для trace и диагностики failed_layer.")
+    codec: Literal["grok", "cef", "csv", "kv"] = Field(description="Модельный Grok либо детерминированный кодек payload.")
+    source: str = Field(
+        description=(
+            "Для первой стадии — raw; для следующей — stages.<имя_предыдущей>.fields.<поле>, "
+            "например stages.envelope.fields.message."
+        )
+    )
+    params: dict[str, Any] = Field(
+        default_factory=dict,
+        description="Для grok — pattern/patterns; для cef — {}; для csv/kv — параметры разделителей и подписей.",
     )
 
 
+class ParserDefinition(SchemaModel):
+    """Grok-слои либо детерминированный pipeline и межполевые ограничения одной revision."""
+
+    kind: Literal["grok", "pipeline"] = Field(
+        default="grok",
+        description="grok — patterns/layers; pipeline — детерминированные stages. Режимы нельзя смешивать.",
+    )
+    patterns: list[GrokPattern] = Field(
+        default_factory=list,
+        description="Пользовательские Grok-конструкции; только для kind=grok.",
+    )
+    layers: list[GrokLayer] = Field(
+        default_factory=list,
+        description="Слои Grok-разбора от raw к вложенным данным; только для kind=grok.",
+    )
+    stages: list[PipelineStage] = Field(
+        default_factory=list,
+        description="Упорядоченные детерминированные стадии; обязательны и только для kind=pipeline.",
+    )
+    constraints: list[FieldConstraint] = Field(
+        default_factory=list,
+        description="Межполевые ограничения, которые невозможно выразить одной конструкцией без ложных комбинаций.",
+    )
+
+    @model_validator(mode="after")
+    def check_parser_mode(self):
+        if self.kind == "grok":
+            if self.stages:
+                raise ValueError("Для kind=grok stages должен быть пустым; для stages используйте kind=pipeline.")
+            if not self.layers:
+                raise ValueError("Для kind=grok layers не должен быть пустым.")
+        else:
+            if not self.stages:
+                raise ValueError("Для kind=pipeline stages не должен быть пустым.")
+            if self.patterns or self.layers:
+                raise ValueError("Для kind=pipeline patterns и layers должны быть пустыми.")
+        return self
+
+
 class Response(SchemaModel):
-    """Полный результат исследования одной строки: смысл, контракт и исполненный Grok-парсер."""
+    """Полный результат исследования одной строки: смысл, контракт и исполненный Grok- или pipeline-парсер."""
 
     essence: str = Field(description="Кратко: участники события, действие и результат без рекомендаций и догадок.")
     structure: list[StructureLayer] = Field(description="Упорядоченные слои от RAW к значениям без выдуманной вложенности.")
@@ -119,11 +168,11 @@ class Response(SchemaModel):
     record_schema: list[RecordField] = Field(description="Минимально полный контракт выходных полей одной Family.")
     format_features: list[FormatFeature] = Field(description="Свойства формата и обязательные следствия для разбора.")
     pitfalls: list[Pitfall] = Field(description="Только неоднозначности формата, их механизм и разрешение.")
-    parser: ParserDefinition = Field(description="Человекочитаемый Grok-парсер, проверенный исполнением на исходной строке.")
+    parser: ParserDefinition = Field(description="Исполненный Grok-парсер или детерминированный pipeline на исходной строке.")
 
 
 class ParserResult(SchemaModel):
-    """Результат execute_grok_parser, который проверяется на полноту и обязательные поля."""
+    """Результат Grok- или pipeline-разбора, проверяемый на полноту и обязательные поля."""
 
     ok: bool = Field(description="True только при полном разборе всех слоёв с пустым residual.")
     captures: dict[str, str] = Field(description="Извлечённые строковые значения по именам captures.")
@@ -144,10 +193,15 @@ class Observation(SchemaModel):
 
 
 class ParserBaseline(SchemaModel):
-    """Прежняя версия парсера и её собственные наблюдения для независимой регрессии."""
+    """Прежняя Grok- или pipeline-ревизия и её наблюдения для независимой регрессии."""
 
-    layers: list[GrokLayer] = Field(description="Слои прежнего парсера без изменений под новую строку.")
-    patterns: dict[str, str] = Field(description="Отображение ИМЯ → regex-тело для всех конструкций прежнего парсера.")
+    kind: Literal["grok", "pipeline"] = Field(default="grok", description="Тип прежнего parser; должен совпадать с candidate.")
+    layers: list[GrokLayer] = Field(default_factory=list, description="Слои прежнего Grok-парсера без изменений.")
+    patterns: dict[str, str] = Field(
+        default_factory=dict,
+        description="Отображение ИМЯ → regex-тело для всех конструкций прежнего Grok-парсера.",
+    )
+    stages: list[PipelineStage] = Field(default_factory=list, description="Стадии прежнего pipeline без изменений.")
     record_schema: list[RecordField] = Field(
         default_factory=list,
         description="Схема прежнего парсера; пустой список означает использование схемы кандидата.",
@@ -175,7 +229,7 @@ class ParserDescription(SchemaModel):
 
     summary: str = Field(description="Кратко: что разбирает эта ревизия и чем она отличается от других.")
     input_contract: str = Field(description="Ожидаемый RAW, конверт, кодировка и необходимые преобразования.")
-    layering: str = Field(description="Порядок слоёв, captures-связи и использованные Grok-конструкции.")
+    layering: str = Field(description="Порядок Grok-слоёв или pipeline-стадий, связи источников и использованные конструкции/кодеки.")
     output_contract: str = Field(description="Основные выходные поля, типы, обязательность и политика residual.")
     revision_reason: str = Field(description="Причина создания новой ревизии; для первой — основание создания parser.")
     regression_and_limitations: str = Field(
@@ -203,11 +257,15 @@ LayersInput = Annotated[
     list[GrokLayer],
     Field(description="Непустой список слоёв; первый source=raw, каждый следующий source — capture предыдущего слоя."),
 ]
+StagesInput = Annotated[
+    list[PipelineStage],
+    Field(description="Непустой список стадий; первая source=raw, каждая следующая ссылается на поле предыдущей стадии."),
+]
 RecordSchemaInput = Annotated[
     list[RecordField],
     Field(description="Контракт полей, используемый для проверки required и типов integer/ipv4."),
 ]
 ConstraintsInput = Annotated[
     list[FieldConstraint],
-    Field(description="Межполевые ограничения allowed_when/required_when; пустой список допустим."),
+    Field(description="Ограничения equals/allowed_when/required_when; пустой список допустим."),
 ]

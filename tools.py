@@ -11,6 +11,7 @@ from langchain_core.tools import tool
 from pydantic import Field, ValidationError
 
 import grok
+import pipeline
 import semantic
 from schemas import (
     ConstraintsInput,
@@ -27,6 +28,7 @@ from schemas import (
     RawInput,
     RecordField,
     RecordSchemaInput,
+    StagesInput,
 )
 import storage
 
@@ -168,6 +170,106 @@ def evaluate_candidate(
 ) -> dict:
     """Независимо проверяет candidate и baseline со всеми ограничениями; ok=true только при успехе всех наблюдений."""
     return grok.evaluate_candidate(layers, patterns, record_schema, observations, baseline, constraints)
+
+
+@tool
+def probe_format(raw: RawInput) -> dict:
+    """Детерминированно проверяет поддерживаемые форматы и возвращает кандидатов с доказательствами, без LLM-детекта."""
+    return pipeline.probe_format(raw)
+
+
+@tool
+def try_parse(
+    codec: Annotated[str, Field(description="grok — модельный конверт; cef/csv/kv — детерминированные payload-кодеки.")],
+    raw: RawInput,
+    params: Annotated[dict, Field(description="Для grok — {pattern, patterns}; для cef — {}; для csv/kv — разделители и правила подписей из probe.")] = {},
+) -> dict:
+    """Пробует кодек на полном входе и возвращает ok/fields/residual/error, не изменяя RAW.
+
+    CSV: delimiter, quotechar, escapechar, doublequote, skipinitialspace, strict,
+    label_separator, positional_prefix/names, field_names, strip_keys/values,
+    allow_positionals, allow_empty_keys/fields, expected_columns, duplicate_policy.
+    KV: pair_separator, key_value_separator, quoting как у CSV, positional_prefix/names,
+    strip_keys/values, allow_positionals, allow_empty_keys/values, expected_pairs,
+    duplicate_policy=error|first|last. Ошибки параметров возвращаются с recovery.
+    """
+    return pipeline.try_parse(codec, raw, params)
+
+
+@tool
+def execute_pipeline_parser(stages: StagesInput, raw: RawInput) -> dict:
+    """Исполняет pipeline по явным source-связям и возвращает captures, trace и failed_layer."""
+    return pipeline.execute_pipeline(stages, raw)
+
+
+@tool
+def validate_pipeline_result(
+    parser_result: ParserResult,
+    record_schema: RecordSchemaInput,
+    constraints: ConstraintsInput = [],
+) -> dict:
+    """Проверяет pipeline residual, required, типы, диапазоны и межполевые ограничения; возвращает issues."""
+    return grok.validate_result(parser_result, record_schema, constraints)
+
+
+@tool
+def evaluate_pipeline_candidate(
+    stages: StagesInput,
+    record_schema: RecordSchemaInput,
+    observations: Annotated[
+        list[Observation],
+        Field(min_length=1, description="Непустой список RAW-строк для независимой проверки pipeline."),
+    ],
+    baseline: Annotated[
+        ParserBaseline | None,
+        Field(description="Прежний pipeline kind=pipeline и его observations; null для новой Family."),
+    ] = None,
+    constraints: ConstraintsInput = [],
+) -> dict:
+    """Независимо проверяет candidate и baseline pipeline; ok=true только при успехе всех наблюдений."""
+    return pipeline.evaluate_candidate(stages, record_schema, observations, baseline, constraints)
+
+
+@tool
+def save_pipeline_family(
+    family_id: Annotated[str, Field(min_length=1, description="Стабильный идентификатор грамматики pipeline.")],
+    revision: Annotated[int, Field(ge=1, description="Положительный номер новой ревизии.")],
+    stages: StagesInput,
+    record_schema: RecordSchemaInput,
+    evidence: Annotated[
+        list[str],
+        Field(min_length=1, description="Непустой список RAW, каждая строка обязана успешно пройти pipeline."),
+    ],
+    family_description: FamilyDescription,
+    parser_description: ParserDescription,
+    constraints: ConstraintsInput = [],
+) -> dict:
+    """Проверяет pipeline на всех evidence, сохраняет revision и индексирует Family/parser для поиска."""
+    observations = [Observation(raw=raw) for raw in evidence]
+    evaluation = pipeline.evaluate_observations(stages, record_schema, observations, constraints)
+    if not evaluation["ok"]:
+        return {
+            "ok": False,
+            "error": "pipeline_evidence_validation_failed",
+            "message": "Family не сохранена: pipeline обязан успешно разобрать каждую evidence-строку.",
+            "recovery": "Исправьте stages/record_schema/constraints или удалите нерелевантную evidence, затем повторите проверку.",
+            "details": evaluation,
+        }
+    saved = storage.save_family(
+        family_id,
+        revision,
+        [],
+        [],
+        [field.model_dump(mode="json") for field in record_schema],
+        evidence,
+        family_description.model_dump(mode="json"),
+        parser_description.model_dump(mode="json"),
+        [constraint.model_dump(mode="json") for constraint in constraints],
+        [stage.model_dump(mode="json") for stage in stages],
+    )
+    if saved["ok"]:
+        semantic.index_family(family_id, revision)
+    return saved
 
 
 @tool
@@ -317,6 +419,12 @@ TOOLS = [
     execute_grok_parser,
     validate_grok_result,
     evaluate_candidate,
+    probe_format,
+    try_parse,
+    execute_pipeline_parser,
+    validate_pipeline_result,
+    evaluate_pipeline_candidate,
+    save_pipeline_family,
     save_grok_pattern,
     get_grok_pattern,
     search_grok_patterns,

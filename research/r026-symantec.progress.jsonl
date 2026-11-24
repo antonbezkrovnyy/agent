@@ -1,0 +1,2 @@
+{"at":"2026-11-24T07:56:20.352247+00:00","line":1,"status":"researched","research_id":84,"new_revisions":[["symantec_endpoint_traffic_log_symantecserver",1]],"pipeline":["grok","kv"],"captures":26}
+{"at":"2026-11-24T08:03:53.344779+00:00","status":"quality_audit","response_validation":"passed","pipeline_families_checked":8,"pipeline_family_errors":0,"grok_examples_checked":297,"grok_issues":[],"raw_matches":1,"advanced_parameter_checks":"passed","symantec_codec_preflight":{"lines":997,"errors":0,"column_counts":{"21":943,"7":47,"6":7}}}

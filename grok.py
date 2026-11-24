@@ -204,6 +204,8 @@ def validate_result(
                 pass
     for constraint in constraints or []:
         value = captures.get(constraint.field)
+        if constraint.equals is not None and value is not None and value != str(constraint.equals):
+            issues.append(f"value_mismatch:{constraint.field}:expected={constraint.equals}:actual={value}")
         if value is not None:
             for condition_field, allowed in constraint.allowed_when.items():
                 if captures.get(condition_field) not in allowed:

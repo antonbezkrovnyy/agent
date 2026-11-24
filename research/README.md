@@ -29,6 +29,8 @@
 | [R022](022-unix-review.md) | Справится ли система с разнородными Unix-событиями? | 143/143; 14 ReAct-исследований; 12 новых Families; 118 Grok; независимый аудит без repair | Unix corpus покрыт |
 | [R023](023-solaris-review.md) | Выдержит ли система разнообразие Solaris sshd/audit? | 67/67; 50 ReAct-исследований; 44 новых Families; 290 Grok; metadata repair и независимый аудит | Текущий исследовательский baseline |
 | [R024](024-communigate-review.md) | Перенесётся ли система на CommuniGate? | Остановлено пользователем: 12/24, 11 ReAct-исследований, 7 новых Families; независимый аудит завершённых результатов пройден | Частичный эксперимент; baseline остаётся R023 |
+| [R025](025-cef-pipeline-review.md) | Сможет ли модель снять envelope своим Grok и передать CEF в детерминированный codec? | Остановлено после доказательства: 66/1132, 6 ReAct-исследований, 7 pipeline-Families; 60 reuse; полный разбор 17/39 полей | Structured pipeline подтверждён частично |
+| [R026](026-symantec-kv-review.md) | Выберет ли модель структурный codec для Symantec positional payload? | 1/1; выбран `grok → kv`; 26 captures; расширенные CSV/KV params проверены на 997 строках | KV pipeline подтверждён на одном наблюдении |
 
 ## Общие условия ранних экспериментов
 

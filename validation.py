@@ -1,5 +1,6 @@
 import grok
-from schemas import GrokPattern, ParserResult, Response
+import pipeline
+from schemas import FieldConstraint, GrokPattern, ParserResult, Response
 import storage
 
 
@@ -20,6 +21,9 @@ def check_response(response: Response, raw: str) -> dict | None:
             ),
             "details": {"invalid_sources": invalid_sources},
         }
+
+    if response.parser.kind == "pipeline":
+        return check_pipeline_response(response, raw)
 
     pattern_issues = grok.validate_patterns(response.parser.patterns)
     if pattern_issues:
@@ -87,7 +91,10 @@ def check_response(response: Response, raw: str) -> dict | None:
             family["layers"] == layers
             and family_patterns == pattern_objects
             and family["record_schema"] == record_schema
-            and family["constraints"] == constraints
+            and [
+                FieldConstraint.model_validate(rule).model_dump(mode="json")
+                for rule in family["constraints"]
+            ] == constraints
         ):
             return None
     return {
@@ -99,4 +106,53 @@ def check_response(response: Response, raw: str) -> dict | None:
             "Для reuse верни parser и record_schema существующей Family без изменений."
         ),
         "details": {"expected": "patterns, layers и record_schema должны совпасть с содержимым SQLite."},
+    }
+
+
+def check_pipeline_response(response: Response, raw: str) -> dict | None:
+    parser_result = pipeline.execute_pipeline(response.parser.stages, raw)
+    validation = grok.validate_result(
+        ParserResult.model_validate(parser_result),
+        response.record_schema,
+        response.parser.constraints,
+    )
+    if not validation["ok"]:
+        return {
+            "error": "parser_validation_failed",
+            "message": "Финальный pipeline не прошёл независимое исполнение на исходной RAW-строке.",
+            "recovery": (
+                "Исправь stages/record_schema, вызови execute_pipeline_parser, "
+                "validate_pipeline_result и evaluate_pipeline_candidate, затем сохрани корректную Family."
+            ),
+            "details": {
+                "issues": validation["issues"],
+                "failed_layer": parser_result.get("failed_layer"),
+                "residual": parser_result.get("residual"),
+            },
+        }
+
+    stages = [stage.model_dump(mode="json") for stage in response.parser.stages]
+    record_schema = [field.model_dump(mode="json") for field in response.record_schema]
+    constraints = [constraint.model_dump(mode="json") for constraint in response.parser.constraints]
+    for item in storage.list_families()["families"]:
+        family = storage.get_family(item["family_id"])["family"]
+        if (
+            family["stages"] == stages
+            and family["patterns"] == []
+            and family["layers"] == []
+            and family["record_schema"] == record_schema
+            and [
+                FieldConstraint.model_validate(rule).model_dump(mode="json")
+                for rule in family["constraints"]
+            ] == constraints
+        ):
+            return None
+    return {
+        "error": "parser_not_persisted",
+        "message": "Исполненный Response.parser не совпадает ни с одной сохранённой pipeline Family.",
+        "recovery": (
+            "Для новой или изменённой грамматики сохрани pipeline через save_pipeline_family "
+            "и проверь через get_parser_family. Для reuse верни существующие stages без изменений."
+        ),
+        "details": {"expected": "stages, record_schema и constraints должны совпасть с содержимым SQLite."},
     }

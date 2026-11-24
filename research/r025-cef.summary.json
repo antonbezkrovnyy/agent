@@ -1,0 +1,63 @@
+{
+  "file": "C:\\Users\\aa.bezkrovnyy\\Downloads\\opensecuritydatalake\\parser-react\\data\\artifact_edr_av.log",
+  "database": "research\\r025-cef.db",
+  "status": "stopped_by_user",
+  "source_end_line": 1132,
+  "total_lines": 1132,
+  "processed_lines": 66,
+  "covered_without_model": 60,
+  "researched_with_model": 6,
+  "unprocessed_range": {
+    "start": 67,
+    "end": 1132
+  },
+  "failed_lines": [],
+  "families": 67,
+  "parser_revisions": 93,
+  "new_pipeline_families": 7,
+  "new_pipeline_revisions": 7,
+  "grok_patterns": 295,
+  "research_results": 83,
+  "duration_seconds": 2256.961,
+  "stopped_at": "2026-11-24T07:41:33.789070+00:00",
+  "semantic_embeddings": 481,
+  "codec_preflight": {
+    "model_grok_then_cef_lines_checked": 1132,
+    "errors": 0
+  },
+  "quality_audit": {
+    "research_responses_checked": 6,
+    "new_pipeline_families_checked": 7,
+    "new_pipeline_family_errors": 0,
+    "grok_examples_checked": 295,
+    "grok_issues": [],
+    "processed_coverage": {
+      "1_match": 66
+    }
+  },
+  "interrupted_research": {
+    "line": 67,
+    "family_id": "trendmicro_deep_security_agent_cef_dpi_xss_prevention",
+    "family_saved_and_validated": true,
+    "research_result_saved": false
+  },
+  "registry_notes": {
+    "inline_envelope_patterns": 21,
+    "inline_patterns_missing_global": [
+      "CEF_BSD_TIMESTAMP",
+      "CEF_HOST",
+      "CEF_PAYLOAD",
+      "CEF_SYSLOG_PRI",
+      "DSA_CEF_PAYLOAD",
+      "DS_BSD_TIMESTAMP",
+      "DS_CEF_PAYLOAD",
+      "DS_HOST",
+      "DS_SYSLOG_PRI",
+      "TM_DS_BSD_TIMESTAMP",
+      "TM_DS_CEF_PAYLOAD",
+      "TM_DS_HOST",
+      "TM_DS_PRI"
+    ],
+    "semantic_aliases_allowed": true
+  }
+}

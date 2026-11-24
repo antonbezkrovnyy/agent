@@ -1,0 +1,39 @@
+{
+  "file": "C:\\Users\\aa.bezkrovnyy\\Downloads\\opensecuritydatalake\\parser-react\\data\\artifact_edr_av.log",
+  "database": "research\\r026-symantec.db",
+  "status": "completed_single_observation",
+  "observation": "<3>Jul 26 18:06:00 OAK-SYM-V01 SymantecServer: SCID0045,Local Host IP: 239.0.1.12,Local Port: 2,Local Host MAC: 01005E00010C,Remote Host IP: 10.3.169.19,Remote Host Name: ,Remote Port: 0,Remote Host MAC: 482E72EC0EAA,IP,Inbound,Begin: 2024-07-26 17:49:10,End Time: 2024-07-26 17:49:10,Occurrences: 1,Application: ,Rule: Allow IGMP traffic,Location: Default,User Name: sumorale,Domain Name: OSCORP,Action: Allowed,SHA-256: ,MD-5:",
+  "processed_lines": 1,
+  "researched_with_model": 1,
+  "covered_without_model": 0,
+  "failed_lines": [],
+  "research_id": 84,
+  "new_family": "symantec_endpoint_traffic_log_symantecserver@1",
+  "pipeline": ["grok", "kv"],
+  "captures": 26,
+  "families": 68,
+  "parser_revisions": 94,
+  "grok_patterns": 297,
+  "research_results": 84,
+  "duration_seconds": 192.052,
+  "completed_at": "2026-11-24T07:56:20.352247+00:00",
+  "semantic_embeddings": 485,
+  "codec_preflight": {
+    "symantec_lines_checked": 997,
+    "column_counts": {
+      "21": 943,
+      "7": 47,
+      "6": 7
+    },
+    "errors": 0,
+    "advanced_parameter_checks": "passed"
+  },
+  "quality_audit": {
+    "response_validation": "passed",
+    "pipeline_families_checked": 8,
+    "pipeline_family_errors": 0,
+    "grok_examples_checked": 297,
+    "grok_issues": [],
+    "raw_matches": 1
+  }
+}

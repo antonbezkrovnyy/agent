@@ -7,7 +7,8 @@ import time
 
 from agent import make_agent, run_observation
 import grok
-from schemas import FieldConstraint, GrokLayer, ParserResult, RecordField
+import pipeline
+from schemas import FieldConstraint, GrokLayer, ParserResult, PipelineStage, RecordField
 import storage
 
 
@@ -18,11 +19,15 @@ def matching_revisions(raw: str, revisions: list[dict]) -> list[dict]:
         if not response["ok"]:
             continue
         family = response["family"]
-        layers = [GrokLayer.model_validate(layer) for layer in family["layers"]]
         record_schema = [RecordField.model_validate(field) for field in family["record_schema"]]
         constraints = [FieldConstraint.model_validate(rule) for rule in family["constraints"]]
-        patterns = {pattern["name"]: pattern["definition"] for pattern in family["patterns"]}
-        parser_result = grok.execute_parser(layers, patterns, raw)
+        if family["stages"]:
+            stages = [PipelineStage.model_validate(stage) for stage in family["stages"]]
+            parser_result = pipeline.execute_pipeline(stages, raw)
+        else:
+            layers = [GrokLayer.model_validate(layer) for layer in family["layers"]]
+            patterns = {pattern["name"]: pattern["definition"] for pattern in family["patterns"]}
+            parser_result = grok.execute_parser(layers, patterns, raw)
         validation = grok.validate_result(
             ParserResult.model_validate(parser_result),
             record_schema,
@@ -63,6 +68,7 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="Построчное покрытие RAW corpus сохранёнными parser families.")
     parser.add_argument("file", type=Path, help="UTF-8 файл с одной RAW-строкой на строку.")
     parser.add_argument("--reset", action="store_true", help="Удалить текущую RESEARCH_DB и журналы перед запуском.")
+    parser.add_argument("--end-line", type=int, help="Обработать только строки с первой по указанную включительно.")
     args = parser.parse_args()
 
     database = Path(os.getenv("RESEARCH_DB", "research/log_research.db"))
@@ -75,6 +81,10 @@ def main() -> None:
         print(f"RESET database={database} built_in_grok=0", flush=True)
 
     lines = [line for line in args.file.read_text(encoding="utf-8").splitlines() if line.strip()]
+    if args.end_line is not None:
+        if not 1 <= args.end_line <= len(lines):
+            parser.error(f"--end-line должен быть в диапазоне 1..{len(lines)}")
+        lines = lines[:args.end_line]
     total = len(lines)
     print(f"START total={total} database={database}", flush=True)
     prior_researched = 0
@@ -175,6 +185,7 @@ def main() -> None:
         "file": str(args.file),
         "database": str(database),
         "total_lines": total,
+        "source_end_line": args.end_line or total,
         "covered_without_model": total - prior_researched - researched,
         "researched_with_model": prior_researched + researched,
         "uncovered_lines": uncovered,
