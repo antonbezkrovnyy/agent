@@ -13,6 +13,7 @@ from pydantic import Field, ValidationError
 import grok
 import semantic
 from schemas import (
+    ConstraintsInput,
     FamilyDescription,
     GrokPattern,
     LayersInput,
@@ -144,9 +145,10 @@ def execute_grok_parser(
 def validate_grok_result(
     parser_result: ParserResult,
     record_schema: RecordSchemaInput,
+    constraints: ConstraintsInput = [],
 ) -> dict:
-    """Проверяет успех, пустой residual, обязательные captures и типы integer/ipv4; возвращает список issues."""
-    return grok.validate_result(parser_result, record_schema)
+    """Проверяет residual, required, типы, диапазоны и межполевые ограничения; возвращает issues."""
+    return grok.validate_result(parser_result, record_schema, constraints)
 
 
 @tool
@@ -162,9 +164,10 @@ def evaluate_candidate(
         ParserBaseline | None,
         Field(description="Прежний парсер и его наблюдения; null, если независимый baseline не требуется."),
     ] = None,
+    constraints: ConstraintsInput = [],
 ) -> dict:
-    """Независимо проверяет candidate и optional baseline; общий ok=true только при успехе всех наблюдений."""
-    return grok.evaluate_candidate(layers, patterns, record_schema, observations, baseline)
+    """Независимо проверяет candidate и baseline со всеми ограничениями; ok=true только при успехе всех наблюдений."""
+    return grok.evaluate_candidate(layers, patterns, record_schema, observations, baseline, constraints)
 
 
 @tool
@@ -172,9 +175,17 @@ def save_grok_pattern(
     name: PatternName,
     definition: PatternDefinition,
     description: Annotated[str, Field(min_length=1, description="Назначение и границы применения конструкции.")],
+    positive_examples: Annotated[
+        list[str],
+        Field(min_length=1, description="Непустой список полных входов, которые конструкция обязана принять."),
+    ],
+    negative_examples: Annotated[
+        list[str],
+        Field(min_length=1, description="Непустой список полных входов, которые конструкция обязана отклонить."),
+    ],
 ) -> dict:
     """Сохраняет Grok-конструкцию и её embedding для семантического поиска через настроенного провайдера."""
-    saved = storage.save_grok(name, definition, description)
+    saved = storage.save_grok(name, definition, description, positive_examples, negative_examples)
     if saved["ok"]:
         semantic.index_grok(name)
     return saved
@@ -214,7 +225,7 @@ def semantic_search_parser_families(
 def semantic_search_parsers(
     query: Annotated[str, Field(min_length=1, description="Входные данные, слои, выходные поля и особенности нужной parser revision.")],
 ) -> dict:
-    """Ищет все parser revisions по смыслу через embedding API; возвращает family_id/revision/score."""
+    """Ищет последние parser revisions по смыслу через embedding API; история не участвует в обычном поиске."""
     return semantic.search_parsers_semantic(query)
 
 
@@ -240,8 +251,31 @@ def save_parser_family(
         ParserDescription,
         Field(description="Развёрнутое описание конкретной parser revision, регрессии и ограничений."),
     ],
+    constraints: ConstraintsInput = [],
 ) -> dict:
-    """Сохраняет ревизию и два описания, затем индексирует Family и parser для семантического поиска."""
+    """Проверяет примеры, сохраняет ревизию и индексирует Family и parser для семантического поиска."""
+    pattern_issues = grok.validate_patterns(patterns)
+    if pattern_issues:
+        return {
+            "ok": False,
+            "error": "grok_pattern_validation_failed",
+            "message": "Family не сохранена: исправьте зависимости и исполняемые примеры.",
+            "issues": pattern_issues,
+        }
+    for pattern in patterns:
+        existing = storage.get_grok(pattern.name)
+        if not existing["ok"]:
+            continue
+        stored = existing["pattern"]
+        if stored["definition"] != pattern.definition:
+            return {
+                "ok": False,
+                "error": "grok_registry_conflict",
+                "message": "Определение Family расходится с глобальным Grok. Используйте сохранённое определение или новое имя.",
+                "pattern": pattern.name,
+                "stored_definition": stored["definition"],
+                "received_definition": pattern.definition,
+            }
     saved = storage.save_family(
         family_id,
         revision,
@@ -251,6 +285,7 @@ def save_parser_family(
         evidence,
         family_description.model_dump(mode="json"),
         parser_description.model_dump(mode="json"),
+        [constraint.model_dump(mode="json") for constraint in constraints],
     )
     if saved["ok"]:
         semantic.index_family(family_id, revision)

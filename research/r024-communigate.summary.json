@@ -1,0 +1,38 @@
+{
+  "file": "C:\\Users\\aa.bezkrovnyy\\Downloads\\opensecuritydatalake\\parser-react\\data\\mail_communigate.log",
+  "database": "research\\r024-communigate.db",
+  "status": "stopped_by_user",
+  "total_lines": 24,
+  "processed_lines": 12,
+  "covered_without_model": 1,
+  "researched_with_model": 11,
+  "unprocessed_lines": [13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24],
+  "failed_lines": [],
+  "families": 67,
+  "parser_revisions": 99,
+  "grok_patterns": 356,
+  "research_results": 88,
+  "duration_seconds": 3197.864,
+  "stopped_at": "2026-11-24T06:28:42.919205+00:00",
+  "semantic_embeddings": 554,
+  "quality_audit": {
+    "research_responses_checked": 11,
+    "source_paths_checked_responses": 11,
+    "responses_persisted_in_exact_revisions": 11,
+    "grok_examples_checked": 356,
+    "processed_coverage": {
+      "1_match": 12
+    }
+  },
+  "quality_repair": {
+    "pattern": "IMAP_TLS_ACCEPT_FAIL_BODY",
+    "change": "Replaced a valid free-text suffix incorrectly used as a negative example; regex and positive examples unchanged.",
+    "semantic_embedding_synchronized": true
+  },
+  "interrupted_research": {
+    "line": 13,
+    "research_result_saved": false,
+    "parser_revision_saved": false,
+    "draft_grok_patterns_retained": 8
+  }
+}

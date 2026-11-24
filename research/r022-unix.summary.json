@@ -1,0 +1,23 @@
+{
+  "file": "C:\\Users\\aa.bezkrovnyy\\Downloads\\opensecuritydatalake\\parser-react\\data\\cybercamp_art_unix.log",
+  "database": "research\\r022-unix.db",
+  "total_lines": 143,
+  "covered_without_model": 129,
+  "researched_with_model": 14,
+  "uncovered_lines": [],
+  "families": 16,
+  "parser_revisions": 32,
+  "grok_patterns": 118,
+  "research_results": 27,
+  "duration_seconds": 2906.846,
+  "completed_at": "2026-11-23T20:46:17.814599+00:00",
+  "semantic_embeddings": 182,
+  "quality_audit": {
+    "latest_families_checked": 12,
+    "source_paths_checked_responses": 14,
+    "grok_examples_checked": 118,
+    "latest_coverage": {
+      "1_match": 143
+    }
+  }
+}

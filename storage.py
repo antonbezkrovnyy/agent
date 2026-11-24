@@ -1,11 +1,19 @@
+from collections.abc import Iterator
+from contextlib import contextmanager
 import json
 import os
 from pathlib import Path
+import re
 import sqlite3
 from datetime import datetime, timezone
 
 
-def db_connect() -> sqlite3.Connection:
+def grok_dependencies(definition: str) -> list[str]:
+    return sorted(set(re.findall(r"%\{([A-Za-z0-9_]+)(?::[A-Za-z_][A-Za-z0-9_]*)?\}", definition)))
+
+
+@contextmanager
+def db_connect() -> Iterator[sqlite3.Connection]:
     path = Path(os.getenv("RESEARCH_DB", "research/log_research.db"))
     path.parent.mkdir(parents=True, exist_ok=True)
     connection = sqlite3.connect(path)
@@ -14,6 +22,8 @@ def db_connect() -> sqlite3.Connection:
             name TEXT PRIMARY KEY,
             definition TEXT NOT NULL,
             description TEXT NOT NULL,
+            positive_examples_json TEXT NOT NULL,
+            negative_examples_json TEXT NOT NULL,
             created_at TEXT NOT NULL
         );
         CREATE TABLE IF NOT EXISTS parser_families (
@@ -25,6 +35,7 @@ def db_connect() -> sqlite3.Connection:
             evidence_json TEXT NOT NULL,
             family_description_json TEXT NOT NULL,
             parser_description_json TEXT NOT NULL,
+            constraints_json TEXT NOT NULL,
             created_at TEXT NOT NULL,
             PRIMARY KEY (family_id, revision)
         );
@@ -49,20 +60,48 @@ def db_connect() -> sqlite3.Connection:
     columns = {
         row[1] for row in connection.execute("PRAGMA table_info(parser_families)").fetchall()
     }
-    for column in ("family_description_json", "parser_description_json"):
+    for column in ("family_description_json", "parser_description_json", "constraints_json"):
         if column not in columns:
+            default = "[]" if column == "constraints_json" else "{}"
             connection.execute(
-                f"ALTER TABLE parser_families ADD COLUMN {column} TEXT NOT NULL DEFAULT '{{}}'"
+                f"ALTER TABLE parser_families ADD COLUMN {column} TEXT NOT NULL DEFAULT '{default}'"
             )
-    return connection
+    grok_columns = {
+        row[1] for row in connection.execute("PRAGMA table_info(grok_patterns)").fetchall()
+    }
+    for column in ("positive_examples_json", "negative_examples_json"):
+        if column not in grok_columns:
+            connection.execute(
+                f"ALTER TABLE grok_patterns ADD COLUMN {column} TEXT NOT NULL DEFAULT '[]'"
+            )
+    connection.execute("UPDATE parser_families SET constraints_json = '[]' WHERE constraints_json = '{}'")
+    try:
+        yield connection
+        connection.commit()
+    finally:
+        connection.close()
 
 
-def save_grok(name: str, definition: str, description: str) -> dict:
+def save_grok(
+    name: str,
+    definition: str,
+    description: str,
+    positive_examples: list[str],
+    negative_examples: list[str],
+) -> dict:
     with db_connect() as connection:
         existing = connection.execute(
-            "SELECT definition, description FROM grok_patterns WHERE name = ?", (name,)
+            "SELECT definition, description, positive_examples_json, negative_examples_json "
+            "FROM grok_patterns WHERE name = ?",
+            (name,),
         ).fetchone()
-        if existing and existing != (definition, description):
+        payload = (
+            definition,
+            description,
+            json.dumps(positive_examples, ensure_ascii=False),
+            json.dumps(negative_examples, ensure_ascii=False),
+        )
+        if existing and existing != payload:
             return {
                 "ok": False,
                 "error": "pattern_exists_with_different_definition",
@@ -72,8 +111,10 @@ def save_grok(name: str, definition: str, description: str) -> dict:
         if existing:
             return {"ok": True, "name": name, "status": "unchanged"}
         connection.execute(
-            "INSERT INTO grok_patterns VALUES (?, ?, ?, ?)",
-            (name, definition, description, datetime.now(timezone.utc).isoformat()),
+            "INSERT INTO grok_patterns ("
+            "name, definition, description, positive_examples_json, negative_examples_json, created_at"
+            ") VALUES (?, ?, ?, ?, ?, ?)",
+            (name, *payload, datetime.now(timezone.utc).isoformat()),
         )
     return {"ok": True, "name": name, "status": "saved"}
 
@@ -81,7 +122,8 @@ def save_grok(name: str, definition: str, description: str) -> dict:
 def get_grok(name: str) -> dict:
     with db_connect() as connection:
         row = connection.execute(
-            "SELECT name, definition, description, created_at FROM grok_patterns WHERE name = ?",
+            "SELECT name, definition, description, positive_examples_json, negative_examples_json, created_at "
+            "FROM grok_patterns WHERE name = ?",
             (name,),
         ).fetchone()
     if not row:
@@ -97,7 +139,10 @@ def get_grok(name: str) -> dict:
             "name": row[0],
             "definition": row[1],
             "description": row[2],
-            "created_at": row[3],
+            "positive_examples": json.loads(row[3]),
+            "negative_examples": json.loads(row[4]),
+            "dependencies": grok_dependencies(row[1]),
+            "created_at": row[5],
         },
     }
 
@@ -106,14 +151,21 @@ def search_grok(query: str) -> dict:
     like = f"%{query}%"
     with db_connect() as connection:
         rows = connection.execute(
-            "SELECT name, definition, description FROM grok_patterns "
-            "WHERE name LIKE ? OR definition LIKE ? OR description LIKE ? LIMIT 20",
+            "SELECT name, definition, description, positive_examples_json, negative_examples_json "
+            "FROM grok_patterns WHERE name LIKE ? OR definition LIKE ? OR description LIKE ? LIMIT 20",
             (like, like, like),
         ).fetchall()
     return {
         "ok": True,
         "patterns": [
-            {"name": row[0], "definition": row[1], "description": row[2]}
+            {
+                "name": row[0],
+                "definition": row[1],
+                "description": row[2],
+                "positive_examples": json.loads(row[3]),
+                "negative_examples": json.loads(row[4]),
+                "dependencies": grok_dependencies(row[1]),
+            }
             for row in rows
         ],
     }
@@ -128,11 +180,12 @@ def save_family(
     evidence: list[str],
     family_description: dict,
     parser_description: dict,
+    constraints: list[dict],
 ) -> dict:
     with db_connect() as connection:
         existing = connection.execute(
             "SELECT patterns_json, layers_json, record_schema_json, evidence_json, "
-            "family_description_json, parser_description_json "
+            "family_description_json, parser_description_json, constraints_json "
             "FROM parser_families WHERE family_id = ? AND revision = ?",
             (family_id, revision),
         ).fetchone()
@@ -143,6 +196,7 @@ def save_family(
             json.dumps(evidence, ensure_ascii=False),
             json.dumps(family_description, ensure_ascii=False),
             json.dumps(parser_description, ensure_ascii=False),
+            json.dumps(constraints, ensure_ascii=False),
         )
         if existing and existing != payload:
             return {
@@ -157,8 +211,8 @@ def save_family(
         connection.execute(
             "INSERT INTO parser_families ("
             "family_id, revision, patterns_json, layers_json, record_schema_json, evidence_json, "
-            "family_description_json, parser_description_json, created_at"
-            ") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            "family_description_json, parser_description_json, constraints_json, created_at"
+            ") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             (family_id, revision, *payload, datetime.now(timezone.utc).isoformat()),
         )
     return {"ok": True, "family_id": family_id, "revision": revision, "status": "saved"}
@@ -202,14 +256,14 @@ def get_family(family_id: str, revision: int | None = None) -> dict:
         if revision is None:
             row = connection.execute(
                 "SELECT revision, patterns_json, layers_json, record_schema_json, evidence_json, "
-                "family_description_json, parser_description_json "
+                "family_description_json, parser_description_json, constraints_json "
                 "FROM parser_families WHERE family_id = ? ORDER BY revision DESC LIMIT 1",
                 (family_id,),
             ).fetchone()
         else:
             row = connection.execute(
                 "SELECT revision, patterns_json, layers_json, record_schema_json, evidence_json, "
-                "family_description_json, parser_description_json "
+                "family_description_json, parser_description_json, constraints_json "
                 "FROM parser_families WHERE family_id = ? AND revision = ?",
                 (family_id, revision),
             ).fetchone()
@@ -232,6 +286,7 @@ def get_family(family_id: str, revision: int | None = None) -> dict:
             "evidence": json.loads(row[4]),
             "family_description": json.loads(row[5]),
             "parser_description": json.loads(row[6]),
+            "constraints": json.loads(row[7]),
         },
     }
 

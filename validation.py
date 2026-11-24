@@ -1,14 +1,60 @@
 import grok
-from schemas import ParserResult, Response
+from schemas import GrokPattern, ParserResult, Response
 import storage
 
 
 def check_response(response: Response, raw: str) -> dict | None:
+    structure_paths = {layer.path for layer in response.structure}
+    invalid_sources = [
+        {"field": field.name, "source": field.source}
+        for field in response.record_schema
+        if field.category == "dynamic" and field.source not in structure_paths
+    ]
+    if invalid_sources:
+        return {
+            "error": "contract_source_mismatch",
+            "message": "Каждый dynamic record_schema.source должен быть точным path из structure.",
+            "recovery": (
+                "Исправь structure или record_schema.source: добавь отсутствующие пути значений "
+                "и используй канонический путь $ для raw. Затем повтори полный Response."
+            ),
+            "details": {"invalid_sources": invalid_sources},
+        }
+
+    pattern_issues = grok.validate_patterns(response.parser.patterns)
+    if pattern_issues:
+        return {
+            "error": "grok_pattern_validation_failed",
+            "message": "Grok-конструкции не прошли зависимости или исполняемые примеры.",
+            "recovery": (
+                "Исправь определения и positive/negative examples. Примеры должны быть полными "
+                "входами для соответствующей конструкции, затем повтори execute_grok_parser."
+            ),
+            "details": {"issues": pattern_issues},
+        }
+
+    registry_conflicts = []
+    for pattern in response.parser.patterns:
+        existing = storage.get_grok(pattern.name)
+        if not existing["ok"]:
+            continue
+        stored = existing["pattern"]
+        if stored["definition"] != pattern.definition:
+            registry_conflicts.append(pattern.name)
+    if registry_conflicts:
+        return {
+            "error": "grok_registry_conflict",
+            "message": "Response patterns расходятся с глобальным Grok Registry.",
+            "recovery": "Используй сохранённые definition/description/examples или сохрани согласованную конструкцию под новым именем.",
+            "details": {"patterns": registry_conflicts},
+        }
+
     patterns = {pattern.name: pattern.definition for pattern in response.parser.patterns}
     parser_result = grok.execute_parser(response.parser.layers, patterns, raw)
     validation = grok.validate_result(
         ParserResult.model_validate(parser_result),
         response.record_schema,
+        response.parser.constraints,
     )
     if not validation["ok"]:
         return {
@@ -25,17 +71,23 @@ def check_response(response: Response, raw: str) -> dict | None:
             },
         }
 
+    pattern_objects = {
+        pattern.name: pattern.model_dump(mode="json") for pattern in response.parser.patterns
+    }
     layers = [layer.model_dump(mode="json") for layer in response.parser.layers]
     record_schema = [field.model_dump(mode="json") for field in response.record_schema]
+    constraints = [constraint.model_dump(mode="json") for constraint in response.parser.constraints]
     for item in storage.list_families()["families"]:
         family = storage.get_family(item["family_id"])["family"]
         family_patterns = {
-            pattern["name"]: pattern["definition"] for pattern in family["patterns"]
+            pattern["name"]: GrokPattern.model_validate(pattern).model_dump(mode="json")
+            for pattern in family["patterns"]
         }
         if (
             family["layers"] == layers
-            and family_patterns == patterns
+            and family_patterns == pattern_objects
             and family["record_schema"] == record_schema
+            and family["constraints"] == constraints
         ):
             return None
     return {

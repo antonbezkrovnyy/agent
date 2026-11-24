@@ -1,0 +1,31 @@
+{
+  "file": "C:\\Users\\aa.bezkrovnyy\\Downloads\\opensecuritydatalake\\parser-react\\data\\os_solaris.log",
+  "database": "research\\r023-solaris.db",
+  "total_lines": 67,
+  "covered_without_model": 17,
+  "researched_with_model": 50,
+  "uncovered_lines": [],
+  "families": 60,
+  "parser_revisions": 86,
+  "grok_patterns": 290,
+  "research_results": 77,
+  "duration_seconds": 10751.156,
+  "completed_at": "2026-11-23T23:50:13.913603+00:00",
+  "semantic_embeddings": 462,
+  "quality_repair": {
+    "synchronized_patterns": [
+      "AUDIT_PATH",
+      "AUDIT_AUDITON_EVENT_NAME",
+      "AUDIT_MODIFY_LOGIN_TEXT_BODY",
+      "AUDIT_DELETE_USER_UAUTH_TEXT_BODY",
+      "AUDIT_RSH_ACCESS_BODY_TEXT",
+      "AUDIT_REMOTE_NODE"
+    ],
+    "latest_new_families_checked": 44,
+    "source_paths_checked_responses": 50,
+    "grok_examples_checked": 290,
+    "original_corpus_lines": 67,
+    "current_external_file_lines": 66,
+    "note": "WARNING line 67 is preserved in progress.jsonl but is absent from the current external file; no external files were modified by the agent."
+  }
+}

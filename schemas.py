@@ -62,6 +62,14 @@ class GrokPattern(SchemaModel):
         description="Regex-тело конструкции; может ссылаться на другие конструкции через %{ИМЯ} или %{ИМЯ:capture}."
     )
     description: str = Field(description="Какой фрагмент формата распознаёт конструкция и каковы границы её применения.")
+    positive_examples: list[str] = Field(
+        default_factory=list,
+        description="Примеры, которые конструкция обязана принять; минимум один для новой конструкции.",
+    )
+    negative_examples: list[str] = Field(
+        default_factory=list,
+        description="Примеры, которые конструкция обязана отклонить; минимум один для новой конструкции.",
+    )
 
 
 class GrokLayer(SchemaModel):
@@ -76,11 +84,30 @@ class GrokLayer(SchemaModel):
     )
 
 
+class FieldConstraint(SchemaModel):
+    """Ограничение присутствия capture в зависимости от значений других captures."""
+
+    field: str = Field(description="Имя capture, к которому применяется ограничение.")
+    allowed_when: dict[str, list[str]] = Field(
+        default_factory=dict,
+        description="Если field присутствует, перечисленные captures должны иметь одно из допустимых значений.",
+    )
+    required_when: dict[str, list[str]] = Field(
+        default_factory=dict,
+        description="Если перечисленные captures имеют одно из значений, field обязан быть непустым.",
+    )
+    description: str = Field(description="Смысловое обоснование ограничения и наблюдения, на которых оно основано.")
+
+
 class ParserDefinition(SchemaModel):
-    """Набор именованных конструкций и порядок их применения к исходной строке."""
+    """Набор именованных конструкций, порядок разбора и межполевые ограничения."""
 
     patterns: list[GrokPattern] = Field(description="Пользовательские Grok-конструкции, необходимые этому парсеру.")
     layers: list[GrokLayer] = Field(description="Слои разбора от raw к вложенным данным в порядке исполнения.")
+    constraints: list[FieldConstraint] = Field(
+        default_factory=list,
+        description="Межполевые ограничения, которые невозможно выразить одной Grok-конструкцией без ложных комбинаций.",
+    )
 
 
 class Response(SchemaModel):
@@ -126,6 +153,10 @@ class ParserBaseline(SchemaModel):
         description="Схема прежнего парсера; пустой список означает использование схемы кандидата.",
     )
     observations: list[Observation] = Field(description="Строки, на которых прежний парсер обязан сохранить результат.")
+    constraints: list[FieldConstraint] = Field(
+        default_factory=list,
+        description="Межполевые ограничения прежнего parser; пустой список означает отсутствие дополнительных правил.",
+    )
 
 
 class FamilyDescription(SchemaModel):
@@ -175,4 +206,8 @@ LayersInput = Annotated[
 RecordSchemaInput = Annotated[
     list[RecordField],
     Field(description="Контракт полей, используемый для проверки required и типов integer/ipv4."),
+]
+ConstraintsInput = Annotated[
+    list[FieldConstraint],
+    Field(description="Межполевые ограничения allowed_when/required_when; пустой список допустим."),
 ]

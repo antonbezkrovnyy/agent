@@ -187,6 +187,7 @@ def search_grok_semantic(query: str) -> dict:
             "name": row[0],
             "definition": row[1],
             "description": row[2],
+            "dependencies": storage.grok_dependencies(row[1]),
             "score": scores[row[0]],
         }
         for row in rows
@@ -227,7 +228,9 @@ def search_parsers_semantic(query: str) -> dict:
     with storage.db_connect() as connection:
         rows = connection.execute(
             "SELECT family_id, revision, evidence_json, family_description_json, layers_json, "
-            "record_schema_json, parser_description_json FROM parser_families"
+            "record_schema_json, parser_description_json FROM parser_families AS current "
+            "WHERE revision = (SELECT MAX(revision) FROM parser_families "
+            "WHERE family_id = current.family_id)"
         ).fetchall()
     if not rows:
         return {"ok": True, "model": model_name(), "parsers": []}

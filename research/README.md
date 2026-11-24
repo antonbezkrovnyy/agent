@@ -24,6 +24,11 @@
 | [R017](017-semantic-search-review.md) | Можно ли находить Family, parser revisions и Grok по смыслу? | Добавлены развёрнутые описания и `semantic_embeddings_v2`; GPT-Lab `embedding` правильно ранжирует кандидатов; обе строки завершились `reuse` | Semantic search работает |
 | [R018](018-cisco-corpus-review.md) | Можно ли покрыть весь Cisco corpus с пустого Registry и нуля встроенных Grok? | 1763/1763 покрыто; 9 ReAct-исследований; 3 Family, 9 revisions, 48 Grok; resume после перезагрузки успешен | Текущий системный baseline |
 | [R019](019-model-quality-audit.md) | Насколько хороши parser, Grok, описания и revisions после corpus run? | Сильная архитектура и совместимость; найдены negative-case проблемы, 66 source mismatches, ошибка PRI и расхождения описаний | Аудит качества R018 |
+| [R020](020-quality-gates-review.md) | Устранят ли детерминированные quality gates дефекты R019 без потери corpus? | 1763/1763 покрыто; 0 source mismatches; 49 Grok с examples; constraints, save gate и latest-first | Quality gates работают |
+| [R021](021-juniper-review.md) | Перенесётся ли система на новый текстовый источник? | 26/26 Junos; 3 ReAct-исследования; новая Family; 64 Grok; устранён global/Family drift | Новый источник покрыт |
+| [R022](022-unix-review.md) | Справится ли система с разнородными Unix-событиями? | 143/143; 14 ReAct-исследований; 12 новых Families; 118 Grok; независимый аудит без repair | Unix corpus покрыт |
+| [R023](023-solaris-review.md) | Выдержит ли система разнообразие Solaris sshd/audit? | 67/67; 50 ReAct-исследований; 44 новых Families; 290 Grok; metadata repair и независимый аудит | Текущий исследовательский baseline |
+| [R024](024-communigate-review.md) | Перенесётся ли система на CommuniGate? | Остановлено пользователем: 12/24, 11 ReAct-исследований, 7 новых Families; независимый аудит завершённых результатов пройден | Частичный эксперимент; baseline остаётся R023 |
 
 ## Общие условия ранних экспериментов
 
@@ -49,6 +54,6 @@
 | Догадки о конфигурации | Да | Нет | Нет |
 | Осторожность с неизвестными значениями | Низкая | Выше | Низкая для hex |
 
-**Текущий системный baseline — R018.** Все 1763 строки Cisco corpus покрыты с пустого Registry и нуля встроенных Grok. Девять непокрытых наблюдений исследованы через ReAct, остальные строки обработаны сохранёнными parser revisions. Semantic search используется для кандидатов, окончательное покрытие подтверждается исполнением и валидацией.
+**Текущий исследовательский baseline — R023.** Cisco, Juniper, Unix и Solaris подтверждают работу на четырёх corpus: 1999 исходных строк, 77 ReAct-исследований, 60 Families, 290 Grok. Quality gates, latest-first dispatch и global/Family consistency проходят независимый аудит.
 
-Ранние результаты относятся к одной-двум строкам, R018 — к полному доступному corpus. Эталонная точность всех captures, универсальность для новых источников и production-качество не доказаны.
+Эталонная точность всех captures, универсальность для других источников и production-качество не доказаны.

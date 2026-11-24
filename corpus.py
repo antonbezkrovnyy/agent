@@ -7,24 +7,26 @@ import time
 
 from agent import make_agent, run_observation
 import grok
-from schemas import GrokLayer, ParserResult, RecordField
+from schemas import FieldConstraint, GrokLayer, ParserResult, RecordField
 import storage
 
 
-def matching_parsers(raw: str) -> list[dict]:
+def matching_revisions(raw: str, revisions: list[dict]) -> list[dict]:
     matches = []
-    for item in storage.list_parser_revisions():
+    for item in revisions:
         response = storage.get_family(item["family_id"], item["revision"])
         if not response["ok"]:
             continue
         family = response["family"]
         layers = [GrokLayer.model_validate(layer) for layer in family["layers"]]
         record_schema = [RecordField.model_validate(field) for field in family["record_schema"]]
+        constraints = [FieldConstraint.model_validate(rule) for rule in family["constraints"]]
         patterns = {pattern["name"]: pattern["definition"] for pattern in family["patterns"]}
         parser_result = grok.execute_parser(layers, patterns, raw)
         validation = grok.validate_result(
             ParserResult.model_validate(parser_result),
             record_schema,
+            constraints,
         )
         if validation["ok"]:
             matches.append({
@@ -33,6 +35,19 @@ def matching_parsers(raw: str) -> list[dict]:
                 "captures": len(parser_result["captures"]),
             })
     return matches
+
+
+def matching_parsers(raw: str) -> list[dict]:
+    latest = storage.list_families()["families"]
+    matches = matching_revisions(raw, latest)
+    if matches:
+        return matches
+    latest_ids = {(item["family_id"], item["revision"]) for item in latest}
+    history = [
+        item for item in storage.list_parser_revisions()
+        if (item["family_id"], item["revision"]) not in latest_ids
+    ]
+    return matching_revisions(raw, history)
 
 
 def append_progress(path: Path, event: dict) -> None:
@@ -76,6 +91,15 @@ def main() -> None:
     for index, raw in enumerate(lines, 1):
         prefix = f"[{index}/{total}]"
         matches = matching_parsers(raw)
+        if len({match["family_id"] for match in matches}) > 1:
+            append_progress(progress_path, {
+                "line": index,
+                "status": "failed",
+                "error": "ambiguous_family_match",
+                "matches": matches,
+                "raw": raw,
+            })
+            raise RuntimeError(f"ambiguous_family_match at line {index}: {matches}")
         if matches:
             covered += 1
             match = matches[0]

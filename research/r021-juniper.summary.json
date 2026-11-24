@@ -1,0 +1,19 @@
+{
+  "file": "C:\\Users\\aa.bezkrovnyy\\Downloads\\opensecuritydatalake\\parser-react\\data\\artifact_juniper.log",
+  "database": "research\\r021-juniper.db",
+  "total_lines": 26,
+  "covered_without_model": 23,
+  "researched_with_model": 3,
+  "uncovered_lines": [],
+  "families": 4,
+  "parser_revisions": 18,
+  "grok_patterns": 64,
+  "research_results": 13,
+  "duration_seconds": 811.424,
+  "completed_at": "2026-11-23T19:46:10.515192+00:00",
+  "semantic_embeddings": 100,
+  "quality_repair": {
+    "synchronized_pattern": "JUNOS_FLOW_SERVICE",
+    "registry_rule": "definition must match globally; family-specific descriptions/examples are allowed and validated"
+  }
+}

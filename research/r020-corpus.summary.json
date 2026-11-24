@@ -1,0 +1,20 @@
+{
+  "file": "data\\artifact_cisco_firewall.log",
+  "database": "research\\r020-corpus.db",
+  "total_lines": 1763,
+  "covered_without_model": 1753,
+  "researched_with_model": 10,
+  "uncovered_lines": [],
+  "families": 3,
+  "parser_revisions": 12,
+  "grok_patterns": 49,
+  "research_results": 10,
+  "duration_seconds": 2321.44,
+  "completed_at": "2026-11-23T19:07:54.883240+00:00",
+  "semantic_embeddings": 73,
+  "quality_repair": {
+    "removed_revision": "cisco_asa_acl_deny_log@6",
+    "reason": "negative example accepted 106100 and invalid intermediate grammar",
+    "repaired_examples": "ASA_ACL_NAME"
+  }
+}

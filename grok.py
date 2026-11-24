@@ -2,7 +2,7 @@ import ipaddress
 
 import regex
 
-from schemas import GrokLayer, Observation, ParserBaseline, ParserResult, RecordField
+from schemas import FieldConstraint, GrokLayer, GrokPattern, Observation, ParserBaseline, ParserResult, RecordField
 
 
 GROK_PATTERNS = {}
@@ -62,6 +62,30 @@ def execute_pattern(pattern: str, input_value: str, patterns: dict[str, str]) ->
     if pattern in GROK_PATTERNS or pattern in patterns:
         pattern = f"%{{{pattern}}}"
     return run_grok(pattern, input_value, patterns)
+
+
+def validate_patterns(patterns: list[GrokPattern]) -> list[str]:
+    definitions = {pattern.name: pattern.definition for pattern in patterns}
+    issues = []
+    for pattern in patterns:
+        try:
+            compile_grok(f"%{{{pattern.name}}}", definitions)
+        except ValueError as error:
+            issues.append(f"invalid_pattern:{pattern.name}:{error}")
+            continue
+        if not pattern.positive_examples:
+            issues.append(f"missing_positive_examples:{pattern.name}")
+        if not pattern.negative_examples:
+            issues.append(f"missing_negative_examples:{pattern.name}")
+        for example in pattern.positive_examples:
+            result = run_grok(f"%{{{pattern.name}}}", example, definitions)
+            if not result["ok"]:
+                issues.append(f"positive_example_failed:{pattern.name}:{example!r}:{result['error']}")
+        for example in pattern.negative_examples:
+            result = run_grok(f"%{{{pattern.name}}}", example, definitions)
+            if result["ok"]:
+                issues.append(f"negative_example_matched:{pattern.name}:{example!r}")
+    return issues
 
 
 def execute_parser(layers: list[GrokLayer], patterns: dict[str, str], raw: str) -> dict:
@@ -139,7 +163,11 @@ def execute_parser(layers: list[GrokLayer], patterns: dict[str, str], raw: str) 
     }
 
 
-def validate_result(parser_result: ParserResult, record_schema: list[RecordField]) -> dict:
+def validate_result(
+    parser_result: ParserResult,
+    record_schema: list[RecordField],
+    constraints: list[FieldConstraint] | None = None,
+) -> dict:
     issues = []
     captures = parser_result.captures
     if not parser_result.ok:
@@ -165,6 +193,28 @@ def validate_result(parser_result: ParserResult, record_schema: list[RecordField
                 ipaddress.ip_address(value)
             except ValueError:
                 issues.append(f"invalid_ip:{name}:actual={value}")
+        if "int" in field_type:
+            try:
+                numeric = int(value)
+                if name == "pri" and not 0 <= numeric <= 191:
+                    issues.append(f"invalid_pri_range:{name}:actual={value}:expected=0..191")
+                if (name in {"src_port", "dst_port"} or name.endswith("_port")) and not 0 <= numeric <= 65535:
+                    issues.append(f"invalid_port_range:{name}:actual={value}:expected=0..65535")
+            except (TypeError, ValueError):
+                pass
+    for constraint in constraints or []:
+        value = captures.get(constraint.field)
+        if value is not None:
+            for condition_field, allowed in constraint.allowed_when.items():
+                if captures.get(condition_field) not in allowed:
+                    issues.append(
+                        f"forbidden_field:{constraint.field}:when={condition_field}={captures.get(condition_field)}"
+                    )
+        if constraint.required_when and all(
+            captures.get(name) in allowed for name, allowed in constraint.required_when.items()
+        ):
+            if value is None or value == "":
+                issues.append(f"missing_conditional_field:{constraint.field}")
     if parser_result.residual:
         issues.append("nonempty_residual")
     return {"ok": not issues, "issues": issues, "captures": captures}
@@ -175,6 +225,7 @@ def evaluate_observations(
     patterns: dict[str, str],
     record_schema: list[RecordField],
     observations: list[Observation],
+    constraints: list[FieldConstraint] | None = None,
 ) -> dict:
     results = []
     for index, observation in enumerate(observations, 1):
@@ -186,7 +237,7 @@ def evaluate_observations(
             })
             continue
         parser_result = ParserResult.model_validate(execute_parser(layers, patterns, observation.raw))
-        validation = validate_result(parser_result, record_schema)
+        validation = validate_result(parser_result, record_schema, constraints)
         issues = list(validation["issues"])
         for name, expected in observation.expected.items():
             actual = parser_result.captures.get(name)
@@ -209,8 +260,9 @@ def evaluate_candidate(
     record_schema: list[RecordField],
     observations: list[Observation],
     baseline: ParserBaseline | None,
+    constraints: list[FieldConstraint] | None = None,
 ) -> dict:
-    candidate = evaluate_observations(layers, patterns, record_schema, observations)
+    candidate = evaluate_observations(layers, patterns, record_schema, observations, constraints)
     result = {"ok": candidate["ok"], "candidate": candidate}
     if baseline:
         previous = evaluate_observations(
@@ -218,6 +270,7 @@ def evaluate_candidate(
             baseline.patterns,
             baseline.record_schema or record_schema,
             baseline.observations,
+            baseline.constraints,
         )
         result["baseline"] = previous
         result["ok"] = result["ok"] and previous["ok"]
