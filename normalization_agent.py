@@ -63,10 +63,16 @@ def check_revision(response: NormalizationRevision) -> dict | None:
     return None
 
 
-def run_normalization(agent, family_id: str, parser_revision: int) -> tuple[NormalizationRevision, int]:
+def run_normalization(
+    agent,
+    family_id: str,
+    parser_revision: int,
+    source_default_year: int | None = None,
+) -> tuple[NormalizationRevision, int]:
     messages = [HumanMessage(content=NORMALIZATION_PROMPT.format(
         family_id=family_id,
         parser_revision=parser_revision,
+        source_default_year=source_default_year or "не задан",
     ))]
     while True:
         final_state = None
@@ -124,8 +130,14 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="Нормализация полей существующей parser Family.")
     parser.add_argument("family_id")
     parser.add_argument("parser_revision", type=int)
+    parser.add_argument("--source-default-year", type=int, help="Внешний год для timestamp без года, например 2023.")
     args = parser.parse_args()
-    run_normalization(make_normalization_agent(), args.family_id, args.parser_revision)
+    run_normalization(
+        make_normalization_agent(),
+        args.family_id,
+        args.parser_revision,
+        args.source_default_year,
+    )
 
 
 if __name__ == "__main__":

@@ -12,15 +12,21 @@ use crate::bundle::{FieldConstraint, ParserFamily, RecordField};
 pub type Captures = BTreeMap<String, String>;
 
 #[derive(Debug)]
+pub struct CompiledGrok {
+    regex: Regex,
+    captures: Vec<(String, String)>,
+}
+
+#[derive(Debug)]
 struct CompiledLayer {
     name: String,
     source: String,
-    regex: Regex,
+    regex: CompiledGrok,
 }
 
 #[derive(Debug)]
 enum CompiledCodec {
-    Grok(Regex),
+    Grok(CompiledGrok),
     Cef,
     Csv,
     Kv,
@@ -131,8 +137,9 @@ fn grok_reference() -> &'static LinearRegex {
     })
 }
 
-pub fn compile_grok(pattern: &str, patterns: &BTreeMap<String, String>) -> Result<Regex> {
+pub fn compile_grok(pattern: &str, patterns: &BTreeMap<String, String>) -> Result<CompiledGrok> {
     let mut expanded = pattern.to_string();
+    let mut logical_captures = Vec::new();
     for _ in 0..20 {
         let mut output = String::new();
         let mut last = 0;
@@ -145,8 +152,10 @@ pub fn compile_grok(pattern: &str, patterns: &BTreeMap<String, String>) -> Resul
                 .with_context(|| format!("unknown_grok_pattern:{name}"))?;
             output.push_str(&expanded[last..whole.start()]);
             if let Some(capture) = captures.get(2) {
+                let internal_name = format!("__grok_{}", logical_captures.len());
+                logical_captures.push((internal_name.clone(), capture.as_str().to_string()));
                 output.push_str("(?P<");
-                output.push_str(capture.as_str());
+                output.push_str(&internal_name);
                 output.push('>');
                 output.push_str(body);
                 output.push(')');
@@ -160,7 +169,10 @@ pub fn compile_grok(pattern: &str, patterns: &BTreeMap<String, String>) -> Resul
         }
         if !changed {
             let anchored = format!(r"\A(?:{expanded})\z");
-            return Regex::new(&anchored).context("invalid_grok_regex");
+            return Ok(CompiledGrok {
+                regex: Regex::new(&anchored).context("invalid_grok_regex")?,
+                captures: logical_captures,
+            });
         }
         output.push_str(&expanded[last..]);
         expanded = output;
@@ -168,15 +180,16 @@ pub fn compile_grok(pattern: &str, patterns: &BTreeMap<String, String>) -> Resul
     bail!("grok_reference_depth_exceeded")
 }
 
-fn run_grok(regex: &Regex, value: &str) -> std::result::Result<Captures, String> {
-    let captures = regex
+fn run_grok(grok: &CompiledGrok, value: &str) -> std::result::Result<Captures, String> {
+    let captures = grok
+        .regex
         .captures(value)
         .map_err(|error| format!("grok_execution_error:{error}"))?
         .ok_or_else(|| "no_match: pattern must match the complete layer input".to_string())?;
     let mut result = Captures::new();
-    for name in regex.capture_names().flatten() {
-        if let Some(value) = captures.name(name) {
-            result.insert(name.to_string(), value.as_str().to_string());
+    for (internal_name, logical_name) in &grok.captures {
+        if let Some(value) = captures.name(internal_name) {
+            result.insert(logical_name.clone(), value.as_str().to_string());
         }
     }
     Ok(result)
@@ -925,6 +938,39 @@ mod tests {
         assert_eq!(captures.get("host").unwrap(), "asa-01");
         assert_eq!(captures.get("port").unwrap(), "443");
         assert!(run_grok(&regex, "10.0.0.1:443").is_err());
+    }
+
+    #[test]
+    fn duplicate_capture_name_uses_last_participating_group() {
+        let patterns = BTreeMap::from([
+            ("ALT".to_string(), "(?:%{A:value}|%{B:value})".to_string()),
+            ("A".to_string(), "foo".to_string()),
+            ("B".to_string(), "bar".to_string()),
+        ]);
+        let regex = compile_grok("%{ALT}", &patterns).unwrap();
+        let captures = run_grok(&regex, "bar").unwrap();
+        assert_eq!(captures.get("value").unwrap(), "bar");
+    }
+
+    #[test]
+    fn deny_log_numeric_protocol_is_captured() {
+        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../research/r032-cisco-acl-deny-log.bundle.json");
+        let bundle = crate::bundle::FamilyBundle::from_path(&path).unwrap();
+        let definitions = bundle
+            .parser
+            .patterns
+            .iter()
+            .map(|pattern| (pattern.name.clone(), pattern.definition.clone()))
+            .collect();
+        let layer = &bundle.parser.layers[0];
+        let regex = compile_grok(&layer.pattern, &definitions).unwrap();
+        let captures = run_grok(&regex, &bundle.parser.evidence[2]).unwrap();
+        assert_eq!(
+            captures.get("protocol").map(String::as_str),
+            Some("47"),
+            "{captures:?}"
+        );
     }
 
     #[test]

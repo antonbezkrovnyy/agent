@@ -1,0 +1,49 @@
+{
+  "ok": true,
+  "file": "data/artifact_cisco_firewall.log",
+  "total": 1763,
+  "mapped": 1763,
+  "failed": 0,
+  "families": {
+    "cisco_asa_acl_verdict": 30,
+    "cisco_asa_acl_deny_log": 1729,
+    "cisco_firepower_connection_event": 4
+  },
+  "python_rust_parity": {
+    "compared": 1763,
+    "fields": [
+      "ok",
+      "status",
+      "captures",
+      "normalized",
+      "event"
+    ],
+    "mismatch_count": 0,
+    "mismatches": []
+  },
+  "bundles": {
+    "cisco_asa_acl_verdict": {
+      "parser_revision": 4,
+      "normalization_revision": 2,
+      "mapping_revision": 4,
+      "compatibility_hash": "2e8ada129cbb9b140563346ad400bfb96df09850873a55b12f6604b3a7d5f490"
+    },
+    "cisco_asa_acl_deny_log": {
+      "parser_revision": 8,
+      "normalization_revision": 1,
+      "mapping_revision": 1,
+      "compatibility_hash": "af8d09f0fbaf6c6544677b69cb95d33fdb0380b2c67c019c68061f1e7ec55575"
+    },
+    "cisco_firepower_connection_event": {
+      "parser_revision": 1,
+      "normalization_revision": 2,
+      "mapping_revision": 1,
+      "compatibility_hash": "ec50c1df23c3d24e9865fd3a995fc2ac27038d5fe2600224a8dc2789f6c7ce75"
+    }
+  },
+  "source_configuration": {
+    "source_default_year": 2023,
+    "source_timezone": "UTC",
+    "note": "Внешние лабораторные настройки для timestamp без года/timezone, не вывод из RAW."
+  }
+}

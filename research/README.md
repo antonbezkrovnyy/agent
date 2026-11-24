@@ -35,6 +35,8 @@
 | [R028](028-cisco-mp-siem-mapping-review.md) | Сможет ли отдельный mapper по описаниям и semantic taxonomy собрать событие MP SIEM? | Mapping rev4: 29 mappings, 4/4 evidence, runner 1/1; 212 полей, 232 values, 222 категории; полная регрессия не запускалась | Parser → normalization → MP SIEM работает на scoped validation |
 | [R029](029-cisco-pipeline-architecture-review.md) | Как объединить три агента в один pipeline и перенести исполнение в Rust+VRL? | Единый runner работает; semantic core совпал с production-событием; определены versioned Family Bundle и control/data planes | Итоговая исследовательская архитектура |
 | [R030](030-rust-data-plane-review.md) | Можно ли исполнять утверждённые revisions в Rust и быстро выбирать Family? | Native Rust pipeline и Aho–Corasick shortlist работают; 10/10 tests, 4/4 exact Python parity; определён dispatch design для 10 000 Families | Rust execution baseline; масштабный индекс требует следующего этапа |
+| [R031](031-cisco-end-to-end-pipeline-review.md) | Как одна Cisco-строка проходит весь путь от пустого Registry до выхода Rust? | Подробно восстановлены parser/normalizer/mapper, Bundle export, Rust startup, dispatch, 21 capture, 18 normalization descriptions, 29 mappings и финальный event | Сквозной методический отчёт на фактическом Bundle 4/2/4 |
+| [R032](032-cisco-full-rust-regression-review.md) | Пройдёт ли весь Cisco corpus через Rust? | 1763/1763 mapped, failed=0; полный Python/Rust parity по captures/normalized/event без mismatches; исправлены nested duplicate captures | Полный Rust execution baseline для текущего Cisco corpus |
 
 ## Общие условия ранних экспериментов
 
@@ -62,6 +64,6 @@
 
 **Текущий исследовательский parser baseline — R023.** Cisco, Juniper, Unix и Solaris подтверждают работу на четырёх corpus: 1999 исходных строк, 77 ReAct-исследований, 60 Families, 290 Grok. Quality gates, latest-first dispatch и global/Family consistency проходят независимый аудит.
 
-**Текущий execution baseline — R030:** versioned Family Bundle и native Rust parser → normalization → MP SIEM mapping с golden parity на четырёх Cisco evidence. Масштаб 10 000 Families, production ReDoS-hardening и полная mapping-регрессия пока не проверены.
+**Текущий execution baseline — R032:** три versioned Family Bundles исполняют весь Cisco corpus в native Rust: 1763/1763 mapped, failed=0 и полный Python/Rust parity без mismatches. Масштаб 10 000 Families и production ReDoS-hardening пока не проверены; timestamp года/timezone для Firepower задаются внешней лабораторной конфигурацией.
 
 Эталонная точность всех captures, универсальность для других источников и production-качество не доказаны.

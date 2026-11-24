@@ -60,13 +60,19 @@ def append_progress(path: Path, event: dict) -> None:
         stream.flush()
 
 
-def apply_normalization(agent, family_id: str, revision: int, raw: str) -> dict | None:
+def apply_normalization(
+    agent,
+    family_id: str,
+    revision: int,
+    raw: str,
+    source_default_year: int | None = None,
+) -> dict | None:
     if agent is None:
         return None
     saved = storage.get_normalization(family_id, parser_revision=revision)
     if not saved["ok"]:
         from normalization_agent import run_normalization
-        run_normalization(agent, family_id, revision)
+        run_normalization(agent, family_id, revision, source_default_year)
     result = normalization.normalize_with_latest(family_id, revision, raw)
     return {
         "status": result["status"],
@@ -103,6 +109,7 @@ def main() -> None:
     parser.add_argument("--normalize", action="store_true", help="Создавать и применять normalization revisions после parser dispatch.")
     parser.add_argument("--map-taxonomy", choices=["mp_siem_8.0"], help="После normalization создавать и применять mapping в указанную таксономию.")
     parser.add_argument("--source-timezone", help="Внешняя timezone для naive timestamp при маппинге.")
+    parser.add_argument("--source-default-year", type=int, help="Внешний год для timestamp без года при нормализации.")
     args = parser.parse_args()
 
     database = Path(os.getenv("RESEARCH_DB", "research/log_research.db"))
@@ -169,7 +176,11 @@ def main() -> None:
                 "raw": raw,
             })
             normalization_event = apply_normalization(
-                normalization_agent, match["family_id"], match["revision"], raw
+                normalization_agent,
+                match["family_id"],
+                match["revision"],
+                raw,
+                args.source_default_year,
             )
             if normalization_event:
                 print(f"{prefix} NORMALIZATION {normalization_event['status']}", flush=True)
@@ -224,7 +235,7 @@ def main() -> None:
         })
         for family_id, revision in new_revisions:
             normalization_event = apply_normalization(
-                normalization_agent, family_id, revision, raw
+                normalization_agent, family_id, revision, raw, args.source_default_year
             )
             if normalization_event:
                 print(f"{prefix} NORMALIZATION {normalization_event['status']}", flush=True)
