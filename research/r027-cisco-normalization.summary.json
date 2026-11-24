@@ -1,0 +1,28 @@
+{
+  "database": "research\\r027-cisco-normalization.db",
+  "status": "completed",
+  "baseline": "research/r020-corpus.db",
+  "family_id": "cisco_asa_acl_verdict",
+  "parser_revision": 4,
+  "normalization_revision": 2,
+  "superseded_normalization_revision": 1,
+  "original_parser_research_id": 8,
+  "normalization_research_id": 12,
+  "fields_described": 18,
+  "evidence_checked": 4,
+  "normalization_revisions": 2,
+  "research_results": 12,
+  "duration_seconds_rev2": 67.537,
+  "completed_at": "2026-11-24T09:01:25.787344+00:00",
+  "quality_audit": {
+    "response_validation": "passed",
+    "original_response_handoff": "passed",
+    "cisco_total_lines": 1763,
+    "parser_coverage": {
+      "1_match": 1763
+    },
+    "normalized_lines": 30,
+    "normalization_errors": 0,
+    "host_absence_metadata_repair_rev1": true
+  }
+}

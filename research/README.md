@@ -31,6 +31,9 @@
 | [R024](024-communigate-review.md) | Перенесётся ли система на CommuniGate? | Остановлено пользователем: 12/24, 11 ReAct-исследований, 7 новых Families; независимый аудит завершённых результатов пройден | Частичный эксперимент; baseline остаётся R023 |
 | [R025](025-cef-pipeline-review.md) | Сможет ли модель снять envelope своим Grok и передать CEF в детерминированный codec? | Остановлено после доказательства: 66/1132, 6 ReAct-исследований, 7 pipeline-Families; 60 reuse; полный разбор 17/39 полей | Structured pipeline подтверждён частично |
 | [R026](026-symantec-kv-review.md) | Выберет ли модель структурный codec для Symantec positional payload? | 1/1; выбран `grok → kv`; 26 captures; расширенные CSV/KV params проверены на 997 строках | KV pipeline подтверждён на одном наблюдении |
+| [R027](027-cisco-normalization-review.md) | Можно ли добавить нормализацию после parser без изменения captures? | 18 описаний, normalization rev2; 4/4 evidence; 30/30 нормализаций; parser 1763/1763; исходный Response передан нормализатору | Минимальная normalization pipeline работает |
+| [R028](028-cisco-mp-siem-mapping-review.md) | Сможет ли отдельный mapper по описаниям и semantic taxonomy собрать событие MP SIEM? | Mapping rev4: 29 mappings, 4/4 evidence, runner 1/1; 212 полей, 232 values, 222 категории; полная регрессия не запускалась | Parser → normalization → MP SIEM работает на scoped validation |
+| [R029](029-cisco-pipeline-architecture-review.md) | Как объединить три агента в один pipeline и перенести исполнение в Rust+VRL? | Единый runner работает; semantic core совпал с production-событием; определены versioned Family Bundle и control/data planes | Итоговая исследовательская архитектура |
 
 ## Общие условия ранних экспериментов
 

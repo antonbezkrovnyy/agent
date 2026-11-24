@@ -7,8 +7,10 @@ import time
 
 from agent import make_agent, run_observation
 import grok
-import pipeline
-from schemas import FieldConstraint, GrokLayer, ParserResult, PipelineStage, RecordField
+import mapping
+import normalization
+import runtime
+from schemas import FieldConstraint, ParserResult, RecordField
 import storage
 
 
@@ -21,13 +23,7 @@ def matching_revisions(raw: str, revisions: list[dict]) -> list[dict]:
         family = response["family"]
         record_schema = [RecordField.model_validate(field) for field in family["record_schema"]]
         constraints = [FieldConstraint.model_validate(rule) for rule in family["constraints"]]
-        if family["stages"]:
-            stages = [PipelineStage.model_validate(stage) for stage in family["stages"]]
-            parser_result = pipeline.execute_pipeline(stages, raw)
-        else:
-            layers = [GrokLayer.model_validate(layer) for layer in family["layers"]]
-            patterns = {pattern["name"]: pattern["definition"] for pattern in family["patterns"]}
-            parser_result = grok.execute_parser(layers, patterns, raw)
+        parser_result = runtime.execute_family(family, raw)
         validation = grok.validate_result(
             ParserResult.model_validate(parser_result),
             record_schema,
@@ -64,11 +60,49 @@ def append_progress(path: Path, event: dict) -> None:
         stream.flush()
 
 
+def apply_normalization(agent, family_id: str, revision: int, raw: str) -> dict | None:
+    if agent is None:
+        return None
+    saved = storage.get_normalization(family_id, parser_revision=revision)
+    if not saved["ok"]:
+        from normalization_agent import run_normalization
+        run_normalization(agent, family_id, revision)
+    result = normalization.normalize_with_latest(family_id, revision, raw)
+    return {
+        "status": result["status"],
+        "normalization_revision": result.get("normalization_revision"),
+        "errors": result["errors"],
+    }
+
+
+def apply_mapping(agent, family_id: str, revision: int, raw: str, source_timezone: str | None) -> dict | None:
+    if agent is None:
+        return None
+    normalization_saved = storage.get_normalization(family_id, parser_revision=revision)
+    if not normalization_saved["ok"]:
+        return {"status": "mapping_unavailable", "errors": ["normalization_not_found"]}
+    normalization_revision = normalization_saved["normalization"]["revision"]
+    saved = storage.get_mapping(family_id, normalization_revision=normalization_revision)
+    if not saved["ok"]:
+        from mapping_agent import run_mapping
+        run_mapping(agent, family_id, revision, normalization_revision, source_timezone)
+    result = mapping.map_with_latest(family_id, revision, raw)
+    return {
+        "status": result["status"],
+        "mapping_revision": result.get("mapping_revision"),
+        "taxonomy": result.get("taxonomy"),
+        "errors": result["errors"],
+    }
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="Построчное покрытие RAW corpus сохранёнными parser families.")
     parser.add_argument("file", type=Path, help="UTF-8 файл с одной RAW-строкой на строку.")
     parser.add_argument("--reset", action="store_true", help="Удалить текущую RESEARCH_DB и журналы перед запуском.")
     parser.add_argument("--end-line", type=int, help="Обработать только строки с первой по указанную включительно.")
+    parser.add_argument("--normalize", action="store_true", help="Создавать и применять normalization revisions после parser dispatch.")
+    parser.add_argument("--map-taxonomy", choices=["mp_siem_8.0"], help="После normalization создавать и применять mapping в указанную таксономию.")
+    parser.add_argument("--source-timezone", help="Внешняя timezone для naive timestamp при маппинге.")
     args = parser.parse_args()
 
     database = Path(os.getenv("RESEARCH_DB", "research/log_research.db"))
@@ -94,6 +128,16 @@ def main() -> None:
             for line in progress_path.read_text(encoding="utf-8").splitlines()
         )
     agent = make_agent()
+    normalization_agent = None
+    mapping_agent = None
+    if args.map_taxonomy:
+        args.normalize = True
+    if args.normalize:
+        from normalization_agent import make_normalization_agent
+        normalization_agent = make_normalization_agent()
+    if args.map_taxonomy:
+        from mapping_agent import make_mapping_agent
+        mapping_agent = make_mapping_agent()
     started = time.monotonic()
     covered = 0
     researched = 0
@@ -124,6 +168,18 @@ def main() -> None:
                 "matches": matches,
                 "raw": raw,
             })
+            normalization_event = apply_normalization(
+                normalization_agent, match["family_id"], match["revision"], raw
+            )
+            if normalization_event:
+                print(f"{prefix} NORMALIZATION {normalization_event['status']}", flush=True)
+                append_progress(progress_path, {"line": index, "status": "normalization", **normalization_event})
+                mapping_event = apply_mapping(
+                    mapping_agent, match["family_id"], match["revision"], raw, args.source_timezone
+                )
+                if mapping_event:
+                    print(f"{prefix} MAPPING {mapping_event['status']}", flush=True)
+                    append_progress(progress_path, {"line": index, "status": "mapping", **mapping_event})
             continue
 
         print(f"{prefix} UNCOVERED raw={raw[:180]!r}", flush=True)
@@ -166,6 +222,19 @@ def main() -> None:
             "new_revisions": new_revisions,
             "raw": raw,
         })
+        for family_id, revision in new_revisions:
+            normalization_event = apply_normalization(
+                normalization_agent, family_id, revision, raw
+            )
+            if normalization_event:
+                print(f"{prefix} NORMALIZATION {normalization_event['status']}", flush=True)
+                append_progress(progress_path, {"line": index, "status": "normalization", **normalization_event})
+                mapping_event = apply_mapping(
+                    mapping_agent, family_id, revision, raw, args.source_timezone
+                )
+                if mapping_event:
+                    print(f"{prefix} MAPPING {mapping_event['status']}", flush=True)
+                    append_progress(progress_path, {"line": index, "status": "mapping", **mapping_event})
 
     print("VERIFY full corpus against saved parser revisions", flush=True)
     uncovered = []
@@ -181,6 +250,8 @@ def main() -> None:
     with storage.db_connect() as connection:
         grok_count = connection.execute("SELECT COUNT(*) FROM grok_patterns").fetchone()[0]
         research_count = connection.execute("SELECT COUNT(*) FROM research_results").fetchone()[0]
+        normalization_count = connection.execute("SELECT COUNT(*) FROM normalization_revisions").fetchone()[0]
+        mapping_count = connection.execute("SELECT COUNT(*) FROM mapping_revisions").fetchone()[0]
     summary = {
         "file": str(args.file),
         "database": str(database),
@@ -193,6 +264,8 @@ def main() -> None:
         "parser_revisions": len(revisions),
         "grok_patterns": grok_count,
         "research_results": research_count,
+        "normalization_revisions": normalization_count,
+        "mapping_revisions": mapping_count,
         "duration_seconds": round(time.monotonic() - started, 3),
         "completed_at": datetime.now(timezone.utc).isoformat(),
     }

@@ -1,0 +1,4 @@
+{"at":"2026-11-24T08:55:58.354762+00:00","status":"normalization_researched","research_id":11,"family_id":"cisco_asa_acl_verdict","parser_revision":4,"normalization_revision":1,"source":"family_descriptions_only"}
+{"status":"quality_repair","normalization_revision":1,"field":"host","change":"capture is absent rather than null","operations_changed":false}
+{"at":"2026-11-24T09:01:25.787344+00:00","status":"normalization_researched","research_id":12,"family_id":"cisco_asa_acl_verdict","parser_revision":4,"normalization_revision":2,"original_parser_research_id":8,"source":"full_parser_response"}
+{"at":"2026-11-24T09:03:28.070846+00:00","status":"quality_audit","normalization_revision":2,"response_validation":"passed","original_response_handoff":"passed","cisco_total_lines":1763,"parser_coverage":{"1_match":1763},"normalized_lines":30,"normalization_errors":0}

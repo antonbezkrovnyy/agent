@@ -141,3 +141,113 @@ SYSTEM_PROMPT = (
     "После завершения исследования верни только JSON-объект без markdown "
     "по следующей схеме Response: "
 )
+
+
+NORMALIZATION_PROMPT = """Нормализуй существующую parser Family {family_id}@{parser_revision}.
+Это отдельный этап после парсинга: parser и его captures изменять нельзя. Маппинг в
+таксономии, переименование полей, enrichment и классификация не нужны.
+
+Сначала получи Family через get_parser_family, затем исходный полный Response через
+get_parser_research. Используй essence, structure, strategy, format_features и pitfalls
+парсинг-агента как исходную семантику, а не восстанавливай её заново. Если research не
+найден, используй Family descriptions и явно отметь это ограничение. Изучи record_schema,
+descriptions, constraints и все evidence. Для каждого поля record_schema кроме raw создай один
+NormalizationField. source должен точно совпадать с именем поля record_schema; target
+не существует, нормализованное значение сохраняет исходное имя.
+
+description каждого поля — главный артефакт для будущего семантического маппинга.
+Опиши развёрнуто: смысл, участника и направление, единицы, допустимые значения,
+обязательность, null против нуля и неопределённости. Не выдумывай назначение opaque
+значений. Для hit_cnt учитывай агрегацию ASA, для hit_interval — разные формы записи,
+для хешей — неподтверждённый смысл. Поля без operations тоже обязательно опиши.
+
+Доступные operations:
+- trim;
+- null_if с params values;
+- to_integer;
+- lowercase;
+- normalize_ip с version=ipv4|ipv6|any;
+- validate_range с min/max после числового преобразования;
+- parse_timestamp с format/formats, default_year при необходимости,
+  input_timezone/output_timezone только при наличии оснований.
+
+Применяй минимально необходимые operations. Не превращай 0 в null. Не назначай UTC
+или текущий год без доказательств. Для Cisco timestamp с годом и без timezone выводи
+naive ISO, если timezone источника неизвестна. Не разбивай и не извлекай новые поля:
+это относится к parser, а не к этой минимальной нормализации.
+
+Сохрани parser evidence без изменений в NormalizationRevision.evidence. Сначала вызови
+preview_normalization на реальной строке, затем evaluate_normalization на всех evidence.
+Исправляй конкретные ошибки инструментов. После успешной проверки вызови
+save_normalization с точным parser_revision. Если прежней normalization нет, используй
+revision=1; если она уже существует, получи её и используй следующий свободный номер.
+Затем вызови get_normalization для сохранённой revision.
+
+Верни только полный JSON NormalizationRevision без markdown: family_id, revision,
+parser_revision, fields, evidence, description. Внутренний reasoning не нужен.
+"""
+
+NORMALIZATION_SYSTEM_PROMPT = (
+    "После завершения нормализации верни только JSON-объект без markdown "
+    "по следующей схеме NormalizationRevision: "
+)
+
+
+MAPPING_PROMPT = """Спроектируй маппинг Family {family_id}@{parser_revision} и
+normalization revision {normalization_revision} в таксономию MP SIEM 8.0.
+Это третий независимый агент после parser и normalizer. Исходный parser и normalization
+менять нельзя. Именно ты выбираешь соответствия по смыслу, а не по совпадению имён.
+
+Сначала получи полный mp_siem_8_mapping_sequence через get_mapping_guidelines и соблюдай
+его порядок в списке mappings: обязательный каркас → категории → subject → object
+атрибуты → src/dst → event_src → остальное взаимодействие → information/data fields.
+Затем получи Family через get_parser_family, исходный Response через
+get_parser_research и normalization через get_normalization. Главные входные данные —
+развёрнутые description каждого NormalizationField, исходная essence/structure/pitfalls
+и примеры evidence.
+
+Для каждого исходного поля и для обязательного каркаса MP SIEM используй
+semantic_search_taxonomy по текстовому смыслу. Ищи taxonomy_field для полей,
+taxonomy_value для action/object/status/importance/event_src.category и
+taxonomy_category для category.generic/high/low. Затем получай точные определения через
+get_taxonomy_field/get_taxonomy_values/get_taxonomy_categories. Semantic score только
+ранжирует кандидатов; решение подтверждай описанием и фактическим preview.
+
+Обязательные поля MP SIEM: time, id, event_src.vendor, event_src.title,
+event_src.category, action, object, status, importance. Категории источника и события не
+путай. event_src описывает регистратора, src/dst — стороны сетевого взаимодействия.
+status относится к результату действия, а не обязательно к успеху соединения.
+Автоматические поля не заполняй. JSON события плоский.
+
+MappingField.source — имя normalized capture. Для констант Family используй constant с
+обоснованием; не скрывай неизвестные исходные значения. Для value_map задавай все
+допустимые значения без default: неизвестное значение должно вызвать ошибку.
+Для разных представлений одного source используй condition {{format: ip|ipv4|ipv6|hostname}}:
+например, IP-форма host может идти в event_src.ip, а обычное имя — в event_src.hostname.
+Составное 'устройство/интерфейс' не является hostname: не записывай его туда без отдельного
+обоснованного разбора. Не приписывай source-интерфейсу ingress-семантику без доказательств.
+
+Не придумывай назначение opaque полей. datafield1..10 и numfield1..5 существуют в Registry:
+используй их для значимых данных без стандартного поля после семантического поиска.
+Не делай новый парсинг.
+
+Внешняя настройка source_timezone для этого запуска: {source_timezone}.
+Она не выведена из RAW. Если timestamp naive и настройка задана, executor использует её
+для приведения time к UTC. Если не задана, не придумывай timezone и верни ошибку конфигурации.
+
+id формируй по правилу MP SIEM: namespace_vendor_title_transport_event-type без пробелов.
+Отдельный namespace обязателен: vendor/title/transport/event-type сам по себе недостаточен.
+Нормализованные timestamp уже ISO; не меняй его смысл.
+
+Сначала preview_mapping на реальной строке, затем evaluate_mapping на всех evidence.
+Исправляй все missing/invalid/unknown/enum/category ошибки. После успеха вызови
+save_mapping: revision=1, если прежней нет, иначе следующий свободный номер. Проверь
+через get_mapping. Верни только полный JSON MappingRevision без markdown: family_id,
+revision, parser_revision, normalization_revision, taxonomy=mp_siem_8.0,
+source_timezone, mappings, evidence, description.
+"""
+
+MAPPING_SYSTEM_PROMPT = (
+    "После завершения маппинга верни только JSON-объект без markdown "
+    "по следующей схеме MappingRevision: "
+)

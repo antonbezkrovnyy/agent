@@ -40,6 +40,53 @@ def db_connect() -> Iterator[sqlite3.Connection]:
             created_at TEXT NOT NULL,
             PRIMARY KEY (family_id, revision)
         );
+        CREATE TABLE IF NOT EXISTS taxonomy_fields (
+            taxonomy TEXT NOT NULL,
+            name TEXT NOT NULL,
+            field_type TEXT NOT NULL,
+            required INTEGER NOT NULL,
+            automatic INTEGER NOT NULL,
+            description TEXT NOT NULL,
+            PRIMARY KEY (taxonomy, name)
+        );
+        CREATE TABLE IF NOT EXISTS taxonomy_values (
+            taxonomy TEXT NOT NULL,
+            field TEXT NOT NULL,
+            value TEXT NOT NULL,
+            description TEXT NOT NULL,
+            PRIMARY KEY (taxonomy, field, value)
+        );
+        CREATE TABLE IF NOT EXISTS taxonomy_categories (
+            taxonomy TEXT NOT NULL,
+            generic TEXT NOT NULL,
+            high TEXT NOT NULL,
+            low TEXT NOT NULL,
+            description TEXT NOT NULL,
+            PRIMARY KEY (taxonomy, generic, high, low)
+        );
+        CREATE TABLE IF NOT EXISTS mapping_revisions (
+            family_id TEXT NOT NULL,
+            revision INTEGER NOT NULL,
+            parser_revision INTEGER NOT NULL,
+            normalization_revision INTEGER NOT NULL,
+            taxonomy TEXT NOT NULL,
+            source_timezone TEXT,
+            mappings_json TEXT NOT NULL,
+            evidence_json TEXT NOT NULL,
+            description TEXT NOT NULL,
+            created_at TEXT NOT NULL,
+            PRIMARY KEY (family_id, revision)
+        );
+        CREATE TABLE IF NOT EXISTS normalization_revisions (
+            family_id TEXT NOT NULL,
+            revision INTEGER NOT NULL,
+            parser_revision INTEGER NOT NULL,
+            fields_json TEXT NOT NULL,
+            evidence_json TEXT NOT NULL,
+            description TEXT NOT NULL,
+            created_at TEXT NOT NULL,
+            PRIMARY KEY (family_id, revision)
+        );
         CREATE TABLE IF NOT EXISTS research_results (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             response_json TEXT NOT NULL,
@@ -292,6 +339,298 @@ def get_family(family_id: str, revision: int | None = None) -> dict:
             "constraints": json.loads(row[7]),
             "stages": json.loads(row[8]),
         },
+    }
+
+
+def save_normalization(
+    family_id: str,
+    revision: int,
+    parser_revision: int,
+    fields: list[dict],
+    evidence: list[str],
+    description: str,
+) -> dict:
+    with db_connect() as connection:
+        existing = connection.execute(
+            "SELECT parser_revision, fields_json, evidence_json, description "
+            "FROM normalization_revisions WHERE family_id = ? AND revision = ?",
+            (family_id, revision),
+        ).fetchone()
+        payload = (
+            parser_revision,
+            json.dumps(fields, ensure_ascii=False),
+            json.dumps(evidence, ensure_ascii=False),
+            description,
+        )
+        if existing and existing != payload:
+            return {
+                "ok": False,
+                "error": "normalization_revision_exists_with_different_content",
+                "message": "Получите существующую normalization revision или увеличьте revision.",
+                "family_id": family_id,
+                "revision": revision,
+            }
+        if existing:
+            return {"ok": True, "family_id": family_id, "revision": revision, "status": "unchanged"}
+        connection.execute(
+            "INSERT INTO normalization_revisions ("
+            "family_id, revision, parser_revision, fields_json, evidence_json, description, created_at"
+            ") VALUES (?, ?, ?, ?, ?, ?, ?)",
+            (family_id, revision, *payload, datetime.now(timezone.utc).isoformat()),
+        )
+    return {"ok": True, "family_id": family_id, "revision": revision, "status": "saved"}
+
+
+def get_normalization(
+    family_id: str,
+    revision: int | None = None,
+    parser_revision: int | None = None,
+) -> dict:
+    clauses = ["family_id = ?"]
+    params = [family_id]
+    if revision is not None:
+        clauses.append("revision = ?")
+        params.append(revision)
+    if parser_revision is not None:
+        clauses.append("parser_revision = ?")
+        params.append(parser_revision)
+    with db_connect() as connection:
+        row = connection.execute(
+            "SELECT revision, parser_revision, fields_json, evidence_json, description, created_at "
+            f"FROM normalization_revisions WHERE {' AND '.join(clauses)} "
+            "ORDER BY revision DESC LIMIT 1",
+            params,
+        ).fetchone()
+    if not row:
+        return {
+            "ok": False,
+            "error": "not_found",
+            "message": "Normalization revision не найдена; проверьте family_id и revisions.",
+            "family_id": family_id,
+            "revision": revision,
+            "parser_revision": parser_revision,
+        }
+    return {
+        "ok": True,
+        "normalization": {
+            "family_id": family_id,
+            "revision": row[0],
+            "parser_revision": row[1],
+            "fields": json.loads(row[2]),
+            "evidence": json.loads(row[3]),
+            "description": row[4],
+            "created_at": row[5],
+        },
+    }
+
+
+def replace_taxonomy(taxonomy: str, fields: list[dict], values: list[dict], categories: list[dict]) -> dict:
+    with db_connect() as connection:
+        connection.execute("DELETE FROM taxonomy_fields WHERE taxonomy = ?", (taxonomy,))
+        connection.execute("DELETE FROM taxonomy_values WHERE taxonomy = ?", (taxonomy,))
+        connection.execute("DELETE FROM taxonomy_categories WHERE taxonomy = ?", (taxonomy,))
+        connection.executemany(
+            "INSERT INTO taxonomy_fields (taxonomy, name, field_type, required, automatic, description) "
+            "VALUES (?, ?, ?, ?, ?, ?)",
+            [(taxonomy, item["name"], item["type"], int(item["required"]), int(item["automatic"]), item["description"]) for item in fields],
+        )
+        connection.executemany(
+            "INSERT INTO taxonomy_values (taxonomy, field, value, description) VALUES (?, ?, ?, ?)",
+            [(taxonomy, item["field"], item["value"], item["description"]) for item in values],
+        )
+        connection.executemany(
+            "INSERT INTO taxonomy_categories (taxonomy, generic, high, low, description) VALUES (?, ?, ?, ?, ?)",
+            [(taxonomy, item["generic"], item["high"], item["low"], item["description"]) for item in categories],
+        )
+    return {"ok": True, "taxonomy": taxonomy, "fields": len(fields), "values": len(values), "categories": len(categories)}
+
+
+def list_taxonomy_fields(taxonomy: str) -> list[dict]:
+    with db_connect() as connection:
+        rows = connection.execute(
+            "SELECT name, field_type, required, automatic, description FROM taxonomy_fields WHERE taxonomy = ? ORDER BY name",
+            (taxonomy,),
+        ).fetchall()
+    return [
+        {"name": row[0], "type": row[1], "required": bool(row[2]), "automatic": bool(row[3]), "description": row[4]}
+        for row in rows
+    ]
+
+
+def get_taxonomy_field(taxonomy: str, name: str) -> dict:
+    with db_connect() as connection:
+        row = connection.execute(
+            "SELECT name, field_type, required, automatic, description FROM taxonomy_fields WHERE taxonomy = ? AND name = ?",
+            (taxonomy, name),
+        ).fetchone()
+    if not row:
+        return {"ok": False, "error": "not_found", "message": "Проверьте точное имя поля таксономии.", "taxonomy": taxonomy, "field": name}
+    return {"ok": True, "field": {"name": row[0], "type": row[1], "required": bool(row[2]), "automatic": bool(row[3]), "description": row[4]}}
+
+
+def get_taxonomy_values(taxonomy: str, field: str | None = None) -> dict:
+    with db_connect() as connection:
+        if field:
+            rows = connection.execute(
+                "SELECT field, value, description FROM taxonomy_values WHERE taxonomy = ? AND field = ? ORDER BY value",
+                (taxonomy, field),
+            ).fetchall()
+        else:
+            rows = connection.execute(
+                "SELECT field, value, description FROM taxonomy_values WHERE taxonomy = ? ORDER BY field, value",
+                (taxonomy,),
+            ).fetchall()
+    return {"ok": True, "values": [{"field": row[0], "value": row[1], "description": row[2]} for row in rows]}
+
+
+def get_taxonomy_categories(taxonomy: str) -> dict:
+    with db_connect() as connection:
+        rows = connection.execute(
+            "SELECT generic, high, low, description FROM taxonomy_categories WHERE taxonomy = ? ORDER BY generic, high, low",
+            (taxonomy,),
+        ).fetchall()
+    return {"ok": True, "categories": [{"generic": row[0], "high": row[1], "low": row[2], "description": row[3]} for row in rows]}
+
+
+def save_mapping(
+    family_id: str,
+    revision: int,
+    parser_revision: int,
+    normalization_revision: int,
+    taxonomy: str,
+    source_timezone: str | None,
+    mappings: list[dict],
+    evidence: list[str],
+    description: str,
+) -> dict:
+    with db_connect() as connection:
+        existing = connection.execute(
+            "SELECT parser_revision, normalization_revision, taxonomy, source_timezone, mappings_json, evidence_json, description "
+            "FROM mapping_revisions WHERE family_id = ? AND revision = ?",
+            (family_id, revision),
+        ).fetchone()
+        payload = (
+            parser_revision,
+            normalization_revision,
+            taxonomy,
+            source_timezone,
+            json.dumps(mappings, ensure_ascii=False),
+            json.dumps(evidence, ensure_ascii=False),
+            description,
+        )
+        if existing and existing != payload:
+            return {"ok": False, "error": "mapping_revision_exists_with_different_content", "message": "Получите существующую mapping revision или увеличьте revision."}
+        if existing:
+            return {"ok": True, "family_id": family_id, "revision": revision, "status": "unchanged"}
+        connection.execute(
+            "INSERT INTO mapping_revisions (family_id, revision, parser_revision, normalization_revision, taxonomy, "
+            "source_timezone, mappings_json, evidence_json, description, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (family_id, revision, *payload, datetime.now(timezone.utc).isoformat()),
+        )
+    return {"ok": True, "family_id": family_id, "revision": revision, "status": "saved"}
+
+
+def get_mapping(
+    family_id: str,
+    revision: int | None = None,
+    normalization_revision: int | None = None,
+) -> dict:
+    clauses = ["family_id = ?"]
+    params = [family_id]
+    if revision is not None:
+        clauses.append("revision = ?")
+        params.append(revision)
+    if normalization_revision is not None:
+        clauses.append("normalization_revision = ?")
+        params.append(normalization_revision)
+    with db_connect() as connection:
+        row = connection.execute(
+            "SELECT revision, parser_revision, normalization_revision, taxonomy, source_timezone, mappings_json, "
+            f"evidence_json, description, created_at FROM mapping_revisions WHERE {' AND '.join(clauses)} "
+            "ORDER BY revision DESC LIMIT 1",
+            params,
+        ).fetchone()
+    if not row:
+        return {"ok": False, "error": "not_found", "message": "Mapping revision не найдена.", "family_id": family_id}
+    return {
+        "ok": True,
+        "mapping": {
+            "family_id": family_id,
+            "revision": row[0],
+            "parser_revision": row[1],
+            "normalization_revision": row[2],
+            "taxonomy": row[3],
+            "source_timezone": row[4],
+            "mappings": json.loads(row[5]),
+            "evidence": json.loads(row[6]),
+            "description": row[7],
+            "created_at": row[8],
+        },
+    }
+
+
+def get_parser_research(family_id: str, revision: int) -> dict:
+    from schemas import FieldConstraint, GrokPattern, Response
+
+    saved = get_family(family_id, revision)
+    if not saved["ok"]:
+        return saved
+    family = saved["family"]
+    family_constraints = [
+        FieldConstraint.model_validate(rule).model_dump(mode="json")
+        for rule in family["constraints"]
+    ]
+    with db_connect() as connection:
+        rows = connection.execute(
+            "SELECT id, response_json, created_at FROM research_results ORDER BY id DESC"
+        ).fetchall()
+    for research_id, response_json, created_at in rows:
+        payload = json.loads(response_json)
+        if payload.get("type") == "normalization":
+            continue
+        try:
+            response = Response.model_validate(payload)
+        except Exception:
+            continue
+        parser = response.parser
+        constraints = [rule.model_dump(mode="json") for rule in parser.constraints]
+        record_schema = [field.model_dump(mode="json") for field in response.record_schema]
+        if family["record_schema"] != record_schema or family_constraints != constraints:
+            continue
+        if parser.kind == "pipeline":
+            matches = (
+                family["stages"] == [stage.model_dump(mode="json") for stage in parser.stages]
+                and family["patterns"] == []
+                and family["layers"] == []
+            )
+        else:
+            family_patterns = {
+                pattern["name"]: GrokPattern.model_validate(pattern).model_dump(mode="json")
+                for pattern in family["patterns"]
+            }
+            response_patterns = {
+                pattern.name: pattern.model_dump(mode="json") for pattern in parser.patterns
+            }
+            matches = (
+                family["layers"] == [layer.model_dump(mode="json") for layer in parser.layers]
+                and family_patterns == response_patterns
+                and family["stages"] == []
+            )
+        if matches:
+            return {
+                "ok": True,
+                "research": {
+                    "id": research_id,
+                    "response": payload,
+                    "created_at": created_at,
+                },
+            }
+    return {
+        "ok": False,
+        "error": "not_found",
+        "message": "Исходный research Response для этой parser revision не найден; используйте Family descriptions.",
+        "family_id": family_id,
+        "revision": revision,
     }
 
 

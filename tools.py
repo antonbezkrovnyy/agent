@@ -11,13 +11,18 @@ from langchain_core.tools import tool
 from pydantic import Field, ValidationError
 
 import grok
+import mapping
+import normalization
 import pipeline
 import semantic
+import taxonomy
 from schemas import (
     ConstraintsInput,
     FamilyDescription,
     GrokPattern,
     LayersInput,
+    MappingFieldsInput,
+    NormalizationFieldsInput,
     Observation,
     ParserBaseline,
     ParserDescription,
@@ -29,6 +34,7 @@ from schemas import (
     RecordField,
     RecordSchemaInput,
     StagesInput,
+    TransformOperation,
 )
 import storage
 
@@ -273,6 +279,190 @@ def save_pipeline_family(
 
 
 @tool
+def apply_normalization_operation(
+    operation: TransformOperation,
+    value: Annotated[str | None, Field(description="Одно исходное значение; null пропускается без изменений.")],
+) -> dict:
+    """Применяет одну normalization-операцию и возвращает ok/result/error без изменения исходного значения."""
+    return normalization.apply_transform(operation, value)
+
+
+@tool
+def preview_normalization(
+    family_id: Annotated[str, Field(min_length=1, description="Существующая parser Family.")],
+    parser_revision: Annotated[int, Field(ge=1, description="Точная parser revision, из которой получить captures.")],
+    fields: NormalizationFieldsInput,
+    raw: RawInput,
+) -> dict:
+    """Сам исполняет сохранённый parser на RAW и затем normalization fields; возвращает captures/normalized/errors/trace."""
+    return normalization.preview_normalization(family_id, parser_revision, fields, raw)
+
+
+@tool
+def evaluate_normalization(
+    family_id: Annotated[str, Field(min_length=1, description="Существующая parser Family.")],
+    parser_revision: Annotated[int, Field(ge=1, description="Точная parser revision.")],
+    fields: NormalizationFieldsInput,
+    evidence: Annotated[list[str], Field(min_length=1, description="Непустой набор RAW для независимой проверки.")],
+) -> dict:
+    """Проверяет parser и normalization на всех evidence, включая полноту описаний record_schema."""
+    return normalization.evaluate_normalization(family_id, parser_revision, fields, evidence)
+
+
+@tool
+def save_normalization(
+    family_id: Annotated[str, Field(min_length=1, description="Существующая parser Family.")],
+    revision: Annotated[int, Field(ge=1, description="Независимый номер normalization revision.")],
+    parser_revision: Annotated[int, Field(ge=1, description="Точная parser revision, к которой относятся правила.")],
+    fields: NormalizationFieldsInput,
+    evidence: Annotated[list[str], Field(min_length=1, description="RAW evidence; каждая строка обязана пройти parser и normalization.")],
+    description: Annotated[str, Field(min_length=1, description="Допущения, правила и ограничения normalization revision.")],
+) -> dict:
+    """Сохраняет normalization revision только после успешной проверки всех evidence."""
+    evaluation = normalization.evaluate_normalization(family_id, parser_revision, fields, evidence)
+    if not evaluation["ok"]:
+        return {
+            "ok": False,
+            "error": "normalization_validation_failed",
+            "message": "Normalization revision не сохранена: исправьте описания, operations или evidence.",
+            "recovery": "Используйте errors/issues результата, повторите preview/evaluate и только затем сохраните.",
+            "details": evaluation,
+        }
+    return storage.save_normalization(
+        family_id,
+        revision,
+        parser_revision,
+        [field.model_dump(mode="json") for field in fields],
+        evidence,
+        description,
+    )
+
+
+@tool
+def get_normalization(
+    family_id: Annotated[str, Field(min_length=1, description="Точная parser Family.")],
+    revision: Annotated[int | None, Field(ge=1, description="Normalization revision; null — последняя подходящая.")] = None,
+    parser_revision: Annotated[int | None, Field(ge=1, description="Если задано, выбрать правила именно для этой parser revision.")] = None,
+) -> dict:
+    """Возвращает сохранённую normalization revision с описаниями, operations и evidence."""
+    return storage.get_normalization(family_id, revision, parser_revision)
+
+
+@tool
+def get_mapping_guidelines() -> dict:
+    """Возвращает полный порядок маппинга MP SIEM из mp_siem_8_mapping_sequence.md."""
+    return taxonomy.mapping_guidelines()
+
+
+@tool
+def semantic_search_taxonomy(
+    kind: Annotated[str, Field(description="taxonomy_field, taxonomy_value или taxonomy_category.")],
+    query: Annotated[str, Field(min_length=1, description="Смысл исходного поля и нужного кандидата MP SIEM.")],
+    field: Annotated[str | None, Field(description="Для taxonomy_value ограничить поиск Enum-полем, например action.")] = None,
+) -> dict:
+    """Ищет поля, Enum values или категории MP SIEM по их описаниям через embeddings."""
+    return taxonomy.search_taxonomy(kind, query, field)
+
+
+@tool
+def get_taxonomy_field(
+    name: Annotated[str, Field(min_length=1, description="Точное плоское имя поля MP SIEM, например src.ip.")],
+) -> dict:
+    """Возвращает тип, обязательность, automatic flag и описание поля MP SIEM."""
+    return storage.get_taxonomy_field(taxonomy.TAXONOMY, name)
+
+
+@tool
+def get_taxonomy_values(
+    field: Annotated[str | None, Field(description="Enum-поле для фильтра; null — все значения таксономии.")] = None,
+) -> dict:
+    """Возвращает допустимые Enum values и их описания из MP SIEM reference."""
+    return storage.get_taxonomy_values(taxonomy.TAXONOMY, field)
+
+
+@tool
+def get_taxonomy_categories() -> dict:
+    """Возвращает официальную иерархию category.generic/high/low."""
+    return storage.get_taxonomy_categories(taxonomy.TAXONOMY)
+
+
+@tool
+def preview_mapping(
+    family_id: Annotated[str, Field(min_length=1, description="Существующая parser Family.")],
+    parser_revision: Annotated[int, Field(ge=1, description="Точная parser revision.")],
+    normalization_revision: Annotated[int, Field(ge=1, description="Точная normalization revision.")],
+    mappings: MappingFieldsInput,
+    raw: RawInput,
+    source_timezone: Annotated[str | None, Field(description="Внешняя timezone для naive timestamp; null, если не задана.")] = None,
+) -> dict:
+    """Исполняет parser и normalization на RAW, затем модельный mapping и проверяет событие MP SIEM."""
+    return mapping.preview_mapping(
+        family_id, parser_revision, normalization_revision, mappings, raw, source_timezone
+    )
+
+
+@tool
+def evaluate_mapping(
+    family_id: Annotated[str, Field(min_length=1, description="Существующая parser Family.")],
+    parser_revision: Annotated[int, Field(ge=1, description="Точная parser revision.")],
+    normalization_revision: Annotated[int, Field(ge=1, description="Точная normalization revision.")],
+    mappings: MappingFieldsInput,
+    evidence: Annotated[list[str], Field(min_length=1, description="Непустой набор RAW evidence.")],
+    source_timezone: Annotated[str | None, Field(description="Внешняя timezone для naive timestamp; null, если не задана.")] = None,
+) -> dict:
+    """Независимо проверяет модельный mapping и схему MP SIEM на всех evidence."""
+    return mapping.evaluate_mappings(
+        family_id, parser_revision, normalization_revision, mappings, evidence, source_timezone
+    )
+
+
+@tool
+def save_mapping(
+    family_id: Annotated[str, Field(min_length=1, description="Существующая parser Family.")],
+    revision: Annotated[int, Field(ge=1, description="Независимый номер mapping revision.")],
+    parser_revision: Annotated[int, Field(ge=1, description="Точная parser revision.")],
+    normalization_revision: Annotated[int, Field(ge=1, description="Точная normalization revision.")],
+    mappings: MappingFieldsInput,
+    evidence: Annotated[list[str], Field(min_length=1, description="RAW evidence для полной проверки.")],
+    description: Annotated[str, Field(min_length=1, description="Решения, допущения и ограничения mapping revision.")],
+    source_timezone: Annotated[str | None, Field(description="Внешняя timezone, заданная runner; не выводить из RAW.")] = None,
+) -> dict:
+    """Сохраняет mapping revision только после успешной проверки parser, normalization и MP SIEM schema."""
+    evaluation = mapping.evaluate_mappings(
+        family_id, parser_revision, normalization_revision, mappings, evidence, source_timezone
+    )
+    if not evaluation["ok"]:
+        return {
+            "ok": False,
+            "error": "mapping_validation_failed",
+            "message": "Mapping revision не сохранена: исправьте соответствия по errors и справочнику.",
+            "recovery": "Используйте semantic_search_taxonomy/get_taxonomy_field, повторите evaluate и затем сохраните.",
+            "details": evaluation,
+        }
+    return storage.save_mapping(
+        family_id,
+        revision,
+        parser_revision,
+        normalization_revision,
+        taxonomy.TAXONOMY,
+        source_timezone,
+        [item.model_dump(mode="json") for item in mappings],
+        evidence,
+        description,
+    )
+
+
+@tool
+def get_mapping(
+    family_id: Annotated[str, Field(min_length=1, description="Точная parser Family.")],
+    revision: Annotated[int | None, Field(ge=1, description="Mapping revision; null — последняя подходящая.")] = None,
+    normalization_revision: Annotated[int | None, Field(ge=1, description="Фильтр по normalization revision.")] = None,
+) -> dict:
+    """Возвращает сохранённый модельный mapping в MP SIEM с evidence и обоснованиями."""
+    return storage.get_mapping(family_id, revision, normalization_revision)
+
+
+@tool
 def save_grok_pattern(
     name: PatternName,
     definition: PatternDefinition,
@@ -395,6 +585,15 @@ def save_parser_family(
 
 
 @tool
+def get_parser_research(
+    family_id: Annotated[str, Field(min_length=1, description="Точная parser Family.")],
+    revision: Annotated[int, Field(ge=1, description="Точная parser revision.")],
+) -> dict:
+    """Возвращает исходный полный Response парсинг-агента: essence, structure, strategy, features, pitfalls и parser."""
+    return storage.get_parser_research(family_id, revision)
+
+
+@tool
 def list_parser_families() -> dict:
     """Перечисляет последние ревизии всех Family с family_id/revision/evidence; входных параметров нет."""
     return storage.list_families()
@@ -434,4 +633,33 @@ TOOLS = [
     save_parser_family,
     list_parser_families,
     get_parser_family,
+]
+
+
+NORMALIZATION_TOOLS = [
+    duckduckgo_search,
+    apply_normalization_operation,
+    preview_normalization,
+    evaluate_normalization,
+    save_normalization,
+    get_normalization,
+    get_parser_family,
+    get_parser_research,
+]
+
+
+MAPPING_TOOLS = [
+    duckduckgo_search,
+    get_mapping_guidelines,
+    semantic_search_taxonomy,
+    get_taxonomy_field,
+    get_taxonomy_values,
+    get_taxonomy_categories,
+    preview_mapping,
+    evaluate_mapping,
+    save_mapping,
+    get_mapping,
+    get_normalization,
+    get_parser_family,
+    get_parser_research,
 ]

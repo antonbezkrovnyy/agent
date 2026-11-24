@@ -237,6 +237,107 @@ class ParserDescription(SchemaModel):
     )
 
 
+class TransformOperation(SchemaModel):
+    """Одна детерминированная операция над значением без переименования поля."""
+
+    op: Literal["trim", "null_if", "to_integer", "lowercase", "normalize_ip", "validate_range", "parse_timestamp"] = Field(
+        description="Имя поддерживаемой операции; параметры зависят от операции."
+    )
+    params: dict[str, Any] = Field(default_factory=dict, description="Параметры операции; неизвестные параметры отклоняются.")
+
+
+class NormalizationField(SchemaModel):
+    """Описание и последовательные преобразования одного исходного capture."""
+
+    source: str = Field(description="Точное имя capture, обычно совпадает с полем record_schema; имя результата сохраняется.")
+    description: str = Field(
+        min_length=1,
+        description="Развёрнутый смысл поля, единицы, направление, null/zero, допустимые значения и неопределённости для будущего маппинга.",
+    )
+    operations: list[TransformOperation] = Field(
+        default_factory=list,
+        description="Упорядоченные операции над значением; пустой список сохраняет исходное значение.",
+    )
+    required: bool = Field(description="True, если отсутствие или null после преобразований является ошибкой.")
+
+
+class NormalizationRevision(SchemaModel):
+    """Проверенная нормализация полей конкретной parser revision."""
+
+    family_id: str = Field(description="Существующая parser Family.")
+    revision: int = Field(ge=1, description="Независимый номер normalization revision.")
+    parser_revision: int = Field(ge=1, description="Точная parser revision, к которой применяются правила.")
+    fields: list[NormalizationField] = Field(
+        description="Описания всех выходных полей Family, включая поля без преобразований."
+    )
+    evidence: list[str] = Field(description="RAW-строки, на которых parser и normalization обязаны успешно исполниться.")
+    description: str = Field(description="Общее описание решений, допущений и ограничений этой normalization revision.")
+
+
+class MappingField(SchemaModel):
+    """Одно выбранное моделью соответствие normalized source и поля MP SIEM."""
+
+    source: str | None = Field(
+        default=None,
+        description="Имя normalized capture; null только для константы, выбранной по смыслу Family.",
+    )
+    target: str = Field(description="Точное плоское имя поля MP SIEM, например src.ip или category.low.")
+    constant: Any | None = Field(
+        default=None,
+        description="Константа, выбранная моделью по документации; нельзя использовать для скрытия неизвестного source.",
+    )
+    value_map: dict[str, Any] | None = Field(
+        default=None,
+        description="Явное соответствие исходных значений целевым; неизвестные значения дают ошибку, а не default.",
+    )
+    condition: dict[str, Any] | None = Field(
+        default=None,
+        description="Опциональное условие применения: {format: ip|ipv4|ipv6|hostname}; применимо только к source.",
+    )
+    description: str = Field(description="Семантическое обоснование соответствия по описаниям source и таксономии.")
+
+    @model_validator(mode="after")
+    def check_mapping_source(self):
+        if self.source is None and self.constant is None:
+            raise ValueError("MappingField требует source или non-null constant.")
+        if self.source is not None and self.constant is not None:
+            raise ValueError("MappingField не может одновременно содержать source и constant.")
+        if self.value_map is not None and self.source is None:
+            raise ValueError("value_map требует source.")
+        if self.condition is not None and self.source is None:
+            raise ValueError("condition требует source.")
+        return self
+
+
+class MappingRevision(SchemaModel):
+    """Проверенный маппинг normalization revision в MP SIEM 8.0."""
+
+    family_id: str = Field(description="Существующая parser Family.")
+    revision: int = Field(ge=1, description="Независимый номер mapping revision.")
+    parser_revision: int = Field(ge=1, description="Точная parser revision.")
+    normalization_revision: int = Field(ge=1, description="Точная normalization revision, чьи значения маппятся.")
+    taxonomy: str = Field(description="Идентификатор таксономии, например mp_siem_8.0.")
+    source_timezone: str | None = Field(
+        default=None,
+        description="Внешняя настройка timezone для naive timestamp; не выводится моделью из RAW.",
+    )
+    mappings: list[MappingField] = Field(description="Выбранные моделью соответствия и константы события MP SIEM.")
+    evidence: list[str] = Field(description="RAW-строки, на которых parser, normalization и mapping проверены.")
+    description: str = Field(description="Решения, допущения и ограничения mapping revision.")
+
+
+MappingFieldsInput = Annotated[
+    list[MappingField],
+    Field(description="Модельные соответствия normalized source → MP SIEM target или обоснованные константы."),
+]
+
+
+NormalizationFieldsInput = Annotated[
+    list[NormalizationField],
+    Field(description="Полный список описаний и operations для полей Family; target не используется."),
+]
+
+
 PatternName = Annotated[
     str,
     Field(min_length=1, description="Точное имя Grok-конструкции, например SYSLOGTIMEWITHYEAR."),
