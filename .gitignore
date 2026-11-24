@@ -2,3 +2,7 @@
 .venv/
 __pycache__/
 *.py[cod]
+.cargo/
+.rustup/
+.tools/
+rust/**/target/
