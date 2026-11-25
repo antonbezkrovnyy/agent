@@ -37,6 +37,7 @@
 | [R030](030-rust-data-plane-review.md) | Можно ли исполнять утверждённые revisions в Rust и быстро выбирать Family? | Native Rust pipeline и Aho–Corasick shortlist работают; 10/10 tests, 4/4 exact Python parity; определён dispatch design для 10 000 Families | Rust execution baseline; масштабный индекс требует следующего этапа |
 | [R031](031-cisco-end-to-end-pipeline-review.md) | Как одна Cisco-строка проходит весь путь от пустого Registry до выхода Rust? | Подробно восстановлены parser/normalizer/mapper, Bundle export, Rust startup, dispatch, 21 capture, 18 normalization descriptions, 29 mappings и финальный event | Сквозной методический отчёт на фактическом Bundle 4/2/4 |
 | [R032](032-cisco-full-rust-regression-review.md) | Пройдёт ли весь Cisco corpus через Rust? | 1763/1763 mapped, failed=0; полный Python/Rust parity по captures/normalized/event без mismatches; исправлены nested duplicate captures | Полный Rust execution baseline для текущего Cisco corpus |
+| [R036](036-cisco-batch-agent-review.md) | Даст ли Drain3 + batch agent выигрыш над построчным R020 без изменения одиночного режима? | 1763/1763 покрыто; Research 9 против 10, но 7 Family вместо 3, 903 строки требуют historical fallback; найдены regression и потерянный Research | Прототип работает; преимущество и production-качество не подтверждены |
 
 ## Общие условия ранних экспериментов
 

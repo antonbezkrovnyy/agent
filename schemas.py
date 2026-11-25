@@ -160,7 +160,7 @@ class ParserDefinition(SchemaModel):
 
 
 class Response(SchemaModel):
-    """Полный результат исследования одной строки: смысл, контракт и исполненный Grok- или pipeline-парсер."""
+    """Полный результат исследования одной parser Family: смысл, контракт и исполняемый parser."""
 
     essence: str = Field(description="Кратко: участники события, действие и результат без рекомендаций и догадок.")
     structure: list[StructureLayer] = Field(description="Упорядоченные слои от RAW к значениям без выдуманной вложенности.")
@@ -169,6 +169,54 @@ class Response(SchemaModel):
     format_features: list[FormatFeature] = Field(description="Свойства формата и обязательные следствия для разбора.")
     pitfalls: list[Pitfall] = Field(description="Только неоднозначности формата, их механизм и разрешение.")
     parser: ParserDefinition = Field(description="Исполненный Grok-парсер или детерминированный pipeline на исходной строке.")
+
+
+class LogSample(SchemaModel):
+    sample_id: str = Field(min_length=1, description="Стабильный идентификатор примера внутри батча.")
+    raw: str = Field(description="Полная исходная RAW-строка без изменений.")
+
+
+class ResearchBatch(SchemaModel):
+    cluster_id: int = Field(description="Идентификатор технического кластера предварительной группировки.")
+    total_logs_in_cluster: int = Field(ge=1, description="Полное число строк в исходном кластере.")
+    samples: list[LogSample] = Field(min_length=1, description="Контрастные RAW-примеры для исследования.")
+
+    @model_validator(mode="after")
+    def check_batch(self):
+        sample_ids = [sample.sample_id for sample in self.samples]
+        if len(set(sample_ids)) != len(sample_ids):
+            raise ValueError("sample_id должен быть уникальным внутри ResearchBatch.")
+        if self.total_logs_in_cluster < len(self.samples):
+            raise ValueError("total_logs_in_cluster не может быть меньше числа samples.")
+        return self
+
+
+class FamilyResearchGroup(SchemaModel):
+    sample_ids: list[str] = Field(min_length=1, description="Примеры, описываемые одной parser Family.")
+    response: Response = Field(description="Обычный результат исследования одной parser Family.")
+
+    @model_validator(mode="after")
+    def check_unique_samples(self):
+        if len(set(self.sample_ids)) != len(self.sample_ids):
+            raise ValueError("sample_id не должен повторяться внутри FamilyResearchGroup.")
+        return self
+
+
+class ResearchBatchResponse(SchemaModel):
+    groups: list[FamilyResearchGroup] = Field(
+        default_factory=list,
+        description="Одна или несколько независимых parser groups; каждая содержит обычный Response.",
+    )
+    unresolved_sample_ids: list[str] = Field(
+        default_factory=list,
+        description="Примеры, для которых недостаточно доказательств надёжного parser.",
+    )
+
+    @model_validator(mode="after")
+    def check_unresolved_samples(self):
+        if len(set(self.unresolved_sample_ids)) != len(self.unresolved_sample_ids):
+            raise ValueError("sample_id не должен повторяться в unresolved_sample_ids.")
+        return self
 
 
 class ParserResult(SchemaModel):

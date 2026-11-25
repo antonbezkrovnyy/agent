@@ -1,0 +1,14 @@
+{
+  "file": "data\\artifact_cisco_firewall.log",
+  "database": "research\\cisco-batch-clean.db",
+  "total_lines": 1763,
+  "initially_covered": 1753,
+  "input_uncovered": 10,
+  "batches": 3,
+  "researched_batches": 3,
+  "researched_groups": 3,
+  "skipped_batches": 0,
+  "uncovered_lines": [],
+  "duration_seconds": 1393.532,
+  "completed_at": "2026-11-25T08:15:44.696711+00:00"
+}

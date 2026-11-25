@@ -9,11 +9,16 @@ from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, ToolMe
 from langchain_deepseek import ChatDeepSeek
 from pydantic import ValidationError
 
-from prompts import RESEARCH_PROMPT, SYSTEM_PROMPT
-from schemas import Response
+from prompts import (
+    RESEARCH_BATCH_PROMPT,
+    RESEARCH_BATCH_SYSTEM_PROMPT,
+    RESEARCH_PROMPT,
+    SYSTEM_PROMPT,
+)
+from schemas import ResearchBatch, ResearchBatchResponse, Response
 import storage
 from tools import TOOLS, error_response, handle_tool_errors, validation_error_response
-from validation import check_response
+from validation import check_batch_response, check_response
 
 
 def make_model() -> ChatDeepSeek:
@@ -116,12 +121,115 @@ def run_observation(
     return response, saved["id"]
 
 
+def run_batch_step(
+    agent,
+    history: list[BaseMessage],
+    batch: ResearchBatch,
+    show_response: bool = True,
+    show_tools: bool = True,
+    compact_tools: bool = False,
+) -> ResearchBatchResponse:
+    messages = history
+    while True:
+        final_state = None
+        for chunk in agent.stream(
+            {"messages": messages},
+            stream_mode=["updates", "values"],
+            version="v2",
+        ):
+            if chunk["type"] == "values":
+                final_state = chunk["data"]
+                continue
+            for source, update in chunk["data"].items():
+                if source not in ("model", "tools"):
+                    continue
+                message = update["messages"][-1]
+                if isinstance(message, AIMessage) and show_tools:
+                    for call in message.tool_calls:
+                        details = "" if compact_tools else f" {call['args']}"
+                        print(f"Tool: {call['name']}{details}", flush=True)
+                elif isinstance(message, ToolMessage) and show_tools and not compact_tools:
+                    print(f"Tool result: {message.content}", flush=True)
+
+        if final_state is None:
+            raise RuntimeError("Агент не вернул финальное состояние")
+        content = next(
+            (
+                message.content
+                for message in reversed(final_state["messages"])
+                if isinstance(message, AIMessage) and message.content
+            ),
+            None,
+        )
+        try:
+            response = ResearchBatchResponse.model_validate_json(content or "")
+        except ValidationError as error:
+            messages = list(final_state["messages"])
+            messages.append(HumanMessage(content=validation_error_response(
+                error,
+                recovery=(
+                    "Не повторяй исследование и не вызывай инструменты. Исправь только финальный "
+                    "ResearchBatchResponse и верни полный JSON-объект без markdown и пояснений."
+                ),
+            )))
+            continue
+        problem = check_batch_response(response, batch)
+        if problem:
+            messages = list(final_state["messages"])
+            messages.append(HumanMessage(content=error_response(
+                problem["error"],
+                problem["message"],
+                recovery=problem["recovery"],
+                details=problem["details"],
+            )))
+            continue
+        history.append(AIMessage(content=response.model_dump_json()))
+        if show_response:
+            print(f"Агент: {response.model_dump_json(indent=2)}")
+        return response
+
+
+def run_research_batch(
+    agent,
+    batch: ResearchBatch,
+    show_response: bool = True,
+    show_tools: bool = True,
+    compact_tools: bool = False,
+) -> tuple[ResearchBatchResponse, list[int]]:
+    response = run_batch_step(
+        agent,
+        [HumanMessage(content=RESEARCH_BATCH_PROMPT.format(batch=batch.model_dump_json()))],
+        batch,
+        show_response=show_response,
+        show_tools=show_tools,
+        compact_tools=compact_tools,
+    )
+    research_ids = []
+    for group in response.groups:
+        saved = storage.save_research(group.response.model_dump(mode="json"))
+        research_ids.append(saved["id"])
+        print(f"Research result saved: id={saved['id']} samples={group.sample_ids}")
+    return response, research_ids
+
+
 def make_agent():
     return create_agent(
         make_model(),
         tools=TOOLS,
         middleware=[handle_tool_errors],
         system_prompt=SYSTEM_PROMPT + json.dumps(Response.model_json_schema(), ensure_ascii=False),
+    )
+
+
+def make_batch_agent():
+    return create_agent(
+        make_model(),
+        tools=TOOLS,
+        middleware=[handle_tool_errors],
+        system_prompt=RESEARCH_BATCH_SYSTEM_PROMPT + json.dumps(
+            ResearchBatchResponse.model_json_schema(),
+            ensure_ascii=False,
+        ),
     )
 
 

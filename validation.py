@@ -1,10 +1,18 @@
 import grok
 import pipeline
-from schemas import FieldConstraint, GrokPattern, ParserResult, Response
+from schemas import (
+    FieldConstraint,
+    GrokPattern,
+    ParserResult,
+    ResearchBatch,
+    ResearchBatchResponse,
+    Response,
+)
 import storage
 
 
-def check_response(response: Response, raw: str) -> dict | None:
+def check_response(response: Response, raw: str | list[str]) -> dict | None:
+    raws = [raw] if isinstance(raw, str) else raw
     structure_paths = {layer.path for layer in response.structure}
     invalid_sources = [
         {"field": field.name, "source": field.source}
@@ -23,7 +31,7 @@ def check_response(response: Response, raw: str) -> dict | None:
         }
 
     if response.parser.kind == "pipeline":
-        return check_pipeline_response(response, raw)
+        return check_pipeline_response(response, raws)
 
     pattern_issues = grok.validate_patterns(response.parser.patterns)
     if pattern_issues:
@@ -54,26 +62,29 @@ def check_response(response: Response, raw: str) -> dict | None:
         }
 
     patterns = {pattern.name: pattern.definition for pattern in response.parser.patterns}
-    parser_result = grok.execute_parser(response.parser.layers, patterns, raw)
-    validation = grok.validate_result(
-        ParserResult.model_validate(parser_result),
-        response.record_schema,
-        response.parser.constraints,
-    )
-    if not validation["ok"]:
-        return {
-            "error": "parser_validation_failed",
-            "message": "Финальный parser не прошёл независимое исполнение на исходной RAW-строке.",
-            "recovery": (
-                "Исправь parser, вызови execute_grok_parser, validate_grok_result и "
-                "evaluate_candidate, затем сохрани корректную Family. Не выдумывай результат проверки."
-            ),
-            "details": {
-                "issues": validation["issues"],
-                "failed_layer": parser_result.get("failed_layer"),
-                "residual": parser_result.get("residual"),
-            },
-        }
+    for sample_index, sample_raw in enumerate(raws):
+        parser_result = grok.execute_parser(response.parser.layers, patterns, sample_raw)
+        validation = grok.validate_result(
+            ParserResult.model_validate(parser_result),
+            response.record_schema,
+            response.parser.constraints,
+        )
+        if not validation["ok"]:
+            return {
+                "error": "parser_validation_failed",
+                "message": "Финальный parser не прошёл независимое исполнение на исходных RAW-строках.",
+                "recovery": (
+                    "Исправь parser, вызови execute_grok_parser, validate_grok_result и "
+                    "evaluate_candidate, затем сохрани корректную Family. Не выдумывай результат проверки."
+                ),
+                "details": {
+                    "sample_index": sample_index,
+                    "raw": sample_raw,
+                    "issues": validation["issues"],
+                    "failed_layer": parser_result.get("failed_layer"),
+                    "residual": parser_result.get("residual"),
+                },
+            }
 
     pattern_objects = {
         pattern.name: pattern.model_dump(mode="json") for pattern in response.parser.patterns
@@ -109,27 +120,31 @@ def check_response(response: Response, raw: str) -> dict | None:
     }
 
 
-def check_pipeline_response(response: Response, raw: str) -> dict | None:
-    parser_result = pipeline.execute_pipeline(response.parser.stages, raw)
-    validation = grok.validate_result(
-        ParserResult.model_validate(parser_result),
-        response.record_schema,
-        response.parser.constraints,
-    )
-    if not validation["ok"]:
-        return {
-            "error": "parser_validation_failed",
-            "message": "Финальный pipeline не прошёл независимое исполнение на исходной RAW-строке.",
-            "recovery": (
-                "Исправь stages/record_schema, вызови execute_pipeline_parser, "
-                "validate_pipeline_result и evaluate_pipeline_candidate, затем сохрани корректную Family."
-            ),
-            "details": {
-                "issues": validation["issues"],
-                "failed_layer": parser_result.get("failed_layer"),
-                "residual": parser_result.get("residual"),
-            },
-        }
+def check_pipeline_response(response: Response, raw: str | list[str]) -> dict | None:
+    raws = [raw] if isinstance(raw, str) else raw
+    for sample_index, sample_raw in enumerate(raws):
+        parser_result = pipeline.execute_pipeline(response.parser.stages, sample_raw)
+        validation = grok.validate_result(
+            ParserResult.model_validate(parser_result),
+            response.record_schema,
+            response.parser.constraints,
+        )
+        if not validation["ok"]:
+            return {
+                "error": "parser_validation_failed",
+                "message": "Финальный pipeline не прошёл независимое исполнение на исходных RAW-строках.",
+                "recovery": (
+                    "Исправь stages/record_schema, вызови execute_pipeline_parser, "
+                    "validate_pipeline_result и evaluate_pipeline_candidate, затем сохрани корректную Family."
+                ),
+                "details": {
+                    "sample_index": sample_index,
+                    "raw": sample_raw,
+                    "issues": validation["issues"],
+                    "failed_layer": parser_result.get("failed_layer"),
+                    "residual": parser_result.get("residual"),
+                },
+            }
 
     stages = [stage.model_dump(mode="json") for stage in response.parser.stages]
     record_schema = [field.model_dump(mode="json") for field in response.record_schema]
@@ -156,3 +171,47 @@ def check_pipeline_response(response: Response, raw: str) -> dict | None:
         ),
         "details": {"expected": "stages, record_schema и constraints должны совпасть с содержимым SQLite."},
     }
+
+
+def check_batch_response(response: ResearchBatchResponse, batch: ResearchBatch) -> dict | None:
+    samples_by_id = {sample.sample_id: sample.raw for sample in batch.samples}
+    expected_ids = set(samples_by_id)
+    assigned_ids = [
+        sample_id
+        for group in response.groups
+        for sample_id in group.sample_ids
+    ] + response.unresolved_sample_ids
+    assigned_set = set(assigned_ids)
+    duplicate_ids = sorted({sample_id for sample_id in assigned_ids if assigned_ids.count(sample_id) > 1})
+    unknown_ids = sorted(assigned_set - expected_ids)
+    missing_ids = sorted(expected_ids - assigned_set)
+    if duplicate_ids or unknown_ids or missing_ids:
+        return {
+            "error": "batch_assignment_invalid",
+            "message": "Каждый sample_id должен ровно один раз попасть в группу или unresolved_sample_ids.",
+            "recovery": (
+                "Исправь только распределение sample_ids. Не дублируй примеры, не придумывай "
+                "новые sample_id и не оставляй входные примеры без назначения."
+            ),
+            "details": {
+                "duplicate_sample_ids": duplicate_ids,
+                "unknown_sample_ids": unknown_ids,
+                "missing_sample_ids": missing_ids,
+            },
+        }
+
+    for group_index, group in enumerate(response.groups):
+        problem = check_response(
+            group.response,
+            [samples_by_id[sample_id] for sample_id in group.sample_ids],
+        )
+        if problem:
+            return {
+                **problem,
+                "details": {
+                    **problem.get("details", {}),
+                    "group_index": group_index,
+                    "sample_ids": group.sample_ids,
+                },
+            }
+    return None
