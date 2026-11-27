@@ -1,9 +1,12 @@
 import grok
+import mp_text
 import pipeline
 from schemas import GrokLayer, PipelineStage
 
 
 def execute_family(family: dict, raw: str) -> dict:
+    if family.get("target") == "mp_text":
+        return mp_text.execute_pattern(family["text_pattern"], raw)
     if family["stages"]:
         stages = [PipelineStage.model_validate(stage) for stage in family["stages"]]
         return pipeline.execute_pipeline(stages, raw)

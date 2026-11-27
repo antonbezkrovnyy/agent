@@ -1,0 +1,53 @@
+{
+  "ok": true,
+  "source_file": "C:/Users/aa.bezkrovnyy/Downloads/opensecuritydatalake/parser-react/data/artifact_edr_av.log",
+  "corpus_file": "research/r034-symantec-kv.log",
+  "total": 997,
+  "mapped": 997,
+  "failed": 0,
+  "families": {
+    "symantec_endpoint_traffic_log_symantecserver": 943,
+    "symantec_endpoint_content_package_download_symantecserver": 47,
+    "symantec_endpoint_system_event_symantecserver": 7
+  },
+  "python_rust_parity": {
+    "compared": 997,
+    "fields": [
+      "ok",
+      "status",
+      "captures",
+      "normalized",
+      "event"
+    ],
+    "mismatch_count": 0,
+    "mismatches": []
+  },
+  "bundles": {
+    "symantec_endpoint_content_package_download_symantecserver": {
+      "parser_revision": 1,
+      "normalization_revision": 1,
+      "mapping_revision": 1,
+      "evidence": 1,
+      "compatibility_hash": "2c1ffb018789f2ac3ed75911a72da86c74bc719c85ceafb2d132bc223ac08273"
+    },
+    "symantec_endpoint_system_event_symantecserver": {
+      "parser_revision": 1,
+      "normalization_revision": 1,
+      "mapping_revision": 1,
+      "evidence": 1,
+      "compatibility_hash": "7eb983911cbfb0735c6d432e528d1cd92fd1425e44c5af71ff395d92f11415cb"
+    },
+    "symantec_endpoint_traffic_log_symantecserver": {
+      "parser_revision": 2,
+      "normalization_revision": 3,
+      "mapping_revision": 3,
+      "evidence": 6,
+      "compatibility_hash": "8e6a7f751bf09b44ea2481d75d4354652118a6d9a54f68f5b56568830bf1b9ec"
+    }
+  },
+  "source_configuration": {
+    "source_default_year": 2024,
+    "source_timezone": "UTC",
+    "note": "Год 2024 наблюдается в payload Begin/Event time; timezone UTC — внешняя лабораторная настройка."
+  }
+}

@@ -1,0 +1,100 @@
+appendix: |
+  { null }
+rules:
+- name: axelnac/normalization_formulas/syslog_auth_login_ok_nas_client
+  uuid: e5bc30ac-bfe4-5abe-a881-db89eb5ec0cb
+  subformulas: null
+  rule_info:
+    grok:
+      kind: TEXT
+      pattern: '{"<"$pri=NUMBER">"}{$ts=DATETIME_SYSLOG} {$host=HOSTNAME} {$program=WORD}{"["$pid=NUMBER"]"?}: {"("$reqid=NUMBER")"?}
+        Login OK: {"["$user=UNTIL("]")} (from client {$nas=HOSTNAME} port {$port=NUMBER} cli {$mac=MACADDR})'
+    condition: null
+    body: |
+      {if exists(."$pri") {
+        ."$pri" = mp_number(."$pri");
+        {if is_null(."$pri") { abort }};
+        {if mp_bool(mp_lt(."$pri", 0)) { abort }};
+        {if mp_bool(mp_gt(."$pri", 191)) { abort }};
+        {if is_null(."$pri") || mp_string(."$pri") == "" { abort }};
+      } else { abort }};
+      {if exists(."$ts") {
+        {if is_null(."$ts") || mp_string(."$ts") == "" { abort }};
+      } else { abort }};
+      {if exists(."$host") {
+        {if is_null(."$host") || mp_string(."$host") == "" { abort }};
+      } else { abort }};
+      {if exists(."$program") {
+        {if is_null(."$program") || mp_string(."$program") == "" { abort }};
+      } else { abort }};
+      {if exists(."$pid") {
+        ."$pid" = mp_number(."$pid");
+        {if is_null(."$pid") { abort }};
+      }};
+      {if exists(."$reqid") {
+        ."$reqid" = mp_number(."$reqid");
+        {if is_null(."$reqid") { abort }};
+      }};
+      {if exists(."$user") {
+        {if is_null(."$user") || mp_string(."$user") == "" { abort }};
+      } else { abort }};
+      {if exists(."$nas") {
+        {if is_null(."$nas") || mp_string(."$nas") == "" { abort }};
+      } else { abort }};
+      {if exists(."$port") {
+        ."$port" = mp_number(."$port");
+        {if is_null(."$port") { abort }};
+        {if is_null(."$port") || mp_string(."$port") == "" { abort }};
+      } else { abort }};
+      {if exists(."$mac") {
+        {if is_null(."$mac") || mp_string(."$mac") == "" { abort }};
+      } else { abort }};
+      {if exists(."$ts") {
+        ."time" = ."$ts";
+      } else { abort }};
+      ."id" = "PT_unknown_syslog_syslog_login";
+      ."event_src_vendor" = "unknown";
+      ."event_src_title" = "syslog";
+      ."event_src_category" = "AAA";
+      ."action" = "login";
+      ."object" = "session";
+      ."status" = "success";
+      ."importance" = "info";
+      ."category_generic" = "Access";
+      ."category_high" = "Authentication";
+      ."category_low" = "Remote";
+      ."subject" = "account";
+      {if exists(."$user") {
+        ."subject_account_name" = ."$user";
+      }};
+      {if exists(."$nas") && (is_ipv4(string!(mp_string(."$nas"))) || is_ipv6(string!(mp_string(."$nas")))) {
+        ."src_ip" = ."$nas";
+      }};
+      {if exists(."$nas") && (mp_regex_match(string!(mp_string(."$nas")), r'^[A-Za-z0-9_.\-]+$') && !is_ipv4(string!(mp_string(."$nas"))) && !is_ipv6(string!(mp_string(."$nas")))) {
+        ."src_hostname" = ."$nas";
+      }};
+      {if exists(."$mac") {
+        ."src_mac" = ."$mac";
+      }};
+      {if exists(."$host") && (mp_regex_match(string!(mp_string(."$host")), r'^[A-Za-z0-9_.\-]+$') && !is_ipv4(string!(mp_string(."$host"))) && !is_ipv6(string!(mp_string(."$host")))) {
+        ."event_src_hostname" = ."$host";
+      }};
+      {if exists(."$host") && (is_ipv4(string!(mp_string(."$host"))) || is_ipv6(string!(mp_string(."$host")))) {
+        ."event_src_ip" = ."$host";
+      }};
+      {if exists(."$program") {
+        ."event_src_subsys" = ."$program";
+      }};
+      ."logon_auth_method" = "remote";
+      {if exists(."$reqid") {
+        ."numfield1" = ."$reqid";
+      }};
+      {if exists(."$port") {
+        ."numfield2" = ."$port";
+      }};
+      {if exists(."$pid") {
+        ."numfield3" = ."$pid";
+      }};
+      {if exists(."$pri") {
+        ."numfield4" = ."$pri";
+      }};

@@ -1,8 +1,10 @@
 import grok
+import mp_text
 import pipeline
 from schemas import (
     FieldConstraint,
     GrokPattern,
+    Observation,
     ParserResult,
     ResearchBatch,
     ResearchBatchResponse,
@@ -32,6 +34,8 @@ def check_response(response: Response, raw: str | list[str]) -> dict | None:
 
     if response.parser.kind == "pipeline":
         return check_pipeline_response(response, raws)
+    if response.parser.kind == "mp_text":
+        return check_mp_text_response(response, raws)
 
     pattern_issues = grok.validate_patterns(response.parser.patterns)
     if pattern_issues:
@@ -117,6 +121,47 @@ def check_response(response: Response, raw: str | list[str]) -> dict | None:
             "Для reuse верни parser и record_schema существующей Family без изменений."
         ),
         "details": {"expected": "patterns, layers и record_schema должны совпасть с содержимым SQLite."},
+    }
+
+
+def check_mp_text_response(response: Response, raws: list[str]) -> dict | None:
+    evaluation = mp_text.evaluate_observations(
+        response.parser.text_pattern,
+        response.record_schema,
+        [Observation(raw=raw) for raw in raws],
+        response.parser.constraints,
+        response.parser.negative_evidence,
+    )
+    if not evaluation["ok"]:
+        return {
+            "error": "mp_text_validation_failed",
+            "message": "Финальный MP TEXT parser не прошёл native captures, schema или negative evidence.",
+            "recovery": (
+                "Исправь text_pattern, вызови execute/evaluate_mp_text_parser и сохрани Family "
+                "через save_mp_text_family. Не выдумывай native результат."
+            ),
+            "details": evaluation,
+        }
+    record_schema = [field.model_dump(mode="json") for field in response.record_schema]
+    constraints = [
+        FieldConstraint.model_validate(rule).model_dump(mode="json")
+        for rule in response.parser.constraints
+    ]
+    for item in storage.list_families()["families"]:
+        family = storage.get_family(item["family_id"])["family"]
+        if (
+            family.get("target") == "mp_text"
+            and family.get("text_pattern") == response.parser.text_pattern
+            and family.get("negative_evidence", []) == response.parser.negative_evidence
+            and family["record_schema"] == record_schema
+            and family["constraints"] == constraints
+        ):
+            return None
+    return {
+        "error": "parser_not_persisted",
+        "message": "MP TEXT Response не совпадает ни с одной сохранённой Family target=mp_text.",
+        "recovery": "Сохрани через save_mp_text_family и проверь get_parser_family; для reuse верни существующую revision без изменений.",
+        "details": {"expected": "text_pattern, record_schema, negative_evidence и constraints должны совпасть с SQLite."},
     }
 
 

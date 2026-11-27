@@ -1,0 +1,69 @@
+{
+  "schema_version": 1,
+  "family_id": "symantec_endpoint_content_package_download_symantecserver",
+  "compatibility_hash": "2c1ffb018789f2ac3ed75911a72da86c74bc719c85ceafb2d132bc223ac08273",
+  "cases": [
+    {
+      "raw": "<6>Jul 26 21:18:57 OAK-SYM-V01 SymantecServer: Site: Site OAK-SYM-V01,Server Name: OAK-SYM-V01,Domain Name: umbrella.net,The client has downloaded the content package successfully,umbrella.net,brestrad,UMBRELLA.NET",
+      "expected": {
+        "ok": true,
+        "status": "mapped",
+        "captures": {
+          "pri": "6",
+          "timestamp": "Jul 26 21:18:57",
+          "host": "OAK-SYM-V01",
+          "msg_id": "SymantecServer",
+          "body": "Site: Site OAK-SYM-V01,Server Name: OAK-SYM-V01,Domain Name: umbrella.net,The client has downloaded the content package successfully,umbrella.net,brestrad,UMBRELLA.NET",
+          "Site": "Site OAK-SYM-V01",
+          "Server Name": "OAK-SYM-V01",
+          "Domain Name": "umbrella.net",
+          "column_4": "The client has downloaded the content package successfully",
+          "column_5": "umbrella.net",
+          "column_6": "brestrad",
+          "column_7": "UMBRELLA.NET"
+        },
+        "normalized": {
+          "pri": 6,
+          "timestamp": "2024-07-26T21:18:57",
+          "host": "OAK-SYM-V01",
+          "msg_id": "SymantecServer",
+          "body": "Site: Site OAK-SYM-V01,Server Name: OAK-SYM-V01,Domain Name: umbrella.net,The client has downloaded the content package successfully,umbrella.net,brestrad,UMBRELLA.NET",
+          "Site": "Site OAK-SYM-V01",
+          "Server Name": "OAK-SYM-V01",
+          "Domain Name": "umbrella.net",
+          "column_4": "The client has downloaded the content package successfully",
+          "column_5": "umbrella.net",
+          "column_6": "brestrad",
+          "column_7": "UMBRELLA.NET"
+        },
+        "event": {
+          "time": "2024-07-26T21:18:57Z",
+          "id": "mp_siem_symantec_endpointprotection_syslog_content_package_download",
+          "event_src.vendor": "symantec",
+          "event_src.title": "endpointprotection",
+          "event_src.category": "Anti-virus",
+          "action": "download",
+          "object": "update",
+          "status": "success",
+          "importance": "info",
+          "category.generic": "Software Management",
+          "category.high": "Security Software Management",
+          "category.low": "Update",
+          "subject": "host",
+          "subject.name": "OAK-SYM-V01",
+          "subject.domain": "umbrella.net",
+          "subject.group": "Site OAK-SYM-V01",
+          "src.hostname": "OAK-SYM-V01",
+          "event_src.hostname": "OAK-SYM-V01",
+          "event_src.subsys": "SymantecServer",
+          "datafield1": "The client has downloaded the content package successfully",
+          "datafield2": "umbrella.net",
+          "datafield3": "brestrad",
+          "datafield4": "UMBRELLA.NET",
+          "numfield1": 6
+        },
+        "errors": []
+      }
+    }
+  ]
+}

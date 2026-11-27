@@ -1,0 +1,73 @@
+{
+  "positive": [
+    {
+      "name": "login_ok",
+      "event": {
+        "message": "<34>Oct 27 2024 12:00:00 nas01 auth[123]: (456) Login OK: [alice] (from client nas01 port 1 cli aa:bb:cc:dd:ee:ff)",
+        "mime": "TEXT"
+      },
+      "required_fields": ["time", "id", "event_src_hostname"],
+      "expected": {
+        "id": "PT_Axel_AxelNAC_syslog_login_ok",
+        "subject": "account",
+        "action": "login",
+        "object": "application",
+        "status": "success",
+        "subject_account_name": "alice",
+        "numfield1": 1,
+        "event_src_title": "axelnac",
+        "event_src_hostname": "nas01",
+        "src_mac": "AA:BB:CC:DD:EE:FF"
+      },
+      "unexpected_fields": ["$user", "$host", "$request_id", "$procid"]
+    },
+    {
+      "name": "login_incorrect_without_cli",
+      "event": {
+        "message": "<34>Oct 27 2024 12:00:01 nas01 auth[123]: (457) Login incorrect (bad password): [alice] (from client nas01 port 2)",
+        "mime": "TEXT"
+      },
+      "required_fields": ["time", "id", "reason"],
+      "expected": {
+        "id": "PT_Axel_AxelNAC_syslog_login_incorrect",
+        "status": "failure",
+        "subject_account_name": "alice",
+        "reason": "bad password",
+        "numfield1": 2
+      },
+      "unexpected_fields": ["src_mac", "$user", "$reason"]
+    },
+    {
+      "name": "login_ok_tls",
+      "event": {
+        "message": "<34>Oct 27 2024 12:00:02 nas01 auth[123]: (458)   Login OK: [alice] (from client nas01 port 3 cli aa:bb:cc:dd:ee:ff via TLS tunnel)",
+        "mime": "TEXT"
+      },
+      "required_fields": ["time", "id"],
+      "expected": {
+        "id": "PT_Axel_AxelNAC_syslog_login_ok_tls",
+        "status": "success",
+        "msgid": "login_ok_tls",
+        "numfield1": 3
+      }
+    }
+  ],
+  "negative": [
+    {
+      "name": "truncated_login",
+      "event": {
+        "message": "<34>Oct 27 2024 12:00:00 nas01 auth[123]: Login OK",
+        "mime": "TEXT"
+      },
+      "status": "unparsed"
+    },
+    {
+      "name": "unrelated_message",
+      "event": {
+        "message": "unrelated plain text event",
+        "mime": "TEXT"
+      },
+      "status": "unparsed"
+    }
+  ]
+}

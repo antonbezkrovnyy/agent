@@ -1,0 +1,50 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  color-scheme: dark;
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+}
+
+* { box-sizing: border-box; }
+html { background: #0a0d12; }
+body { margin: 0; min-width: 320px; min-height: 100vh; background: #0a0d12; color: #e7ecf3; }
+button, input, select, textarea { font: inherit; }
+button, a { -webkit-tap-highlight-color: transparent; }
+::selection { background: rgba(119, 224, 189, .25); }
+::-webkit-scrollbar { width: 9px; height: 9px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: #303947; border-radius: 8px; border: 2px solid transparent; background-clip: padding-box; }
+
+@layer components {
+  .card { @apply rounded-2xl border border-line bg-panel shadow-panel; }
+  .input { @apply rounded-xl border border-line bg-canvas px-3.5 py-2.5 text-sm text-slate-100 outline-none transition placeholder:text-slate-600 focus:border-accent/60 focus:ring-2 focus:ring-accent/10; }
+  .btn { @apply inline-flex items-center justify-center gap-2 rounded-xl border border-line bg-elevated px-3.5 py-2 text-sm font-medium text-slate-200 transition hover:border-slate-600 hover:bg-slate-700/40 disabled:cursor-not-allowed disabled:opacity-40; }
+  .icon-btn { @apply inline-flex h-9 w-9 items-center justify-center rounded-lg text-muted transition hover:bg-white/5 hover:text-white; }
+  .th { @apply whitespace-nowrap border-b border-line bg-panel px-4 py-3 text-left text-[11px] font-semibold uppercase tracking-wider text-muted; }
+  .td { @apply max-w-[360px] border-b border-line/60 px-4 py-3 align-top text-sm text-slate-300; }
+}
+
+.markdown-body { color: #cbd5e1; line-height: 1.75; font-size: 15px; }
+.markdown-body > :first-child { margin-top: 0; }
+.markdown-body h1 { color: #f8fafc; font-size: 2rem; line-height: 1.25; margin: 0 0 1.5rem; letter-spacing: -.025em; }
+.markdown-body h2 { color: #f1f5f9; font-size: 1.4rem; margin: 2.25rem 0 .85rem; padding-top: 1rem; border-top: 1px solid #252c38; }
+.markdown-body h3 { color: #e2e8f0; font-size: 1.1rem; margin: 1.75rem 0 .65rem; }
+.markdown-body p { margin: .8rem 0; }
+.markdown-body a { color: #77e0bd; text-decoration: none; }
+.markdown-body a:hover { text-decoration: underline; }
+.markdown-body ul, .markdown-body ol { padding-left: 1.5rem; margin: .8rem 0; }
+.markdown-body ul { list-style: disc; }
+.markdown-body ol { list-style: decimal; }
+.markdown-body li { margin: .3rem 0; }
+.markdown-body strong { color: #f1f5f9; font-weight: 600; }
+.markdown-body code { background: #1b2330; color: #a7f3d0; border-radius: 5px; padding: .15em .35em; font-size: .88em; }
+.markdown-body pre { background: #090c11; border: 1px solid #252c38; border-radius: 12px; padding: 1rem; overflow-x: auto; }
+.markdown-body pre code { background: transparent; padding: 0; color: #cbd5e1; }
+.markdown-body blockquote { border-left: 3px solid #77e0bd; margin: 1rem 0; padding: .1rem 1rem; color: #94a3b8; }
+.markdown-body table { width: 100%; border-collapse: collapse; margin: 1rem 0; display: block; overflow-x: auto; }
+.markdown-body th { color: #e2e8f0; text-align: left; background: #171d27; }
+.markdown-body th, .markdown-body td { border: 1px solid #252c38; padding: .6rem .75rem; vertical-align: top; }
+.markdown-body hr { border: 0; border-top: 1px solid #252c38; margin: 2rem 0; }

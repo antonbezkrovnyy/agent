@@ -1,0 +1,38 @@
+{
+  "ok": true,
+  "file": "C:\\Users\\aa.bezkrovnyy\\Downloads\\opensecuritydatalake\\parser-react\\data\\artifact_juniper.log",
+  "total": 26,
+  "mapped": 26,
+  "failed": 0,
+  "families": {
+    "juniper_junos_rt_flow_session_deny": 26
+  },
+  "python_rust_parity": {
+    "compared": 26,
+    "fields": [
+      "ok",
+      "status",
+      "captures",
+      "normalized",
+      "event"
+    ],
+    "mismatch_count": 0,
+    "mismatches": []
+  },
+  "bundle": {
+    "parser_revision": 6,
+    "normalization_revision": 1,
+    "mapping_revision": 2,
+    "compatibility_hash": "e01a9c40efb43fa2274b3ba7c5478c9e5bb8243f42ef57c375875ecb7b511986"
+  },
+  "source_configuration": {
+    "source_default_year": 2023,
+    "source_timezone": "UTC",
+    "note": "Лабораторные настройки; реальные год и timezone Junos в RAW отсутствуют."
+  },
+  "concrete_mapping_checks": {
+    "subject_account": true,
+    "username_not_in_datafields": true,
+    "protocol_uses_concrete_field": true
+  }
+}

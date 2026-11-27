@@ -1,0 +1,106 @@
+{
+  "schema_version": 1,
+  "profile": "logicore-mp-text-v1.1.7",
+  "source": "axelnac",
+  "revision": 2,
+  "spec_hash": "80ba3fdc16ce7def7e6a2d5dc57b39098eb7a11087beb6940c121c3fd09df2d3",
+  "rules_path": "output\\registry-axelnac\\pipeline\\parse\\axelnac\\norm_rules_axelnac.yml",
+  "conf_path": "output\\registry-axelnac\\pipeline\\parse\\autonormalizer\\axelnac.conf",
+  "fixtures_path": "output\\registry-axelnac\\fixtures\\axelnac\\native_fixtures.json",
+  "report_path": "output\\registry-axelnac\\fixtures\\axelnac\\validation_report.json",
+  "rules": 1,
+  "positive_fixtures": 1,
+  "negative_fixtures": 5,
+  "assumptions": [],
+  "native": {
+    "declared_rules": 1,
+    "failed_fixtures": 0,
+    "loaded_rules": 1,
+    "negative_fixtures": 5,
+    "ok": true,
+    "positive_fixtures": 1,
+    "results": [
+      {
+        "actual": {
+          "action": "login",
+          "category_generic": "Access",
+          "category_high": "Authentication",
+          "category_low": "Remote",
+          "event_src_category": "AAA",
+          "event_src_hostname": "nas01",
+          "event_src_subsys": "auth",
+          "event_src_title": "syslog",
+          "event_src_vendor": "unknown",
+          "id": "PT_unknown_syslog_syslog_login",
+          "importance": "info",
+          "logon_auth_method": "remote",
+          "numfield1": 456,
+          "numfield2": 1,
+          "numfield3": 123,
+          "numfield4": 34,
+          "object": "session",
+          "src_hostname": "nas01",
+          "src_mac": "AA:BB:CC:DD:EE:FF",
+          "status": "success",
+          "subject": "account",
+          "subject_account_name": "alice",
+          "time": "2024-10-27T12:00:00.000Z"
+        },
+        "errors": [],
+        "index": 0,
+        "name": "syslog_auth_login_ok_nas_client:0",
+        "ok": true,
+        "positive": true
+      },
+      {
+        "detail": null,
+        "error": null,
+        "index": 0,
+        "name": "syslog_auth_login_ok_nas_client:negative:0",
+        "ok": true,
+        "positive": false,
+        "status": "unparsed"
+      },
+      {
+        "detail": null,
+        "error": null,
+        "index": 1,
+        "name": "syslog_auth_login_ok_nas_client:negative:1",
+        "ok": true,
+        "positive": false,
+        "status": "unparsed"
+      },
+      {
+        "detail": null,
+        "error": null,
+        "index": 2,
+        "name": "syslog_auth_login_ok_nas_client:negative:2",
+        "ok": true,
+        "positive": false,
+        "status": "unparsed"
+      },
+      {
+        "detail": null,
+        "error": null,
+        "index": 3,
+        "name": "syslog_auth_login_ok_nas_client:negative:3",
+        "ok": true,
+        "positive": false,
+        "status": "unparsed"
+      },
+      {
+        "detail": null,
+        "error": null,
+        "index": 4,
+        "name": "syslog_auth_login_ok_nas_client:negative:4",
+        "ok": true,
+        "positive": false,
+        "status": "unparsed"
+      }
+    ],
+    "skipped_rules": 0,
+    "strict_load": true,
+    "native_exit_code": 0
+  },
+  "ok": true
+}

@@ -1,5 +1,6 @@
 from collections.abc import Iterator
 from contextlib import contextmanager
+import hashlib
 import json
 import os
 from pathlib import Path
@@ -32,6 +33,9 @@ def db_connect() -> Iterator[sqlite3.Connection]:
             patterns_json TEXT NOT NULL,
             layers_json TEXT NOT NULL,
             stages_json TEXT NOT NULL DEFAULT '[]',
+            target TEXT NOT NULL DEFAULT 'research',
+            text_pattern TEXT,
+            negative_evidence_json TEXT NOT NULL DEFAULT '[]',
             record_schema_json TEXT NOT NULL,
             evidence_json TEXT NOT NULL,
             family_description_json TEXT NOT NULL,
@@ -92,6 +96,48 @@ def db_connect() -> Iterator[sqlite3.Connection]:
             response_json TEXT NOT NULL,
             created_at TEXT NOT NULL
         );
+        CREATE TABLE IF NOT EXISTS mp_exports (
+            source TEXT NOT NULL,
+            revision INTEGER NOT NULL,
+            profile TEXT NOT NULL,
+            spec_json TEXT NOT NULL,
+            spec_hash TEXT NOT NULL,
+            yaml_path TEXT NOT NULL,
+            conf_path TEXT NOT NULL,
+            fixtures_path TEXT NOT NULL,
+            report_path TEXT NOT NULL,
+            native_ok INTEGER NOT NULL,
+            rules_count INTEGER NOT NULL,
+            positive_count INTEGER NOT NULL,
+            negative_count INTEGER NOT NULL,
+            created_at TEXT NOT NULL,
+            PRIMARY KEY (source, revision)
+        );
+        CREATE TABLE IF NOT EXISTS feedback (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            dedup_key TEXT NOT NULL,
+            source TEXT NOT NULL,
+            agent TEXT NOT NULL,
+            category TEXT NOT NULL,
+            family_id TEXT,
+            parser_revision INTEGER,
+            normalization_revision INTEGER,
+            mapping_revision INTEGER,
+            field TEXT,
+            summary TEXT NOT NULL,
+            needed TEXT,
+            evidence_json TEXT NOT NULL,
+            details_json TEXT NOT NULL,
+            blocking INTEGER NOT NULL,
+            status TEXT NOT NULL,
+            occurrences INTEGER NOT NULL DEFAULT 1,
+            resolution TEXT,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL,
+            resolved_at TEXT
+        );
+        CREATE INDEX IF NOT EXISTS idx_feedback_dedup_open ON feedback(dedup_key, status);
+        CREATE INDEX IF NOT EXISTS idx_feedback_family_status ON feedback(family_id, status);
         CREATE TABLE IF NOT EXISTS semantic_embeddings_v2 (
             entity_type TEXT NOT NULL,
             entity_id TEXT NOT NULL,
@@ -114,6 +160,14 @@ def db_connect() -> Iterator[sqlite3.Connection]:
             connection.execute(
                 f"ALTER TABLE parser_families ADD COLUMN {column} TEXT NOT NULL DEFAULT '{default}'"
             )
+    for definition in (
+        "target TEXT NOT NULL DEFAULT 'research'",
+        "text_pattern TEXT",
+        "negative_evidence_json TEXT NOT NULL DEFAULT '[]'",
+    ):
+        column = definition.split()[0]
+        if column not in columns:
+            connection.execute(f"ALTER TABLE parser_families ADD COLUMN {definition}")
     grok_columns = {
         row[1] for row in connection.execute("PRAGMA table_info(grok_patterns)").fetchall()
     }
@@ -230,11 +284,15 @@ def save_family(
     parser_description: dict,
     constraints: list[dict],
     stages: list[dict] | None = None,
+    target: str = "research",
+    text_pattern: str | None = None,
+    negative_evidence: list[str] | None = None,
 ) -> dict:
     with db_connect() as connection:
         existing = connection.execute(
             "SELECT patterns_json, layers_json, record_schema_json, evidence_json, "
-            "family_description_json, parser_description_json, constraints_json, stages_json "
+            "family_description_json, parser_description_json, constraints_json, stages_json, "
+            "target, text_pattern, negative_evidence_json "
             "FROM parser_families WHERE family_id = ? AND revision = ?",
             (family_id, revision),
         ).fetchone()
@@ -247,6 +305,9 @@ def save_family(
             json.dumps(parser_description, ensure_ascii=False),
             json.dumps(constraints, ensure_ascii=False),
             json.dumps(stages or [], ensure_ascii=False),
+            target,
+            text_pattern,
+            json.dumps(negative_evidence or [], ensure_ascii=False),
         )
         if existing and existing != payload:
             return {
@@ -261,8 +322,9 @@ def save_family(
         connection.execute(
             "INSERT INTO parser_families ("
             "family_id, revision, patterns_json, layers_json, record_schema_json, evidence_json, "
-            "family_description_json, parser_description_json, constraints_json, stages_json, created_at"
-            ") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            "family_description_json, parser_description_json, constraints_json, stages_json, "
+            "target, text_pattern, negative_evidence_json, created_at"
+            ") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             (family_id, revision, *payload, datetime.now(timezone.utc).isoformat()),
         )
     return {"ok": True, "family_id": family_id, "revision": revision, "status": "saved"}
@@ -271,7 +333,7 @@ def save_family(
 def list_families() -> dict:
     with db_connect() as connection:
         rows = connection.execute(
-            "SELECT family_id, revision, evidence_json, family_description_json "
+            "SELECT family_id, revision, evidence_json, family_description_json, target "
             "FROM parser_families AS current "
             "WHERE revision = ("
             "SELECT MAX(revision) FROM parser_families "
@@ -286,6 +348,7 @@ def list_families() -> dict:
                 "revision": row[1],
                 "evidence": json.loads(row[2]),
                 "description": json.loads(row[3]),
+                "target": row[4],
             }
             for row in rows
         ],
@@ -295,10 +358,10 @@ def list_families() -> dict:
 def list_parser_revisions() -> list[dict]:
     with db_connect() as connection:
         rows = connection.execute(
-            "SELECT family_id, revision FROM parser_families "
+            "SELECT family_id, revision, target FROM parser_families "
             "ORDER BY family_id, revision DESC"
         ).fetchall()
-    return [{"family_id": row[0], "revision": row[1]} for row in rows]
+    return [{"family_id": row[0], "revision": row[1], "target": row[2]} for row in rows]
 
 
 def get_family(family_id: str, revision: int | None = None) -> dict:
@@ -306,14 +369,16 @@ def get_family(family_id: str, revision: int | None = None) -> dict:
         if revision is None:
             row = connection.execute(
                 "SELECT revision, patterns_json, layers_json, record_schema_json, evidence_json, "
-                "family_description_json, parser_description_json, constraints_json, stages_json "
+                "family_description_json, parser_description_json, constraints_json, stages_json, "
+                "target, text_pattern, negative_evidence_json "
                 "FROM parser_families WHERE family_id = ? ORDER BY revision DESC LIMIT 1",
                 (family_id,),
             ).fetchone()
         else:
             row = connection.execute(
                 "SELECT revision, patterns_json, layers_json, record_schema_json, evidence_json, "
-                "family_description_json, parser_description_json, constraints_json, stages_json "
+                "family_description_json, parser_description_json, constraints_json, stages_json, "
+                "target, text_pattern, negative_evidence_json "
                 "FROM parser_families WHERE family_id = ? AND revision = ?",
                 (family_id, revision),
             ).fetchone()
@@ -338,6 +403,9 @@ def get_family(family_id: str, revision: int | None = None) -> dict:
             "parser_description": json.loads(row[6]),
             "constraints": json.loads(row[7]),
             "stages": json.loads(row[8]),
+            "target": row[9],
+            "text_pattern": row[10],
+            "negative_evidence": json.loads(row[11]),
         },
     }
 
@@ -603,6 +671,15 @@ def get_parser_research(family_id: str, revision: int) -> dict:
                 and family["patterns"] == []
                 and family["layers"] == []
             )
+        elif parser.kind == "mp_text":
+            matches = (
+                family.get("target") == "mp_text"
+                and family.get("text_pattern") == parser.text_pattern
+                and family.get("negative_evidence", []) == parser.negative_evidence
+                and family["patterns"] == []
+                and family["layers"] == []
+                and family["stages"] == []
+            )
         else:
             family_patterns = {
                 pattern["name"]: GrokPattern.model_validate(pattern).model_dump(mode="json")
@@ -641,3 +718,286 @@ def save_research(response: dict) -> dict:
             (json.dumps(response, ensure_ascii=False), datetime.now(timezone.utc).isoformat()),
         )
     return {"ok": True, "id": cursor.lastrowid}
+
+
+def save_mp_export(spec: dict, package: dict) -> dict:
+    source = spec["source"]
+    revision = spec["revision"]
+    with db_connect() as connection:
+        existing = connection.execute(
+            "SELECT spec_hash FROM mp_exports WHERE source = ? AND revision = ?",
+            (source, revision),
+        ).fetchone()
+        if existing and existing[0] != package["spec_hash"]:
+            return {
+                "ok": False,
+                "error": "mp_export_revision_exists_with_different_content",
+                "message": "Для изменённого MP candidate увеличьте revision.",
+                "source": source,
+                "revision": revision,
+            }
+        payload = (
+            package["profile"],
+            json.dumps(spec, ensure_ascii=False),
+            package["spec_hash"],
+            package["rules_path"],
+            package["conf_path"],
+            package["fixtures_path"],
+            package["report_path"],
+            int(package["native"]["ok"]),
+            package["rules"],
+            package["positive_fixtures"],
+            package["negative_fixtures"],
+            datetime.now(timezone.utc).isoformat(),
+        )
+        if existing:
+            return {"ok": True, "source": source, "revision": revision, "status": "unchanged"}
+        connection.execute(
+            "INSERT INTO mp_exports (source, revision, profile, spec_json, spec_hash, yaml_path, "
+            "conf_path, fixtures_path, report_path, native_ok, rules_count, positive_count, "
+            "negative_count, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (source, revision, *payload),
+        )
+    return {"ok": True, "source": source, "revision": revision, "status": "saved"}
+
+
+def get_mp_export(source: str, revision: int | None = None) -> dict:
+    with db_connect() as connection:
+        if revision is None:
+            row = connection.execute(
+                "SELECT revision, profile, spec_json, spec_hash, yaml_path, conf_path, fixtures_path, "
+                "report_path, native_ok, rules_count, positive_count, negative_count, created_at "
+                "FROM mp_exports WHERE source = ? ORDER BY revision DESC LIMIT 1",
+                (source,),
+            ).fetchone()
+        else:
+            row = connection.execute(
+                "SELECT revision, profile, spec_json, spec_hash, yaml_path, conf_path, fixtures_path, "
+                "report_path, native_ok, rules_count, positive_count, negative_count, created_at "
+                "FROM mp_exports WHERE source = ? AND revision = ?",
+                (source, revision),
+            ).fetchone()
+    if not row:
+        return {"ok": False, "error": "not_found", "source": source, "revision": revision}
+    return {
+        "ok": True,
+        "export": {
+            "source": source,
+            "revision": row[0],
+            "profile": row[1],
+            "spec": json.loads(row[2]),
+            "spec_hash": row[3],
+            "yaml_path": row[4],
+            "conf_path": row[5],
+            "fixtures_path": row[6],
+            "report_path": row[7],
+            "native_ok": bool(row[8]),
+            "rules": row[9],
+            "positive_fixtures": row[10],
+            "negative_fixtures": row[11],
+            "created_at": row[12],
+        },
+    }
+
+
+FEEDBACK_COLUMNS = (
+    "id",
+    "source",
+    "agent",
+    "category",
+    "family_id",
+    "parser_revision",
+    "normalization_revision",
+    "mapping_revision",
+    "field",
+    "summary",
+    "needed",
+    "evidence_json",
+    "details_json",
+    "blocking",
+    "status",
+    "occurrences",
+    "resolution",
+    "created_at",
+    "updated_at",
+    "resolved_at",
+)
+
+
+def feedback_record(row: sqlite3.Row | tuple) -> dict:
+    record = dict(zip(FEEDBACK_COLUMNS, row, strict=True))
+    record["evidence"] = json.loads(record.pop("evidence_json"))
+    record["details"] = json.loads(record.pop("details_json"))
+    record["blocking"] = bool(record["blocking"])
+    return record
+
+
+def get_feedback(feedback_id: int) -> dict:
+    with db_connect() as connection:
+        row = connection.execute(
+            f"SELECT {', '.join(FEEDBACK_COLUMNS)} FROM feedback WHERE id = ?",
+            (feedback_id,),
+        ).fetchone()
+    if not row:
+        return {
+            "ok": False,
+            "error": "not_found",
+            "message": "Feedback не найден; проверьте id.",
+            "id": feedback_id,
+        }
+    return {"ok": True, "feedback": feedback_record(row)}
+
+
+def report_feedback(
+    source: str,
+    agent: str,
+    category: str,
+    summary: str,
+    family_id: str | None = None,
+    parser_revision: int | None = None,
+    normalization_revision: int | None = None,
+    mapping_revision: int | None = None,
+    field: str | None = None,
+    evidence: list[str] | None = None,
+    details: object = None,
+    blocking: bool = False,
+    needed: str | None = None,
+) -> dict:
+    if source not in {"model", "runner"}:
+        raise ValueError("source должен быть model или runner")
+    if not agent.strip() or not category.strip() or not summary.strip():
+        raise ValueError("agent, category и summary должны быть непустыми")
+    evidence = list(dict.fromkeys(evidence or []))
+    signature = {
+        "source": source,
+        "agent": agent,
+        "category": category,
+        "family_id": family_id,
+        "parser_revision": parser_revision,
+        "normalization_revision": normalization_revision,
+        "mapping_revision": mapping_revision,
+        "field": field,
+        "summary": summary,
+    }
+    dedup_key = hashlib.sha256(
+        json.dumps(signature, ensure_ascii=False, sort_keys=True).encode("utf-8")
+    ).hexdigest()
+    now = datetime.now(timezone.utc).isoformat()
+    with db_connect() as connection:
+        existing_row = connection.execute(
+            f"SELECT {', '.join(FEEDBACK_COLUMNS)} FROM feedback "
+            "WHERE dedup_key = ? AND status = 'open' ORDER BY id DESC LIMIT 1",
+            (dedup_key,),
+        ).fetchone()
+        if existing_row:
+            existing = feedback_record(existing_row)
+            feedback_id = existing["id"]
+            connection.execute(
+                "UPDATE feedback SET evidence_json = ?, details_json = ?, blocking = ?, "
+                "needed = ?, occurrences = occurrences + 1, updated_at = ? WHERE id = ?",
+                (
+                    json.dumps(list(dict.fromkeys([*existing["evidence"], *evidence])), ensure_ascii=False),
+                    json.dumps(details if details is not None else existing["details"], ensure_ascii=False, default=str),
+                    int(blocking or existing["blocking"]),
+                    needed or existing["needed"],
+                    now,
+                    feedback_id,
+                ),
+            )
+        else:
+            cursor = connection.execute(
+                "INSERT INTO feedback ("
+                "dedup_key, source, agent, category, family_id, parser_revision, "
+                "normalization_revision, mapping_revision, field, summary, needed, "
+                "evidence_json, details_json, blocking, status, occurrences, created_at, updated_at"
+                ") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'open', 1, ?, ?)",
+                (
+                    dedup_key,
+                    source,
+                    agent,
+                    category,
+                    family_id,
+                    parser_revision,
+                    normalization_revision,
+                    mapping_revision,
+                    field,
+                    summary,
+                    needed,
+                    json.dumps(evidence, ensure_ascii=False),
+                    json.dumps(details, ensure_ascii=False, default=str),
+                    int(blocking),
+                    now,
+                    now,
+                ),
+            )
+            feedback_id = cursor.lastrowid
+        row = connection.execute(
+            f"SELECT {', '.join(FEEDBACK_COLUMNS)} FROM feedback WHERE id = ?",
+            (feedback_id,),
+        ).fetchone()
+    return {
+        "ok": True,
+        "id": feedback_id,
+        "deduplicated": existing_row is not None,
+        "feedback": feedback_record(row),
+    }
+
+
+def list_feedback(
+    status: str | None = "open",
+    family_id: str | None = None,
+    limit: int = 50,
+) -> dict:
+    if status not in {None, "open", "resolved", "accepted_uncertainty"}:
+        raise ValueError("Неизвестный status feedback")
+    if not 1 <= limit <= 200:
+        raise ValueError("limit должен быть в диапазоне 1..200")
+    clauses = []
+    params = []
+    if status is not None:
+        clauses.append("status = ?")
+        params.append(status)
+    if family_id is not None:
+        clauses.append("family_id = ?")
+        params.append(family_id)
+    where = f" WHERE {' AND '.join(clauses)}" if clauses else ""
+    with db_connect() as connection:
+        rows = connection.execute(
+            f"SELECT {', '.join(FEEDBACK_COLUMNS)} FROM feedback{where} "
+            "ORDER BY updated_at DESC, id DESC LIMIT ?",
+            [*params, limit],
+        ).fetchall()
+    return {
+        "ok": True,
+        "feedback": [feedback_record(row) for row in rows],
+        "count": len(rows),
+    }
+
+
+def resolve_feedback(
+    feedback_id: int,
+    resolution: str,
+    status: str = "resolved",
+) -> dict:
+    if status not in {"resolved", "accepted_uncertainty"}:
+        raise ValueError("status должен быть resolved или accepted_uncertainty")
+    if not resolution.strip():
+        raise ValueError("resolution должен объяснять закрытие feedback")
+    saved = get_feedback(feedback_id)
+    if not saved["ok"]:
+        return saved
+    if saved["feedback"]["status"] != "open":
+        return {
+            "ok": False,
+            "error": "feedback_already_closed",
+            "message": "Feedback уже закрыт; новое проявление создаст отдельную запись.",
+            "id": feedback_id,
+            "feedback": saved["feedback"],
+        }
+    now = datetime.now(timezone.utc).isoformat()
+    with db_connect() as connection:
+        connection.execute(
+            "UPDATE feedback SET status = ?, resolution = ?, updated_at = ?, resolved_at = ? WHERE id = ?",
+            (status, resolution, now, now, feedback_id),
+        )
+    return get_feedback(feedback_id)

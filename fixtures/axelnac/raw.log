@@ -1,0 +1,4 @@
+<34>Oct 27 2024 12:00:00 nas01 auth[123]: (456) Login OK: [alice] (from client nas01 port 1 cli aa:bb:cc:dd:ee:ff)
+<34>Oct 27 2024 12:00:01 nas01 auth[123]: (457) Login incorrect (bad password): [alice] (from client nas01 port 2)
+<34>Oct 27 2024 12:00:02 nas01 auth[123]: (458)   Login OK: [alice] (from client nas01 port 3 cli aa:bb:cc:dd:ee:ff via TLS tunnel)
+<34>Oct 27 2024 12:00:03 nas01 auth[123]: (459) Login incorrect (bad password): [alice] (from client nas01 port 4 cli aa:bb:cc:dd:ee:ff)

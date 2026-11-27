@@ -1,7 +1,7 @@
 from collections.abc import Callable
 import json
 from datetime import datetime
-from typing import Annotated
+from typing import Annotated, Any, Literal
 
 from ddgs import DDGS
 from langchain.agents.middleware import wrap_tool_call
@@ -12,6 +12,8 @@ from pydantic import Field, ValidationError
 
 import grok
 import mapping
+import mp_text
+from mp_profile import load_profile
 import normalization
 import pipeline
 import semantic
@@ -92,6 +94,56 @@ def handle_tool_errors(
         name=request.tool_call["name"],
         status="error",
     )
+
+
+@tool
+def report_feedback(
+    agent: Literal["parser", "normalization", "mapping", "mp_text"],
+    category: Annotated[str, Field(min_length=1, description="Короткий стабильный код проблемы, например ambiguous_semantics.")],
+    summary: Annotated[str, Field(min_length=1, description="Конкретная проблема, ограничение или неопределённость без внутреннего reasoning.")],
+    family_id: Annotated[str | None, Field(description="Связанная Family; null, если она ещё не создана или неизвестна.")] = None,
+    parser_revision: Annotated[int | None, Field(ge=1, description="Связанная parser revision.")] = None,
+    normalization_revision: Annotated[int | None, Field(ge=1, description="Связанная normalization revision.")] = None,
+    mapping_revision: Annotated[int | None, Field(ge=1, description="Связанная mapping revision.")] = None,
+    field: Annotated[str | None, Field(description="Точное имя поля, если проблема относится к одному полю.")] = None,
+    evidence: Annotated[list[str], Field(description="RAW-строки и наблюдения, подтверждающие проблему; пустой список, если их нет.")] = [],
+    details: Annotated[dict[str, Any] | None, Field(description="Наблюдаемые значения, альтернативы и другие структурированные детали.")] = None,
+    blocking: Annotated[bool, Field(description="True, если результат нельзя безопасно применить до разрешения проблемы.")] = False,
+    needed: Annotated[str | None, Field(description="Какие данные, конфигурация или действие нужны для разрешения.")] = None,
+) -> dict:
+    """Сохраняет сообщение модели о проблеме или ограничении; не заменяет исправление результата и проверки."""
+    return storage.report_feedback(
+        source="model",
+        agent=agent,
+        category=category,
+        summary=summary,
+        family_id=family_id,
+        parser_revision=parser_revision,
+        normalization_revision=normalization_revision,
+        mapping_revision=mapping_revision,
+        field=field,
+        evidence=evidence,
+        details=details,
+        blocking=blocking,
+        needed=needed,
+    )
+
+
+@tool
+def list_open_feedback(
+    family_id: Annotated[str | None, Field(description="Ограничить список конкретной Family; null — все Families.")] = None,
+    limit: Annotated[int, Field(ge=1, le=200, description="Максимальное число последних записей.")] = 50,
+) -> dict:
+    """Возвращает открытые проблемы и ограничения, чтобы агент мог учесть их и не создавать дубли."""
+    return storage.list_feedback(status="open", family_id=family_id, limit=limit)
+
+
+@tool
+def get_feedback(
+    feedback_id: Annotated[int, Field(ge=1, description="Точный идентификатор записи feedback.")],
+) -> dict:
+    """Возвращает одну запись feedback со статусом, evidence и разрешением."""
+    return storage.get_feedback(feedback_id)
 
 
 @tool
@@ -272,6 +324,90 @@ def save_pipeline_family(
         parser_description.model_dump(mode="json"),
         [constraint.model_dump(mode="json") for constraint in constraints],
         [stage.model_dump(mode="json") for stage in stages],
+    )
+    if saved["ok"]:
+        semantic.index_family(family_id, revision)
+    return saved
+
+
+@tool
+def get_mp_text_capabilities() -> dict:
+    """Возвращает разрешённые tokens/functions и правила MP TEXT выбранного Logicore runtime."""
+    profile = load_profile().data
+    return {
+        "ok": True,
+        "name": profile["name"],
+        "runtime": profile["runtime"],
+        "text_tokens": profile["capabilities"]["text_tokens"],
+        "text_operators": profile["capabilities"]["text_operators"],
+        "text_syntax": profile["capabilities"]["text_syntax"],
+        "capture_policy": "temporary $captures; полное совпадение RAW",
+    }
+
+
+@tool
+def execute_mp_text_parser(
+    text_pattern: Annotated[str, Field(min_length=1, description="Полный native MP TEXT pattern с $captures.")],
+    raw: RawInput,
+) -> dict:
+    """Исполняет MP TEXT через mpsiem и возвращает captures до VRL и удаления $variables."""
+    return mp_text.execute_pattern(text_pattern, raw)
+
+
+@tool
+def evaluate_mp_text_parser(
+    text_pattern: Annotated[str, Field(min_length=1)],
+    record_schema: RecordSchemaInput,
+    observations: Annotated[list[Observation], Field(min_length=1)],
+    baseline: ParserBaseline | None = None,
+    constraints: ConstraintsInput = [],
+    negative_evidence: Annotated[list[str], Field(description="RAW, которые pattern обязан отклонить.")] = [],
+) -> dict:
+    """Проверяет MP TEXT candidate и необязательный MP TEXT baseline на всех RAW и expected captures."""
+    return mp_text.evaluate_candidate(
+        text_pattern, record_schema, observations, baseline, constraints, negative_evidence
+    )
+
+
+@tool
+def save_mp_text_family(
+    family_id: Annotated[str, Field(min_length=1)],
+    revision: Annotated[int, Field(ge=1)],
+    text_pattern: Annotated[str, Field(min_length=1)],
+    record_schema: RecordSchemaInput,
+    evidence: Annotated[list[str], Field(min_length=1)],
+    family_description: FamilyDescription,
+    parser_description: ParserDescription,
+    constraints: ConstraintsInput = [],
+    negative_evidence: Annotated[list[str], Field(description="Negative RAW для регрессии.")] = [],
+) -> dict:
+    """Проверяет native MP TEXT и сохраняет обычную parser Family с target=mp_text."""
+    observations = [Observation(raw=raw) for raw in evidence]
+    evaluation = mp_text.evaluate_observations(
+        text_pattern, record_schema, observations, constraints, negative_evidence
+    )
+    if not evaluation["ok"]:
+        return {
+            "ok": False,
+            "error": "mp_text_evidence_validation_failed",
+            "message": "Family не сохранена: исправьте MP TEXT pattern, captures или evidence.",
+            "recovery": "Используйте native issues, повторите evaluate_mp_text_parser и затем save.",
+            "details": evaluation,
+        }
+    saved = storage.save_family(
+        family_id,
+        revision,
+        [],
+        [],
+        [field.model_dump(mode="json") for field in record_schema],
+        evidence,
+        family_description.model_dump(mode="json"),
+        parser_description.model_dump(mode="json"),
+        [constraint.model_dump(mode="json") for constraint in constraints],
+        [],
+        target="mp_text",
+        text_pattern=text_pattern,
+        negative_evidence=negative_evidence,
     )
     if saved["ok"]:
         semantic.index_family(family_id, revision)
@@ -613,6 +749,9 @@ def get_parser_family(
 
 TOOLS = [
     current_time,
+    report_feedback,
+    list_open_feedback,
+    get_feedback,
     duckduckgo_search,
     execute_grok,
     execute_grok_parser,
@@ -636,7 +775,18 @@ TOOLS = [
 ]
 
 
+MP_TEXT_TOOLS = [
+    get_mp_text_capabilities,
+    execute_mp_text_parser,
+    evaluate_mp_text_parser,
+    save_mp_text_family,
+]
+
+
 NORMALIZATION_TOOLS = [
+    report_feedback,
+    list_open_feedback,
+    get_feedback,
     duckduckgo_search,
     apply_normalization_operation,
     preview_normalization,
@@ -649,6 +799,9 @@ NORMALIZATION_TOOLS = [
 
 
 MAPPING_TOOLS = [
+    report_feedback,
+    list_open_feedback,
+    get_feedback,
     duckduckgo_search,
     get_mapping_guidelines,
     semantic_search_taxonomy,

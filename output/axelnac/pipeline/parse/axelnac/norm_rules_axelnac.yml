@@ -1,0 +1,325 @@
+appendix: |
+  { null }
+rules:
+- name: axelnac/normalization_formulas/login_ok
+  uuid: a5117013-9aaa-5089-89d2-89a87522977e
+  subformulas: null
+  rule_info:
+    grok:
+      kind: TEXT
+      pattern: '{"<"NUMBER">"?} {$time=DATETIME_SYSLOG|$time=DATETIME} {$host=HOSTNAME} auth{"["$procid=NUMBER"]"}: ({$request_id=NUMBER})
+        Login OK: [{$user=UNTIL("]")} (from client {$nas=WORDDASH} port {$port=NUMBER} cli {$src_mac=MACADDR})'
+    condition: null
+    body: |
+      {if exists(."$time") {
+        {if is_null(."$time") || mp_string(."$time") == "" { abort }};
+      } else { abort }};
+      {if exists(."$host") {
+        ."$host" = mp_lower(."$host");
+        {if is_null(."$host") { abort }};
+        {if is_null(."$host") || mp_string(."$host") == "" { abort }};
+      } else { abort }};
+      {if exists(."$request_id") {
+        {if is_null(."$request_id") || mp_string(."$request_id") == "" { abort }};
+      } else { abort }};
+      {if exists(."$user") {
+        ."$user" = mp_lower(."$user");
+        {if is_null(."$user") { abort }};
+        {if is_null(."$user") || mp_string(."$user") == "" { abort }};
+      } else { abort }};
+      {if exists(."$nas") {
+        {if is_null(."$nas") || mp_string(."$nas") == "" { abort }};
+      } else { abort }};
+      {if exists(."$port") {
+        ."$port" = mp_number(."$port");
+        {if is_null(."$port") { abort }};
+        {if mp_bool(mp_lt(."$port", 0)) { abort }};
+        {if mp_bool(mp_gt(."$port", 65535)) { abort }};
+        {if is_null(."$port") || mp_string(."$port") == "" { abort }};
+      } else { abort }};
+      {if exists(."$src_mac") {
+        {if is_null(."$src_mac") || mp_string(."$src_mac") == "" { abort }};
+      } else { abort }};
+      {if exists(."$time") {
+        vrl_tmp_time = format_timestamp!(."$time", format: "%Y-%m-%dT%H:%M:%S%.3f", timezone: "UTC");
+        ."time" = parse_timestamp!(vrl_tmp_time, format: "%Y-%m-%dT%H:%M:%S%.3f", timezone: "Europe/Moscow");
+      } else { abort }};
+      {if exists(."$time") {
+        vrl_tmp_start_time = format_timestamp!(."$time", format: "%Y-%m-%dT%H:%M:%S%.3f", timezone: "UTC");
+        ."start_time" = parse_timestamp!(vrl_tmp_start_time, format: "%Y-%m-%dT%H:%M:%S%.3f", timezone: "Europe/Moscow");
+      }};
+      ."id" = "PT_Axel_AxelNAC_syslog_login_ok";
+      ."event_src_category" = "AAA";
+      ."event_src_title" = "axelnac";
+      ."event_src_vendor" = "AxelPRO";
+      {if exists(."$host") {
+        ."event_src_hostname" = ."$host";
+      }};
+      ."subject" = "account";
+      ."object" = "application";
+      ."action" = "login";
+      ."status" = "success";
+      ."importance" = "info";
+      {if exists(."$user") {
+        ."subject_account_name" = ."$user";
+      }};
+      {if exists(."$port") {
+        ."numfield1" = ."$port";
+      }};
+      {if exists(."$request_id") {
+        ."datafield1" = ."$request_id";
+      }};
+      {if exists(."$src_mac") {
+        ."src_mac" = ."$src_mac";
+      }};
+      ."protocol_layer7" = "radius";
+      ."object_name" = "axelnac";
+      ."msgid" = "login_ok";
+      ."reason" = "successful authentication";
+      ."category_generic" = "Application";
+      ."category_high" = "Access Management";
+      ."category_low" = "Communication";
+      ."logon_auth_method" = "remote";
+- name: axelnac/normalization_formulas/login_ok_tls
+  uuid: f638af19-c3b6-5dd0-bfb6-ac12a5a06459
+  subformulas: null
+  rule_info:
+    grok:
+      kind: TEXT
+      pattern: '{"<"NUMBER">"?} {$time=DATETIME_SYSLOG|$time=DATETIME} {$host=HOSTNAME} auth{"["$procid=NUMBER"]"}: ({$request_id=NUMBER})   Login
+        OK: [{$user=UNTIL("]")} (from client {$nas=WORDDASH} port {$port=NUMBER} cli {$src_mac=MACADDR} via TLS tunnel)'
+    condition: null
+    body: |
+      {if exists(."$time") {
+        {if is_null(."$time") || mp_string(."$time") == "" { abort }};
+      } else { abort }};
+      {if exists(."$host") {
+        ."$host" = mp_lower(."$host");
+        {if is_null(."$host") { abort }};
+        {if is_null(."$host") || mp_string(."$host") == "" { abort }};
+      } else { abort }};
+      {if exists(."$request_id") {
+        {if is_null(."$request_id") || mp_string(."$request_id") == "" { abort }};
+      } else { abort }};
+      {if exists(."$user") {
+        ."$user" = mp_lower(."$user");
+        {if is_null(."$user") { abort }};
+        {if is_null(."$user") || mp_string(."$user") == "" { abort }};
+      } else { abort }};
+      {if exists(."$nas") {
+        {if is_null(."$nas") || mp_string(."$nas") == "" { abort }};
+      } else { abort }};
+      {if exists(."$port") {
+        ."$port" = mp_number(."$port");
+        {if is_null(."$port") { abort }};
+        {if mp_bool(mp_lt(."$port", 0)) { abort }};
+        {if mp_bool(mp_gt(."$port", 65535)) { abort }};
+        {if is_null(."$port") || mp_string(."$port") == "" { abort }};
+      } else { abort }};
+      {if exists(."$src_mac") {
+        {if is_null(."$src_mac") || mp_string(."$src_mac") == "" { abort }};
+      } else { abort }};
+      {if exists(."$time") {
+        vrl_tmp_time = format_timestamp!(."$time", format: "%Y-%m-%dT%H:%M:%S%.3f", timezone: "UTC");
+        ."time" = parse_timestamp!(vrl_tmp_time, format: "%Y-%m-%dT%H:%M:%S%.3f", timezone: "Europe/Moscow");
+      } else { abort }};
+      {if exists(."$time") {
+        vrl_tmp_start_time = format_timestamp!(."$time", format: "%Y-%m-%dT%H:%M:%S%.3f", timezone: "UTC");
+        ."start_time" = parse_timestamp!(vrl_tmp_start_time, format: "%Y-%m-%dT%H:%M:%S%.3f", timezone: "Europe/Moscow");
+      }};
+      ."id" = "PT_Axel_AxelNAC_syslog_login_ok_tls";
+      ."event_src_category" = "AAA";
+      ."event_src_title" = "axelnac";
+      ."event_src_vendor" = "AxelPRO";
+      {if exists(."$host") {
+        ."event_src_hostname" = ."$host";
+      }};
+      ."subject" = "account";
+      ."object" = "application";
+      ."action" = "login";
+      ."status" = "success";
+      ."importance" = "info";
+      {if exists(."$user") {
+        ."subject_account_name" = ."$user";
+      }};
+      {if exists(."$port") {
+        ."numfield1" = ."$port";
+      }};
+      {if exists(."$request_id") {
+        ."datafield1" = ."$request_id";
+      }};
+      {if exists(."$src_mac") {
+        ."src_mac" = ."$src_mac";
+      }};
+      ."protocol_layer7" = "radius";
+      ."object_name" = "axelnac";
+      ."msgid" = "login_ok_tls";
+      ."reason" = "successful authentication via TLS tunnel";
+      ."category_generic" = "Application";
+      ."category_high" = "Access Management";
+      ."category_low" = "Communication";
+      ."logon_auth_method" = "remote";
+- name: axelnac/normalization_formulas/login_incorrect
+  uuid: 5ae34234-d3c6-5367-aea7-d8d1aa89b501
+  subformulas: null
+  rule_info:
+    grok:
+      kind: TEXT
+      pattern: '{"<"NUMBER">"?} {$time=DATETIME_SYSLOG|$time=DATETIME} {$host=HOSTNAME} auth{"["$procid=NUMBER"]"}: ({$request_id=NUMBER})
+        Login incorrect ({$reason=UNTIL("): [")}{$user=UNTIL("]")} (from client {$nas=WORDDASH} port {$port=NUMBER} cli {$src_mac=MACADDR})'
+    condition: null
+    body: |
+      {if exists(."$time") {
+        {if is_null(."$time") || mp_string(."$time") == "" { abort }};
+      } else { abort }};
+      {if exists(."$host") {
+        ."$host" = mp_lower(."$host");
+        {if is_null(."$host") { abort }};
+        {if is_null(."$host") || mp_string(."$host") == "" { abort }};
+      } else { abort }};
+      {if exists(."$request_id") {
+        {if is_null(."$request_id") || mp_string(."$request_id") == "" { abort }};
+      } else { abort }};
+      {if exists(."$reason") {
+        ."$reason" = strip_whitespace!(."$reason");
+        {if is_null(."$reason") || mp_string(."$reason") == "" { abort }};
+      } else { abort }};
+      {if exists(."$user") {
+        ."$user" = mp_lower(."$user");
+        {if is_null(."$user") { abort }};
+        {if is_null(."$user") || mp_string(."$user") == "" { abort }};
+      } else { abort }};
+      {if exists(."$nas") {
+        {if is_null(."$nas") || mp_string(."$nas") == "" { abort }};
+      } else { abort }};
+      {if exists(."$port") {
+        ."$port" = mp_number(."$port");
+        {if is_null(."$port") { abort }};
+        {if mp_bool(mp_lt(."$port", 0)) { abort }};
+        {if mp_bool(mp_gt(."$port", 65535)) { abort }};
+        {if is_null(."$port") || mp_string(."$port") == "" { abort }};
+      } else { abort }};
+      {if exists(."$src_mac") {
+        {if is_null(."$src_mac") || mp_string(."$src_mac") == "" { abort }};
+      } else { abort }};
+      {if exists(."$time") {
+        vrl_tmp_time = format_timestamp!(."$time", format: "%Y-%m-%dT%H:%M:%S%.3f", timezone: "UTC");
+        ."time" = parse_timestamp!(vrl_tmp_time, format: "%Y-%m-%dT%H:%M:%S%.3f", timezone: "Europe/Moscow");
+      } else { abort }};
+      {if exists(."$time") {
+        vrl_tmp_start_time = format_timestamp!(."$time", format: "%Y-%m-%dT%H:%M:%S%.3f", timezone: "UTC");
+        ."start_time" = parse_timestamp!(vrl_tmp_start_time, format: "%Y-%m-%dT%H:%M:%S%.3f", timezone: "Europe/Moscow");
+      }};
+      ."id" = "PT_Axel_AxelNAC_syslog_login_incorrect";
+      ."event_src_category" = "AAA";
+      ."event_src_title" = "axelnac";
+      ."event_src_vendor" = "AxelPRO";
+      {if exists(."$host") {
+        ."event_src_hostname" = ."$host";
+      }};
+      ."subject" = "account";
+      ."object" = "application";
+      ."action" = "login";
+      ."status" = "failure";
+      ."importance" = "low";
+      {if exists(."$user") {
+        ."subject_account_name" = ."$user";
+      }};
+      {if exists(."$port") {
+        ."numfield1" = ."$port";
+      }};
+      {if exists(."$request_id") {
+        ."datafield1" = ."$request_id";
+      }};
+      {if exists(."$src_mac") {
+        ."src_mac" = ."$src_mac";
+      }};
+      ."protocol_layer7" = "radius";
+      ."object_name" = "axelnac";
+      ."msgid" = "login_incorrect";
+      {if exists(."$reason") {
+        ."reason" = ."$reason";
+      }};
+      ."category_generic" = "Application";
+      ."category_high" = "Access Management";
+      ."category_low" = "Communication";
+      ."logon_auth_method" = "remote";
+- name: axelnac/normalization_formulas/login_incorrect_nocli
+  uuid: c228e558-1b12-5782-b30a-ec203a92a034
+  subformulas: null
+  rule_info:
+    grok:
+      kind: TEXT
+      pattern: '{"<"NUMBER">"?} {$time=DATETIME_SYSLOG|$time=DATETIME} {$host=HOSTNAME} auth{"["$procid=NUMBER"]"}: ({$request_id=NUMBER})
+        Login incorrect ({$reason=UNTIL("): [")}{$user=UNTIL("]")} (from client {$nas=WORDDASH} port {$port=NUMBER})'
+    condition: null
+    body: |
+      {if exists(."$time") {
+        {if is_null(."$time") || mp_string(."$time") == "" { abort }};
+      } else { abort }};
+      {if exists(."$host") {
+        ."$host" = mp_lower(."$host");
+        {if is_null(."$host") { abort }};
+        {if is_null(."$host") || mp_string(."$host") == "" { abort }};
+      } else { abort }};
+      {if exists(."$request_id") {
+        {if is_null(."$request_id") || mp_string(."$request_id") == "" { abort }};
+      } else { abort }};
+      {if exists(."$reason") {
+        ."$reason" = strip_whitespace!(."$reason");
+        {if is_null(."$reason") || mp_string(."$reason") == "" { abort }};
+      } else { abort }};
+      {if exists(."$user") {
+        ."$user" = mp_lower(."$user");
+        {if is_null(."$user") { abort }};
+        {if is_null(."$user") || mp_string(."$user") == "" { abort }};
+      } else { abort }};
+      {if exists(."$nas") {
+        {if is_null(."$nas") || mp_string(."$nas") == "" { abort }};
+      } else { abort }};
+      {if exists(."$port") {
+        ."$port" = mp_number(."$port");
+        {if is_null(."$port") { abort }};
+        {if mp_bool(mp_lt(."$port", 0)) { abort }};
+        {if mp_bool(mp_gt(."$port", 65535)) { abort }};
+        {if is_null(."$port") || mp_string(."$port") == "" { abort }};
+      } else { abort }};
+      {if exists(."$time") {
+        vrl_tmp_time = format_timestamp!(."$time", format: "%Y-%m-%dT%H:%M:%S%.3f", timezone: "UTC");
+        ."time" = parse_timestamp!(vrl_tmp_time, format: "%Y-%m-%dT%H:%M:%S%.3f", timezone: "Europe/Moscow");
+      } else { abort }};
+      {if exists(."$time") {
+        vrl_tmp_start_time = format_timestamp!(."$time", format: "%Y-%m-%dT%H:%M:%S%.3f", timezone: "UTC");
+        ."start_time" = parse_timestamp!(vrl_tmp_start_time, format: "%Y-%m-%dT%H:%M:%S%.3f", timezone: "Europe/Moscow");
+      }};
+      ."id" = "PT_Axel_AxelNAC_syslog_login_incorrect";
+      ."event_src_category" = "AAA";
+      ."event_src_title" = "axelnac";
+      ."event_src_vendor" = "AxelPRO";
+      {if exists(."$host") {
+        ."event_src_hostname" = ."$host";
+      }};
+      ."subject" = "account";
+      ."object" = "application";
+      ."action" = "login";
+      ."status" = "failure";
+      ."importance" = "low";
+      {if exists(."$user") {
+        ."subject_account_name" = ."$user";
+      }};
+      {if exists(."$port") {
+        ."numfield1" = ."$port";
+      }};
+      {if exists(."$request_id") {
+        ."datafield1" = ."$request_id";
+      }};
+      ."protocol_layer7" = "radius";
+      ."object_name" = "axelnac";
+      ."msgid" = "login_incorrect";
+      {if exists(."$reason") {
+        ."reason" = ."$reason";
+      }};
+      ."category_generic" = "Application";
+      ."category_high" = "Access Management";
+      ."category_low" = "Communication";
+      ."logon_auth_method" = "remote";

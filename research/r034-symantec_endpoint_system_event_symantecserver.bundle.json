@@ -1,0 +1,4434 @@
+{
+  "schema_version": 1,
+  "family_id": "symantec_endpoint_system_event_symantecserver",
+  "dispatch": {
+    "strategy": "always_candidates",
+    "anchors": [],
+    "fallback": true
+  },
+  "parser": {
+    "family_id": "symantec_endpoint_system_event_symantecserver",
+    "revision": 1,
+    "patterns": [],
+    "layers": [],
+    "record_schema": [
+      {
+        "name": "raw",
+        "category": "dynamic",
+        "type": "string",
+        "required": true,
+        "source": "$"
+      },
+      {
+        "name": "pri",
+        "category": "dynamic",
+        "type": "integer",
+        "required": true,
+        "source": "$.pri"
+      },
+      {
+        "name": "timestamp",
+        "category": "dynamic",
+        "type": "timestamp",
+        "required": true,
+        "source": "$.timestamp"
+      },
+      {
+        "name": "host",
+        "category": "dynamic",
+        "type": "string",
+        "required": true,
+        "source": "$.host"
+      },
+      {
+        "name": "msg_id",
+        "category": "static",
+        "type": "string",
+        "required": true,
+        "source": "$.msg_id"
+      },
+      {
+        "name": "column_1",
+        "category": "dynamic",
+        "type": "string",
+        "required": true,
+        "source": "$.payload.column_1"
+      },
+      {
+        "name": "Category",
+        "category": "dynamic",
+        "type": "integer",
+        "required": true,
+        "source": "$.payload.Category"
+      },
+      {
+        "name": "column_3",
+        "category": "dynamic",
+        "type": "string",
+        "required": true,
+        "source": "$.payload.column_3"
+      },
+      {
+        "name": "Event Description",
+        "category": "dynamic",
+        "type": "string",
+        "required": true,
+        "source": "$.payload['Event Description']"
+      },
+      {
+        "name": "Event time",
+        "category": "dynamic",
+        "type": "timestamp",
+        "required": true,
+        "source": "$.payload['Event time']"
+      },
+      {
+        "name": "Group Name",
+        "category": "dynamic",
+        "type": "string",
+        "required": true,
+        "source": "$.payload['Group Name']"
+      }
+    ],
+    "evidence": [
+      "<6>Jul 26 21:38:49 OAK-SYM-V01 SymantecServer: FULL-PF00BE8C,Category: 0,CVE,\"Event Description: Failed to connect to all GUPs, now trying to connect SEPM\",Event time: 2024-07-26 21:37:04,Group Name: My Company\\Clients\\Fulton"
+    ],
+    "family_description": {
+      "summary": "Syslog-записи системных/управленческих событий Symantec, которые эмиттер с литеральным тегом 'SymantecServer' отправляет в BSD/RFC3164-конверте: плоский payload из шести полей — двух токенов без подписи (код записи и маркер типа события), подписанного числового 'Category' и трёх текстовых подписей 'Event Description', 'Event time', 'Group Name', причём значение описания обрамлено двойными кавычками и содержит запятые и двоеточие. Наблюдено одно событие: клиент/менеджер на устройстве 'OAK-SYM-V01' в группе 'My Company\\Clients\\Fulton' сообщил, что не смог подключиться ни к одному GUP и теперь пытается подключиться к SEPM.",
+      "event_semantics": "Участники: устройство-эмиттер host (наблюдено 'OAK-SYM-V01'); группа/контейнер управления, названная подписью Group Name ('My Company\\Clients\\Fulton'); код записи в первом токене без подписи ('FULL-PF00BE8C') и маркер типа события во втором токене без подписи ('CVE'). Действие: эмиттер зафиксировал системное событие Symantec с числовой категорией Category=0 и текстовым описанием 'Failed to connect to all GUPs, now trying to connect SEPM'. Результат: клиент не смог установить связь ни с одним групп-апдейт-провайдером и перешёл к попытке подключения к самому SEPM; момент события задан подписью Event time ('2024-07-26 21:37:04') и не совпадает с меткой времени конверта, которая года не содержит. Вердикта доступа, сетевых конечных точек, MAC, счётчиков, хешей, правила и пользователя в записи нет, поэтому такие поля не вводятся. Семантика Category, кода записи и маркера 'CVE' по одному наблюдению не доказывается: значения сохраняются дословно и позиционно.",
+      "envelope_and_payload": "Конверт двухуровневый, но без вложенного конверта данных. Внешний — BSD/RFC3164 без года: '<' PRI 0..191 '>' + 'MMM  D HH:MM:SS' с выравниванием дня пробелами (наблюдено 'Jul 26 21:38:49') + пробел + имя устройства + пробел + литеральный тег 'SymantecServer' + ':' + пробел + payload. Внутренний конверт отсутствует: payload плоский, разделён запятыми, состоит из шести полей и содержит RFC4180-подобное цитирование — значение поля 'Event Description' обрамлено двойными кавычками и вмещает запятые и двоеточие ('\"Event Description: Failed to connect to all GUPs, now trying to connect SEPM\"'), поэтому запятая внутри кавычек не является разделителем, а двоеточие внутри значения не открывает новую пару. Два поля не имеют подписи вовсе ('FULL-PF00BE8C', 'CVE'). Значения могут содержать пробелы и обратный слэш ('My Company\\Clients\\Fulton'), который не является escape-последовательностью и не разыменовывается. Значения конверта (pri, timestamp, host, msg_id) сохраняются отдельными полями, payload выделяется в capture body и передаётся детерминированному kv-кодеку без изменения строки: RAW не нормализуется, не unescape-ится и не переразбивается.",
+      "dispatch": "Ключ диспетчеризации составной: литеральный тег msg_id='SymantecServer' (закреплён равенством) плюс собственная грамматика тела — набор подписей 'Category', 'Event Description', 'Event time', 'Group Name' и ровно два токена без подписи. Один тег Family не определяет: под тем же тегом и тем же устройством существуют записи журнала трафика Symantec (Family symantec_endpoint_traffic_log_symantecserver, девятнадцать подписей и три позиционных токена) и записи о загрузке пакета содержимого (Family symantec_endpoint_content_package_download_symantecserver, три подписи и четыре позиционных токена) — они разбираются своими схемами. Границу закрывают обязательные поля этой схемы: на строке журнала трафика тот же pipeline механически даёт ok=true, но валидация возвращает missing_required_field для Category, 'Event Description', 'Event time' и 'Group Name'. PRI, метка времени, имя устройства, код column_1, маркер column_3, категория, описание, время события и имя группы ключом не служат: они меняются между событиями одной грамматики.",
+      "applicability": "Применимо к записям '<PRI 0..191><MMM  D HH:MM:SS> <host> SymantecServer: <payload>', где payload — плоский список через запятую из двух токенов без подписи и четырёх подписанных полей 'Category', 'Event Description', 'Event time', 'Group Name', причём описание может быть закавычено и содержать запятые. Допустимы PRI 0..191 (наблюдено 6); BSD-метка без года с выравниванием дня пробелами (наблюдено 'Jul 26 21:38:49'); имя устройства из [A-Za-z0-9][A-Za-z0-9_.-]* (наблюдено 'OAK-SYM-V01'); литеральный тег 'SymantecServer' без PID; код записи в форме беспробельного токена (наблюдено 'FULL-PF00BE8C'); маркер типа события беспробельным токеном (наблюдено 'CVE'); Category как неотрицательное целое (наблюдено 0); описание — текст без символа двойной кавычки внутри (наблюдено 'Failed to connect to all GUPs, now trying to connect SEPM'); Event time в форме 'YYYY-MM-DD HH:MM:SS' с годом (наблюдено '2024-07-26 21:37:04'); Group Name — текст с пробелами и обратными слэшами (наблюдено 'My Company\\Clients\\Fulton'). Residual обязан быть пустым на обеих стадиях.",
+      "exclusions": "Не входит: записи того же устройства с иным тегом вместо 'SymantecServer'; записи Symantec журнала трафика под тем же тегом (девятнадцать подписей 'Local Host IP', 'Local Port', 'Local Host MAC', 'Remote Host IP', 'Remote Host Name', 'Remote Port', 'Remote Host MAC', 'Begin', 'End Time', 'Occurrences', 'Application', 'Rule', 'Location', 'User Name', 'Domain Name', 'Action', 'SHA-256', 'MD-5' и три позиционных токена) — иная грамматика тела и собственная Family; записи Symantec о загрузке пакета содержимого ('Site', 'Server Name', 'Domain Name' плюс четыре токена без подписи) — третья Family; тела с иным набором, порядком или числом подписей; тела без кавычек вокруг описания, если значение описания содержит запятую (тогда запятая распадёт поле); значение с двойной кавычкой внутри; метка времени конверта с годом или в ISO-форме; RFC5424 со структурными данными; PRI вне 0..191; тег с PID ('SymantecServer[42]:'); экранированные конверты вида syslog(json(xml)); записи CEF, ASA/PIX, Firepower ('IPSSI:'), Junos ('RT_FLOW:'), Solaris ('audit: [ID ...]'), PAM, systemd-logind, su/sudo/sshd и реестр правил нормализации; записи Symantec иных типов событий (антивирус, доступ, карантин) с иной грамматикой тела."
+    },
+    "parser_description": {
+      "summary": "Две детерминированные стадии: grok-слой выделяет из BSD/RFC3164-конверта pri, timestamp, host, литеральный msg_id='SymantecServer' и payload в capture body; стадия kv разбирает тело как плоский список с RFC4180-подобным цитированием, отдавая два позиционных токена (column_1, column_3) и четыре подписанных поля (Category, 'Event Description', 'Event time', 'Group Name'). Это первая ревизия Family варианта тела 'системное событие Symantec' под тем же тегом, что журнал трафика и загрузка пакета.",
+      "input_contract": "Одна исходная строка целиком, без предварительного unescape и нормализации: '<PRI 0..191>' + 'MMM  D HH:MM:SS' (без года, день выровнен пробелами) + ' ' + имя устройства + ' SymantecServer: ' + payload. Payload — остаток строки до конца записи (CR/LF исключены), внутри: запятые-разделители, два токена без подписи, подписи с пробелами в именах ('Event Description', 'Event time', 'Group Name'), значение описания в двойных кавычках с запятыми и двоеточием, значение группы с обратными слэшами. RAW сохраняется в поле raw дословно.",
+      "layering": "Две стадии. Стадия envelope (codec=grok, source=raw) применяет шаблон '<%{SYSLOG_PRI:pri}>%{BSD_SYSLOG_TIMESTAMP:timestamp} %{SYSLOG_HOSTNAME:host} %{SYMANTEC_SERVER_TAG:msg_id}: %{SYMANTEC_PAYLOAD_REST:body}' с локальным набором конструкций в params.patterns: SYSLOG_PRI (0..191), BSD_SYSLOG_TIMESTAMP (MMM  D HH:MM:SS без года), SYSLOG_HOSTNAME, литерал SYMANTEC_SERVER_TAG ('SymantecServer') и SYMANTEC_PAYLOAD_REST ([^\\r\\n]+), который забирает тело целиком и поэтому не зависит от набора и числа полей; все пять конструкций переиспользованы из сохранённого набора без изменений, новых конструкций не заводилось. Стадия pairs (codec=kv, source=stages.envelope.fields.body) получает ровно выделенное тело и разбирает его с параметрами probe/try_parse: pair_separator=',', key_value_separator=':', quotechar='\"', allow_positionals=true, strip_values=true. Цитирование снимается кодеком, поэтому запятые и двоеточие внутри кавычек не делят поля; позиционные токены кодек нумерует по фактической позиции — column_1 и column_3, потому что column_2 занято подписью Category. Ни один шаблон не переписан и не ослаблен.",
+      "output_contract": "Одиннадцать полей. Конверт: raw (source $, dynamic, required), pri (integer), timestamp, host, msg_id (static 'SymantecServer', закреплён равенством). Payload: column_1, Category (integer), column_3, 'Event Description', 'Event time' (timestamp), 'Group Name' — все required=true, поскольку присутствуют в единственной наблюдённой записи грамматики и без них запись этого типа не опознаётся. Пустых значений не наблюдалось, поэтому пустые строки не подставляются и null не приравнивается к нулю: Category=0 сохранено как валидное число. Значения не нормализуются: описание сохраняется без снятия внутренних кавычек и без переразбиения по запятым, 'My Company\\Clients\\Fulton' — дословно с обратными слэшами, 'Event time' остаётся отдельным временем с годом и не сверяется с меткой конверта. Уровень важности отдельным полем не вводится: он закодирован только в PRI и сохраняется как pri. Residual обязан быть пустым на обеих стадиях.",
+      "revision_reason": "Причина создания — new_variant: стабильный идентификатор сообщения (литеральный тег 'SymantecServer') тот же, но грамматика тела иная. Проверено исполнением: конверт и kv-кодек существующей Family symantec_endpoint_traffic_log_symantecserver ревизия 2 разбирают эту строку механически (ok=true, residual пустой на обеих стадиях), но валидация по её схеме возвращает missing_required_field для 'Local Host IP', 'Local Port', 'Remote Host IP', 'Remote Port', 'Rule' и Action, а её собственная схема не описывает ни Category, ни 'Event Description', ни 'Event time', ни 'Group Name'. Поэтому вместо расширения слоя журнала трафика (которое сделало бы обязательные сетевые поля необязательными и размыло его грамматику) заведена отдельная Family с тем же тегом и собственной схемой тела; конвертный grok-слой переиспользован без изменений.",
+      "regression_and_limitations": "evaluate_pipeline_candidate: candidate ok=true на новой строке, residual пустой, issues пустые, ожидаемые captures совпали (pri=6, host='OAK-SYM-V01', msg_id='SymantecServer', column_1='FULL-PF00BE8C', Category=0, column_3='CVE', 'Event Description'='Failed to connect to all GUPs, now trying to connect SEPM', 'Event time'='2024-07-26 21:37:04', 'Group Name'='My Company\\Clients\\Fulton'). Baseline — Family symantec_endpoint_traffic_log_symantecserver ревизия 2 с двумя собственными Evidence (RSOD0039 и SCID0045) — независимо проверен и остаётся ok=true с пустым residual и пустыми issues: регрессии нет. Проверка формата: probe_format дал двух кандидатов (csv с label_separator ':' и kv), выбран kv, потому что он даёт тот же результат на try_parse и совпадает с кодеком родственных Symantec-Family. Ограничения: подтверждена одна запись, поэтому число и порядок шести полей зафиксированы грамматикой тела — событие Symantec с иным набором подписей или иным числом токенов без подписи не разберётся и потребует новой ревизии; двойная кавычка или незакрытая кавычка внутри значения не поддержаны; семантика column_1 (код записи), column_3 (маркер 'CVE') и Category по одному наблюдению остаётся гипотезой — кодек отдаёт их позиционно и без нормализации, derived-поля из них не строятся; граница с другими Symantec-Family закрывается обязательными полями схемы, а не отдельным литералом в конверте."
+    },
+    "constraints": [
+      {
+        "field": "msg_id",
+        "equals": "SymantecServer",
+        "allowed_when": {},
+        "required_when": {},
+        "description": "Ключ диспетчеризации Family — литеральный тег 'SymantecServer' между именем устройства и payload; у того же эмиттера встречаются записи с иным тегом и иной грамматикой тела, поэтому конверт закрепляет значение равенством. Сам тег типы событий Symantec не различает: границу закрывает набор подписей Category/Event Description/Event time/Group Name и два токена без подписи, а также обязательность этих полей в схеме."
+      }
+    ],
+    "stages": [
+      {
+        "name": "envelope",
+        "codec": "grok",
+        "source": "raw",
+        "params": {
+          "pattern": "<%{SYSLOG_PRI:pri}>%{BSD_SYSLOG_TIMESTAMP:timestamp} %{SYSLOG_HOSTNAME:host} %{SYMANTEC_SERVER_TAG:msg_id}: %{SYMANTEC_PAYLOAD_REST:body}",
+          "patterns": {
+            "SYSLOG_PRI": "(?:[0-9]{1,2}|1[0-8][0-9]|19[01])",
+            "BSD_SYSLOG_TIMESTAMP": "(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec) +(?:0[1-9]|[12][0-9]|3[01]|[1-9]) +(?:[01][0-9]|2[0-3]):[0-5][0-9]:[0-5][0-9]",
+            "SYSLOG_HOSTNAME": "[A-Za-z0-9][A-Za-z0-9_.\\-]*",
+            "SYMANTEC_SERVER_TAG": "SymantecServer",
+            "SYMANTEC_PAYLOAD_REST": "[^\\r\\n]+"
+          }
+        }
+      },
+      {
+        "name": "pairs",
+        "codec": "kv",
+        "source": "stages.envelope.fields.body",
+        "params": {
+          "pair_separator": ",",
+          "key_value_separator": ":",
+          "quotechar": "\"",
+          "allow_positionals": true,
+          "strip_values": true
+        }
+      }
+    ]
+  },
+  "normalization": {
+    "family_id": "symantec_endpoint_system_event_symantecserver",
+    "revision": 1,
+    "parser_revision": 1,
+    "fields": [
+      {
+        "source": "pri",
+        "description": "Приоритет syslog из конверта BSD/RFC3164: число в угловых скобках в начале RAW, десятичное целое 0..191 (наблюдено 6). PRI кодирует facility*8+severity; отдельного поля уровня важности нет, поэтому severity/facility выводятся из него только при будущем маппинге и в этой нормализации не разбираются. Значение приводится к целому и проверяется диапазоном 0..191; 0 — валидное значение PRI (kern/emerg), а не отсутствие данных, null не подставляется. Поле обязательно: отсутствие PRI означает, что строка не является BSD-конвертом этой Family.",
+        "operations": [
+          {
+            "op": "to_integer",
+            "params": {}
+          },
+          {
+            "op": "validate_range",
+            "params": {
+              "max": 191,
+              "min": 0
+            }
+          }
+        ],
+        "required": true
+      },
+      {
+        "source": "timestamp",
+        "description": "Метка времени syslog-конверта BSD/RFC3164 без года: 'MMM  D HH:MM:SS', где день выровнен пробелами (наблюдено 'Jul 26 21:38:49'). Это время, проставленное эмиттером/релеем при отправке записи, а не время самого события Symantec (для него есть отдельное поле 'Event time'); две метки не сверяются и не подменяют друг друга. Год в RAW отсутствует, поэтому при нормализации подставляется default_year=2024 из внешней настройки corpus — значение настройки не выводится из строки; timezone из неё не следует. Часовой пояс источника не указан, поэтому результат — naive ISO 'YYYY-MM-DDTHH:MM:SS' без смещения и без назначения UTC. Пустых и null-значений не наблюдалось; поле обязательно, так как без метки конверта строка не опознаётся.",
+        "operations": [
+          {
+            "op": "parse_timestamp",
+            "params": {
+              "default_year": 2024,
+              "format": "%b %e %H:%M:%S"
+            }
+          }
+        ],
+        "required": true
+      },
+      {
+        "source": "host",
+        "description": "Имя устройства-эмиттера (участник события), извлечённое из конверта между меткой времени и литеральным тегом: строка из [A-Za-z0-9][A-Za-z0-9_.-]*, наблюдено 'OAK-SYM-V01'. Идентифицирует конкретный хост Symantec (клиент/менеджер), а не сетевой адрес и не отправителя syslog в смысле relay; IP-адреса в поле нет, поэтому normalize_ip неприменим. Регистр и дефисы сохраняются дословно, значение не приводится ни к нижнему регистру, ни к FQDN. Пустых/null не наблюдалось; поле обязательно.",
+        "operations": [],
+        "required": true
+      },
+      {
+        "source": "msg_id",
+        "description": "Статический литеральный тег 'SymantecServer' между именем устройства и payload; закреплён в конверте равенством и является частью ключа диспетчеризации Family. Обозначает тип источника (Symantec Endpoint Protection, серверная сторона), но НЕ различает типы событий: под этим же тегом у того же эмиттера встречаются журнал трафика и загрузка пакета содержимого с другими грамматиками тела. PID в теге отсутствует. Значение постоянно, преобразований не требует; null/иное значение означает, что строка не относится к этой Family.",
+        "operations": [],
+        "required": true
+      },
+      {
+        "source": "column_1",
+        "description": "Первый позиционный токен payload без подписи (перед 'Category: '): беспробельный код записи, наблюдено 'FULL-PF00BE8C' (форма префикса 'FULL-' с шестнадцатеричным суффиксом). Служит идентификатором конкретной записи/шаблона сообщения Symantec, но точная семантика префикса и суффикса по одному наблюдению не подтверждена, поэтому значение сохраняется дословно: не разбирается на части, не приводится к нижнему регистру, не трактуется как идентификатор события в таксономии. Поле строковое, хотя суффикс выглядит шестнадцатеричным; числовое преобразование намеренно не применяется. Пустых/null не наблюдалось; поле обязательно, так как позиция токена — часть грамматики тела.",
+        "operations": [],
+        "required": true
+      },
+      {
+        "source": "Category",
+        "description": "Числовой код категории системного события Symantec из подписанного поля 'Category: '; целое неотрицательное, наблюдено 0. Ноль — валидное напечатанное значение, а не отсутствие данных: он сохраняется как 0 и никогда не превращается в null. Соответствие конкретных чисел классам событий (антивирус/клиент/управление) в research не доказано, поэтому значение не расшифровывается и не классифицируется, а лишь приводится к целому и проверяется на неотрицательность; верхняя граница в RAW не наблюдалась и не навязывается. Единиц измерения нет. Поле обязательно: при его отсутствии строка относится к другой грамматике Symantec.",
+        "operations": [
+          {
+            "op": "to_integer",
+            "params": {}
+          },
+          {
+            "op": "validate_range",
+            "params": {
+              "min": 0
+            }
+          }
+        ],
+        "required": true
+      },
+      {
+        "source": "column_3",
+        "description": "Второй позиционный токен payload без подписи (между 'Category: 0,' и закавыченным описанием): беспробельный маркер типа события, наблюдено 'CVE'. Предположительно указывает на подтип системного события Symantec (например, событие, связанное с CVE/уязвимостями), но это лишь гипотеза по одному наблюдению, поэтому значение сохраняется дословно — регистр не меняется (lowercase не применяется), значение не сопоставляется с внешними каталогами CVE и не разбирается на поля. Пустых/null не наблюдалось; поле обязательно как часть позиционной грамматики тела.",
+        "operations": [],
+        "required": true
+      },
+      {
+        "source": "Event Description",
+        "description": "Текстовое описание системного события Symantec из подписанного поля 'Event Description: '. В RAW значение обрамлено парой двойных кавычек, потому что содержит запятые и двоеточие; снятие кавычек выполняет parser, поэтому здесь значение уже без обрамления, а внутреннее содержимое не нормализуется и не переразбивается. Наблюдённый текст 'Failed to connect to all GUPs, now trying to connect SEPM' описывает результат действия: клиент не смог подключиться ни к одному групп-апдейт-провайдеру (GUP) и теперь пытается подключиться к самому SEPM. Это свободный человекочитаемый текст, не enum: единиц измерения и числового смысла нет, длина и набор символов не ограничены грамматикой, перевод строки невозможен (payload = [^\\r\\n]+), двойная кавычка внутри значения не поддерживается. Регистр и пунктуация сохраняются; пустых/null не наблюдалось, поле обязательно.",
+        "operations": [],
+        "required": true
+      },
+      {
+        "source": "Event time",
+        "description": "Момент наступления самого события Symantec из подписанного поля 'Event time: '; форма с годом 'YYYY-MM-DD HH:MM:SS' (наблюдено '2024-07-26 21:37:04'). Это независимая от конверта величина: она не совпадает с безгодовой меткой timestamp конверта ('Jul 26 21:38:49'), не вычисляется из неё и не подставляет в неё год. Поскольку год в формате присутствует, внешняя настройка source_default_year игнорируется. Timezone в записи не указана, поэтому результат — naive ISO 'YYYY-MM-DDTHH:MM:SS' без смещения; UTC не назначается. Пустых/null не наблюдалось; поле обязательно, так как 'Event time' — часть обязательного набора подписей, закрывающего границу Family.",
+        "operations": [
+          {
+            "op": "parse_timestamp",
+            "params": {
+              "format": "%Y-%m-%d %H:%M:%S"
+            }
+          }
+        ],
+        "required": true
+      },
+      {
+        "source": "Group Name",
+        "description": "Имя группы/контейнера управления Symantec из подписанного поля 'Group Name: ' — иерархический путь уровней, разделённых обратным слэшем (наблюдено 'My Company\\Clients\\Fulton', то есть три уровня: 'My Company', 'Clients', 'Fulton'). Это локация/скоуп применения политики для устройства-эмиттера, а не имя пользователя и не домен. Обратный слэш здесь — разделитель уровней, а не escape-последовательность: значение не unescape-ится, слэши не схлопываются и не заменяются на '/', регистр и пробелы внутри уровней сохраняются дословно, поэтому в JSON-представлении слэши могут выглядеть удвоенными. Разбор пути на отдельные уровни — задача будущего маппинга, а не этой нормализации. Пустых/null не наблюдалось; поле обязательно.",
+        "operations": [],
+        "required": true
+      }
+    ],
+    "evidence": [
+      "<6>Jul 26 21:38:49 OAK-SYM-V01 SymantecServer: FULL-PF00BE8C,Category: 0,CVE,\"Event Description: Failed to connect to all GUPs, now trying to connect SEPM\",Event time: 2024-07-26 21:37:04,Group Name: My Company\\\\Clients\\\\Fulton"
+    ],
+    "description": "Минимальная нормализация полей Family symantec_endpoint_system_event_symantecserver (parser revision 1), построенная на essence/structure/strategy/format_features/pitfalls парсинг-агента. Семантика не пересматривалась: конверт BSD/RFC3164 несёт pri, безгодовую метку конверта timestamp, host и литеральный msg_id='SymantecServer', а плоский payload даёт два позиционных токена (column_1 — код записи 'FULL-PF00BE8C', column_3 — маркер 'CVE') и четыре подписанных поля (Category, 'Event Description', 'Event time', 'Group Name'). Operations применены только там, где тип поля требует детерминированного преобразования: pri → to_integer + validate_range 0..191 (диапазон PRI по грамматике конверта); Category → to_integer + validate_range min=0, потому что 0 — валидное напечатанное значение, а не отсутствие данных, и в null не превращается; timestamp → parse_timestamp '%b %e %H:%M:%S' с default_year=2024 из внешней настройки corpus source_default_year (год в RAW отсутствует, поэтому настройка допустима; timezone из неё не следует, и без указания timezone источника результат остаётся naive ISO 'YYYY-MM-DDTHH:MM:SS' без назначения UTC); 'Event time' → parse_timestamp '%Y-%m-%d %H:%M:%S' без default_year, так как год уже присутствует в формате, и тоже naive ISO без timezone. Все остальные поля (host, msg_id, column_1, column_3, 'Event Description', 'Group Name') сохранены дословно без operations: регистр не меняется, обратные слэши в 'Group Name' не unescape-ятся, закавыченное описание не переразбирается по запятым и двоеточию, значения не разбиваются на новые поля (это задача parser и будущего маппинга). Ограничения: подтверждено одно observation, поэтому число и порядок шести полей payload зафиксированы грамматикой; семантика Category, кода записи column_1 и маркера column_3 остаётся гипотезой и не интерпретируется; соответствие category/сообщений таксономии, переименование и enrichment не выполняются; отсутствие значения в обязательных полях считается ошибкой (required=true для всех десяти полей), null не приравнивается к нулю и наоборот. Evidence сохранён без изменений из parser Family; parser и его captures не изменялись.",
+    "created_at": "2026-11-24T19:59:39.757264+00:00"
+  },
+  "mapping": {
+    "family_id": "symantec_endpoint_system_event_symantecserver",
+    "revision": 1,
+    "parser_revision": 1,
+    "normalization_revision": 1,
+    "taxonomy": "mp_siem_8.0",
+    "source_timezone": "UTC",
+    "mappings": [
+      {
+        "source": "Event time",
+        "target": "time",
+        "constant": null,
+        "value_map": null,
+        "condition": null,
+        "description": "Момент самого события Symantec из подписанного поля Event time; конвертная метка timestamp относится к отправке записи, а не к событию. Значение naive, применена внешняя настройка UTC."
+      },
+      {
+        "source": null,
+        "target": "id",
+        "constant": "mp_siem_symantec_symantecserver_syslog_system_event",
+        "value_map": null,
+        "condition": null,
+        "description": "Идентификатор правила нормализации по формату namespace_vendor_title_transport_event-type: ns=mp_siem, vendor=symantec, title=symantecserver, transport=syslog, event-type=system_event."
+      },
+      {
+        "source": null,
+        "target": "event_src.vendor",
+        "constant": "symantec",
+        "value_map": null,
+        "condition": null,
+        "description": "Производитель регистратора — Symantec (Endpoint Protection), в нижнем регистре без пробелов."
+      },
+      {
+        "source": "msg_id",
+        "target": "event_src.title",
+        "constant": null,
+        "value_map": {
+          "SymantecServer": "symantecserver"
+        },
+        "condition": null,
+        "description": "Литеральный тег источника 'SymantecServer' — название приложения-регистратора. Полный value_map покрывает единственное допустимое грамматикой значение; иное значение msg_id вызовет ошибку."
+      },
+      {
+        "source": null,
+        "target": "event_src.category",
+        "constant": "Anti-virus",
+        "value_map": null,
+        "condition": null,
+        "description": "Регистратор — Symantec Endpoint Protection, антивирусное endpoint-защитное ПО; категория узла/приложения, зарегистрировавшего событие."
+      },
+      {
+        "source": null,
+        "target": "action",
+        "constant": "connect",
+        "value_map": null,
+        "condition": null,
+        "description": "Описание сообщает о попытке установить соединение (с GUP, затем с SEPM); характер воздействия — соединение."
+      },
+      {
+        "source": null,
+        "target": "object",
+        "constant": "connection",
+        "value_map": null,
+        "condition": null,
+        "description": "Действие выполняется над соединением клиента с сервером обновлений/менеджером; сетевых адресов и портов в записи нет."
+      },
+      {
+        "source": null,
+        "target": "status",
+        "constant": "failure",
+        "value_map": null,
+        "condition": null,
+        "description": "'Failed to connect to all GUPs' фиксирует неуспешный результат попытки соединения; status относится к результату действия connect."
+      },
+      {
+        "source": null,
+        "target": "importance",
+        "constant": "info",
+        "value_map": null,
+        "condition": null,
+        "description": "Служебное системное сообщение о выборе сервера обновлений без признака ИБ-инцидента; PRI 6 (severity=info) подтверждает информационный уровень."
+      },
+      {
+        "source": null,
+        "target": "category.generic",
+        "constant": "Monitoring",
+        "value_map": null,
+        "condition": null,
+        "description": "Событие — сообщение о состоянии/ошибке работы клиентского ПО, раздел категоризации Monitoring."
+      },
+      {
+        "source": null,
+        "target": "category.high",
+        "constant": "Errors",
+        "value_map": null,
+        "condition": null,
+        "description": "Ветвь Monitoring→Errors: запись фиксирует ошибку связи приложения с серверами."
+      },
+      {
+        "source": null,
+        "target": "category.low",
+        "constant": "Application",
+        "value_map": null,
+        "condition": null,
+        "description": "Конкретный вид внутри Monitoring→Errors — ошибка приложения (клиент не смог подключиться к GUP/SEPM)."
+      },
+      {
+        "source": null,
+        "target": "subject",
+        "constant": "host",
+        "value_map": null,
+        "condition": null,
+        "description": "Субъект воздействия — узел OAK-SYM-V01, на котором клиент Symantec пытается установить соединение; учётной записи, процесса и правила в записи нет."
+      },
+      {
+        "source": "host",
+        "target": "subject.name",
+        "constant": null,
+        "value_map": null,
+        "condition": null,
+        "description": "Имя узла-эмиттера идентифицирует конкретный хост Symantec (клиент/менеджер), то есть субъекта действия connect."
+      },
+      {
+        "source": "Group Name",
+        "target": "subject.group",
+        "constant": null,
+        "value_map": null,
+        "condition": null,
+        "description": "Group Name — иерархический путь группы управления ('My Company\\Clients\\Fulton'), в которую входит узел-субъект; значение сохраняется дословно с обратными слэшами-разделителями уровней."
+      },
+      {
+        "source": "host",
+        "target": "event_src.hostname",
+        "constant": null,
+        "value_map": null,
+        "condition": {
+          "format": "hostname"
+        },
+        "description": "Тот же узел является и регистратором записи: грамматика конверта допускает только имя устройства, поэтому значение кладётся в event_src.hostname с условием format=hostname."
+      },
+      {
+        "source": "Event Description",
+        "target": "reason",
+        "constant": null,
+        "value_map": null,
+        "condition": null,
+        "description": "Event Description — человекочитаемая причина события (не удалось подключиться ни к одному GUP, теперь попытка подключения к SEPM), что соответствует смыслу поля reason."
+      },
+      {
+        "source": "column_1",
+        "target": "msgid",
+        "constant": null,
+        "value_map": null,
+        "condition": null,
+        "description": "column_1 — беспробельный код записи Symantec ('FULL-PF00BE8C'), идентифицирующий тип записи/шаблон сообщения у источника; это ближайшее по смыслу конкретное поле msgid. Значение сохраняется дословно."
+      },
+      {
+        "source": "column_3",
+        "target": "datafield1",
+        "constant": null,
+        "value_map": null,
+        "condition": null,
+        "description": "column_3 — позиционный маркер 'CVE' с неподтверждённой семантикой; конкретного поля таксономии для такого маркера нет (не object.type, не category.*, msgid занят кодом записи), поэтому значение сохранено дословно в datafield1."
+      },
+      {
+        "source": "Category",
+        "target": "numfield1",
+        "constant": null,
+        "value_map": null,
+        "condition": null,
+        "description": "Category — числовой код категории системного события Symantec (0), соответствие чисел классам событий не доказано; подходящего конкретного числового поля таксономии нет, поэтому код сохранён в numfield1."
+      },
+      {
+        "source": "pri",
+        "target": "numfield2",
+        "constant": null,
+        "value_map": null,
+        "condition": null,
+        "description": "PRI syslog (6) — технический приоритет конверта facility*8+severity; поля syslog-priority/severity в таксономии нет (importance уже заполнена семантически), поэтому исходное число сохранено в numfield2."
+      }
+    ],
+    "evidence": [
+      "<6>Jul 26 21:38:49 OAK-SYM-V01 SymantecServer: FULL-PF00BE8C,Category: 0,CVE,\"Event Description: Failed to connect to all GUPs, now trying to connect SEPM\",Event time: 2024-07-26 21:37:04,Group Name: My Company\\Clients\\Fulton"
+    ],
+    "description": "Mapping revision 1 для Family symantec_endpoint_system_event_symantecserver (parser 1, normalization 1) в MP SIEM 8.0. Каркас: time берётся из подписанного 'Event time' (время самого события, ISO, naive → UTC по внешней настройке), id = mp_siem_symantec_symantecserver_syslog_system_event (namespace + vendor + title + transport + event-type), event_src.vendor=symantec, event_src.title из литерального тега msg_id через полный value_map (SymantecServer→symantecserver, неизвестное значение = ошибка), event_src.category=Anti-virus (регистратор — Symantec Endpoint Protection). Смысловая связка: клиент не смог подключиться к GUP и пробует SEPM → action=connect, object=connection, status=failure (результат действия, а не факт соединения). Категория события отделена от категории источника: Monitoring→Errors→Application (ошибка приложения при установке связи). Субъект — узел-эмиттер: subject=host, subject.name=host, subject.group=Group Name (иерархический путь группы управления, сохранён дословно с обратными слэшами). Тот же узел — регистратор, поэтому host идёт и в event_src.hostname с condition {format: hostname} (IP-представления в грамматике конверта нет; составных 'устройство/интерфейс' в записи нет). Event Description положен в конкретное поле reason (причина события), а не в datafield. Остатки: column_1 → msgid (код записи/шаблона Symantec, идентификатор типа записи у источника, значение дословное); column_3 ('CVE') → datafield1 и Category (0) → numfield1, поскольку семантика маркера и числового кода категории по одному наблюдению не доказана, а подходящих конкретных полей таксономии нет; pri → numfield2, так как поля syslog-priority/severity в таксономии нет, а importance — семантический enum и уже заполнена info. Автоматические поля (uuid, normalized, body, recv_*, original_time, count, taxonomy_version и др.) не заполнялись; конвертная метка timestamp сознательно не использована вместо времени события. Сетевых src/dst нет: адресов, портов, MAC и имён GUP/SEPM в нормализованных полях не существует (они только внутри текста описания), поэтому стороны взаимодействия не выдумывались. Все normalized source замаплены; неизвестные значения enum и value_map вызывают ошибку, default не задан.",
+    "created_at": "2026-11-24T20:01:26.168890+00:00"
+  },
+  "taxonomy": {
+    "name": "mp_siem_8.0",
+    "fields": [
+      {
+        "name": "action",
+        "type": "Enum",
+        "required": true,
+        "automatic": false,
+        "description": "Характер воздействия на объект"
+      },
+      {
+        "name": "agent_id",
+        "type": "UUID",
+        "required": false,
+        "automatic": true,
+        "description": "Идентификатор MP 10 Collector, получившего событие"
+      },
+      {
+        "name": "aggregation_name",
+        "type": "String",
+        "required": false,
+        "automatic": true,
+        "description": "Название правила агрегации"
+      },
+      {
+        "name": "alert.context",
+        "type": "String",
+        "required": false,
+        "automatic": false,
+        "description": "Дополнительная информация о событии ИБ"
+      },
+      {
+        "name": "alert.key",
+        "type": "String",
+        "required": false,
+        "automatic": false,
+        "description": "Дополнительная техническая информация о событии ИБ"
+      },
+      {
+        "name": "asset_ids",
+        "type": "UUIDList",
+        "required": false,
+        "automatic": true,
+        "description": "Перечень идентификаторов в хранилище активов"
+      },
+      {
+        "name": "assets",
+        "type": "StringList",
+        "required": false,
+        "automatic": true,
+        "description": "IP-адреса и имена узлов, вовлечённых в инцидент; берутся из исходных событий корреляции"
+      },
+      {
+        "name": "assigned_dst_host",
+        "type": "String",
+        "required": false,
+        "automatic": false,
+        "description": "FQDN, соответствующее IP-адресу, назначенному получателю"
+      },
+      {
+        "name": "assigned_dst_ip",
+        "type": "IPAddress",
+        "required": false,
+        "automatic": false,
+        "description": "IP-адрес, назначенный получателю при NAT"
+      },
+      {
+        "name": "assigned_dst_port",
+        "type": "Number",
+        "required": false,
+        "automatic": false,
+        "description": "Порт, назначенный получателю при NAT"
+      },
+      {
+        "name": "assigned_src_host",
+        "type": "String",
+        "required": false,
+        "automatic": false,
+        "description": "FQDN, соответствующее IP-адресу, назначенному источнику"
+      },
+      {
+        "name": "assigned_src_ip",
+        "type": "IPAddress",
+        "required": false,
+        "automatic": false,
+        "description": "IP-адрес, назначенный источнику, например через DHCP, NAT или VPN"
+      },
+      {
+        "name": "assigned_src_port",
+        "type": "Number",
+        "required": false,
+        "automatic": false,
+        "description": "Порт, назначенный источнику при NAT"
+      },
+      {
+        "name": "attacking_assets",
+        "type": "StringList",
+        "required": false,
+        "automatic": true,
+        "description": "IP-адреса и имена узлов — источников атаки; берутся из исходных событий корреляции"
+      },
+      {
+        "name": "body",
+        "type": "String",
+        "required": false,
+        "automatic": true,
+        "description": "Текст необработанного события в UTF-8"
+      },
+      {
+        "name": "category.generic",
+        "type": "String",
+        "required": false,
+        "automatic": false,
+        "description": "Верхний уровень категоризации"
+      },
+      {
+        "name": "category.high",
+        "type": "String",
+        "required": false,
+        "automatic": false,
+        "description": "Средний уровень категоризации"
+      },
+      {
+        "name": "category.low",
+        "type": "String",
+        "required": false,
+        "automatic": false,
+        "description": "Нижний уровень категоризации"
+      },
+      {
+        "name": "chain_id",
+        "type": "String",
+        "required": false,
+        "automatic": false,
+        "description": "Идентификатор последовательности событий"
+      },
+      {
+        "name": "correlation_name",
+        "type": "String",
+        "required": false,
+        "automatic": false,
+        "description": "Уникальное название правила корреляции"
+      },
+      {
+        "name": "correlation_type",
+        "type": "Enum",
+        "required": false,
+        "automatic": false,
+        "description": "`event` — корреляционное событие; `incident` — корреляционное событие и инцидент"
+      },
+      {
+        "name": "count",
+        "type": "Number",
+        "required": false,
+        "automatic": true,
+        "description": "Количество агрегированных событий"
+      },
+      {
+        "name": "count.bytes",
+        "type": "Number",
+        "required": false,
+        "automatic": false,
+        "description": "Суммарное количество байтов в ответе сервера"
+      },
+      {
+        "name": "count.bytes_in",
+        "type": "Number",
+        "required": false,
+        "automatic": false,
+        "description": "Количество входящих байтов"
+      },
+      {
+        "name": "count.bytes_out",
+        "type": "Number",
+        "required": false,
+        "automatic": false,
+        "description": "Количество исходящих байтов"
+      },
+      {
+        "name": "count.packets",
+        "type": "Number",
+        "required": false,
+        "automatic": false,
+        "description": "Суммарное количество пакетов"
+      },
+      {
+        "name": "count.packets_in",
+        "type": "Number",
+        "required": false,
+        "automatic": false,
+        "description": "Количество входящих пакетов"
+      },
+      {
+        "name": "count.packets_out",
+        "type": "Number",
+        "required": false,
+        "automatic": false,
+        "description": "Количество исходящих пакетов"
+      },
+      {
+        "name": "count.subevents",
+        "type": "Number",
+        "required": false,
+        "automatic": false,
+        "description": "Количество событий, на основании которых зарегистрировано агрегированное или корреляционное событие"
+      },
+      {
+        "name": "datafield1",
+        "type": "String",
+        "required": false,
+        "automatic": false,
+        "description": "Данные, не укладывающиеся в схему полей событий"
+      },
+      {
+        "name": "datafield10",
+        "type": "String",
+        "required": false,
+        "automatic": false,
+        "description": "Данные, не укладывающиеся в схему полей событий"
+      },
+      {
+        "name": "datafield2",
+        "type": "String",
+        "required": false,
+        "automatic": false,
+        "description": "Данные, не укладывающиеся в схему полей событий"
+      },
+      {
+        "name": "datafield3",
+        "type": "String",
+        "required": false,
+        "automatic": false,
+        "description": "Данные, не укладывающиеся в схему полей событий"
+      },
+      {
+        "name": "datafield4",
+        "type": "String",
+        "required": false,
+        "automatic": false,
+        "description": "Данные, не укладывающиеся в схему полей событий"
+      },
+      {
+        "name": "datafield5",
+        "type": "String",
+        "required": false,
+        "automatic": false,
+        "description": "Данные, не укладывающиеся в схему полей событий"
+      },
+      {
+        "name": "datafield6",
+        "type": "String",
+        "required": false,
+        "automatic": false,
+        "description": "Данные, не укладывающиеся в схему полей событий"
+      },
+      {
+        "name": "datafield7",
+        "type": "String",
+        "required": false,
+        "automatic": false,
+        "description": "Данные, не укладывающиеся в схему полей событий"
+      },
+      {
+        "name": "datafield8",
+        "type": "String",
+        "required": false,
+        "automatic": false,
+        "description": "Данные, не укладывающиеся в схему полей событий"
+      },
+      {
+        "name": "datafield9",
+        "type": "String",
+        "required": false,
+        "automatic": false,
+        "description": "Данные, не укладывающиеся в схему полей событий"
+      },
+      {
+        "name": "detect",
+        "type": "String",
+        "required": false,
+        "automatic": false,
+        "description": "Описание атаки"
+      },
+      {
+        "name": "direction",
+        "type": "String",
+        "required": false,
+        "automatic": false,
+        "description": "Направление взаимодействия сторон, например сетевого соединения или доверительных отношений"
+      },
+      {
+        "name": "dst.asset",
+        "type": "UUID",
+        "required": false,
+        "automatic": false,
+        "description": "Идентификатор актива — объекта взаимодействия"
+      },
+      {
+        "name": "dst.fqdn",
+        "type": "String",
+        "required": false,
+        "automatic": false,
+        "description": "FQDN узла-получателя"
+      },
+      {
+        "name": "dst.geo.asn",
+        "type": "Number",
+        "required": false,
+        "automatic": false,
+        "description": "Номер автономной системы получателя"
+      },
+      {
+        "name": "dst.geo.city",
+        "type": "String",
+        "required": false,
+        "automatic": false,
+        "description": "Город получателя"
+      },
+      {
+        "name": "dst.geo.country",
+        "type": "String",
+        "required": false,
+        "automatic": false,
+        "description": "Страна получателя"
+      },
+      {
+        "name": "dst.geo.org",
+        "type": "String",
+        "required": false,
+        "automatic": false,
+        "description": "Организация, которой принадлежит получатель"
+      },
+      {
+        "name": "dst.host",
+        "type": "String",
+        "required": false,
+        "automatic": false,
+        "description": "Заполняется автоматически на основании `dst.ip` или `dst.hostname`"
+      },
+      {
+        "name": "dst.hostname",
+        "type": "String",
+        "required": false,
+        "automatic": false,
+        "description": "Имя узла-получателя без имени домена"
+      },
+      {
+        "name": "dst.ip",
+        "type": "IPAddress",
+        "required": false,
+        "automatic": false,
+        "description": "IPv4 или IPv6 получателя взаимодействия"
+      },
+      {
+        "name": "dst.mac",
+        "type": "MACAddress",
+        "required": false,
+        "automatic": false,
+        "description": "MAC-адрес получателя"
+      },
+      {
+        "name": "dst.port",
+        "type": "Number",
+        "required": false,
+        "automatic": false,
+        "description": "Порт получателя"
+      },
+      {
+        "name": "duration",
+        "type": "Number",
+        "required": false,
+        "automatic": false,
+        "description": "Продолжительность процесса в секундах"
+      },
+      {
+        "name": "event_src.asset",
+        "type": "UUID",
+        "required": false,
+        "automatic": false,
+        "description": "Идентификатор актива — источника события"
+      },
+      {
+        "name": "event_src.category",
+        "type": "Enum",
+        "required": true,
+        "automatic": false,
+        "description": "Категория источника события, например `IDS/IPS`, `Firewall`, `Mail server`"
+      },
+      {
+        "name": "event_src.fqdn",
+        "type": "String",
+        "required": false,
+        "automatic": false,
+        "description": "FQDN узла — источника события"
+      },
+      {
+        "name": "event_src.host",
+        "type": "String",
+        "required": false,
+        "automatic": true,
+        "description": "Заполняется на основании `event_src.hostname`, `event_src.ip`, `recv_ipv4`, `recv_ipv6`"
+      },
+      {
+        "name": "event_src.hostname",
+        "type": "String",
+        "required": false,
+        "automatic": false,
+        "description": "Имя узла — источника события без имени домена"
+      },
+      {
+        "name": "event_src.id",
+        "type": "String",
+        "required": false,
+        "automatic": false,
+        "description": "Уникальный идентификатор источника события"
+      },
+      {
+        "name": "event_src.ip",
+        "type": "IPAddress",
+        "required": false,
+        "automatic": false,
+        "description": "IPv4 или IPv6 источника события"
+      },
+      {
+        "name": "event_src.rule",
+        "type": "String",
+        "required": false,
+        "automatic": false,
+        "description": "Название правила, службы или приложения, зарегистрировавшего событие на источнике"
+      },
+      {
+        "name": "event_src.subsys",
+        "type": "String",
+        "required": false,
+        "automatic": false,
+        "description": "Подсистема источника, в которой генерируются события этого типа"
+      },
+      {
+        "name": "event_src.title",
+        "type": "String",
+        "required": true,
+        "automatic": false,
+        "description": "Название приложения-источника; нижний регистр без пробелов, например `windows`, `asa`, `ios`"
+      },
+      {
+        "name": "event_src.vendor",
+        "type": "String",
+        "required": true,
+        "automatic": false,
+        "description": "Производитель приложения-источника; нижний регистр без пробелов, например `microsoft`, `cisco`"
+      },
+      {
+        "name": "event_type",
+        "type": "String",
+        "required": false,
+        "automatic": true,
+        "description": "Не используется"
+      },
+      {
+        "name": "external_link",
+        "type": "String",
+        "required": false,
+        "automatic": false,
+        "description": "Ссылка на внешний ресурс с подробными сведениями о событии"
+      },
+      {
+        "name": "generator",
+        "type": "String",
+        "required": false,
+        "automatic": true,
+        "description": "Не используется"
+      },
+      {
+        "name": "generator.type",
+        "type": "Enum",
+        "required": false,
+        "automatic": true,
+        "description": "Компонент, зарегистрировавший событие"
+      },
+      {
+        "name": "generator.version",
+        "type": "String",
+        "required": false,
+        "automatic": true,
+        "description": "Версия службы, зарегистрировавшей событие"
+      },
+      {
+        "name": "historical",
+        "type": "Bool",
+        "required": false,
+        "automatic": true,
+        "description": "`true` — устаревшее событие; `false` — обычное событие; берётся из профиля сбора"
+      },
+      {
+        "name": "id",
+        "type": "String",
+        "required": true,
+        "automatic": false,
+        "description": "Идентификатор события в формате, заданном для правила нормализации или корреляции"
+      },
+      {
+        "name": "importance",
+        "type": "Enum",
+        "required": true,
+        "automatic": false,
+        "description": "`info`, `low`, `medium`, `high` — важность события для ИБ"
+      },
+      {
+        "name": "incorrect_time",
+        "type": "Bool",
+        "required": false,
+        "automatic": true,
+        "description": "Признак возможно некорректного времени события"
+      },
+      {
+        "name": "input_id",
+        "type": "UUID",
+        "required": false,
+        "automatic": true,
+        "description": "Идентификатор источника события"
+      },
+      {
+        "name": "interface",
+        "type": "String",
+        "required": false,
+        "automatic": false,
+        "description": "Сетевой интерфейс, через который происходит взаимодействие"
+      },
+      {
+        "name": "job_id",
+        "type": "UUID",
+        "required": false,
+        "automatic": true,
+        "description": "Идентификатор подзадачи MP 10 Collector на сбор событий"
+      },
+      {
+        "name": "labels",
+        "type": "String",
+        "required": false,
+        "automatic": false,
+        "description": "Метки события ИБ"
+      },
+      {
+        "name": "logon_auth_method",
+        "type": "Enum",
+        "required": false,
+        "automatic": false,
+        "description": "Способ подключения при аутентификации: `local` или `remote`"
+      },
+      {
+        "name": "logon_service",
+        "type": "String",
+        "required": false,
+        "automatic": false,
+        "description": "Служба/модуль аутентификации или ПО, используемое при взаимодействии с источником"
+      },
+      {
+        "name": "logon_type",
+        "type": "Number",
+        "required": false,
+        "automatic": false,
+        "description": "Тип аутентификации на источнике"
+      },
+      {
+        "name": "mime",
+        "type": "String",
+        "required": false,
+        "automatic": true,
+        "description": "MIME-тип необработанных данных"
+      },
+      {
+        "name": "msgid",
+        "type": "String",
+        "required": false,
+        "automatic": false,
+        "description": "Идентификатор типа события, уникальный в рамках событий одного источника"
+      },
+      {
+        "name": "nas_fqdn",
+        "type": "String",
+        "required": false,
+        "automatic": false,
+        "description": "FQDN NAS-сервера"
+      },
+      {
+        "name": "nas_ip",
+        "type": "IPAddress",
+        "required": false,
+        "automatic": false,
+        "description": "IP-адрес NAS-сервера"
+      },
+      {
+        "name": "normalized",
+        "type": "Bool",
+        "required": false,
+        "automatic": true,
+        "description": "`true` — нормализованное или корреляционное событие; `false` — необработанное"
+      },
+      {
+        "name": "numfield1",
+        "type": "Number",
+        "required": false,
+        "automatic": false,
+        "description": "Числовые данные, не укладывающиеся в схему полей событий"
+      },
+      {
+        "name": "numfield2",
+        "type": "Number",
+        "required": false,
+        "automatic": false,
+        "description": "Числовые данные, не укладывающиеся в схему полей событий"
+      },
+      {
+        "name": "numfield3",
+        "type": "Number",
+        "required": false,
+        "automatic": false,
+        "description": "Числовые данные, не укладывающиеся в схему полей событий"
+      },
+      {
+        "name": "numfield4",
+        "type": "Number",
+        "required": false,
+        "automatic": false,
+        "description": "Числовые данные, не укладывающиеся в схему полей событий"
+      },
+      {
+        "name": "numfield5",
+        "type": "Number",
+        "required": false,
+        "automatic": false,
+        "description": "Числовые данные, не укладывающиеся в схему полей событий"
+      },
+      {
+        "name": "object",
+        "type": "Enum",
+        "required": true,
+        "automatic": false,
+        "description": "Объект воздействия"
+      },
+      {
+        "name": "object.account.contact",
+        "type": "String",
+        "required": false,
+        "automatic": false,
+        "description": "Контактная информация пользователя учётной записи"
+      },
+      {
+        "name": "object.account.dn",
+        "type": "String",
+        "required": false,
+        "automatic": false,
+        "description": "Distinguished Name учётной записи в Active Directory"
+      },
+      {
+        "name": "object.account.domain",
+        "type": "String",
+        "required": false,
+        "automatic": false,
+        "description": "Домен учётной записи"
+      },
+      {
+        "name": "object.account.fullname",
+        "type": "String",
+        "required": false,
+        "automatic": false,
+        "description": "Данные пользователя учётной записи, например имя и фамилия"
+      },
+      {
+        "name": "object.account.group",
+        "type": "String",
+        "required": false,
+        "automatic": false,
+        "description": "Группы учётной записи или их идентификаторы через вертикальную черту с пробелами"
+      },
+      {
+        "name": "object.account.id",
+        "type": "String",
+        "required": false,
+        "automatic": false,
+        "description": "Идентификатор учётной записи"
+      },
+      {
+        "name": "object.account.name",
+        "type": "String",
+        "required": false,
+        "automatic": false,
+        "description": "Логин учётной записи"
+      },
+      {
+        "name": "object.account.privileges",
+        "type": "String",
+        "required": false,
+        "automatic": false,
+        "description": "Права и привилегии учётной записи"
+      },
+      {
+        "name": "object.account.session_id",
+        "type": "String",
+        "required": false,
+        "automatic": false,
+        "description": "Идентификатор сессии учётной записи, например Logon ID"
+      },
+      {
+        "name": "object.domain",
+        "type": "String",
+        "required": false,
+        "automatic": false,
+        "description": "Имя домена объекта"
+      },
+      {
+        "name": "object.fullpath",
+        "type": "String",
+        "required": false,
+        "automatic": false,
+        "description": "Полный путь к объекту: `object.path` + `object.name`"
+      },
+      {
+        "name": "object.group",
+        "type": "String",
+        "required": false,
+        "automatic": false,
+        "description": "Имя группы, в которую входит объект"
+      },
+      {
+        "name": "object.hash",
+        "type": "String",
+        "required": false,
+        "automatic": false,
+        "description": "Хеш-сумма объекта"
+      },
+      {
+        "name": "object.id",
+        "type": "String",
+        "required": false,
+        "automatic": false,
+        "description": "Идентификатор объекта"
+      },
+      {
+        "name": "object.name",
+        "type": "String",
+        "required": false,
+        "automatic": false,
+        "description": "Имя объекта"
+      },
+      {
+        "name": "object.new_value",
+        "type": "String",
+        "required": false,
+        "automatic": false,
+        "description": "Конечное значение изменённого свойства объекта"
+      },
+      {
+        "name": "object.num_value",
+        "type": "Number",
+        "required": false,
+        "automatic": false,
+        "description": "Исходное численное значение изменённого свойства объекта"
+      },
+      {
+        "name": "object.path",
+        "type": "String",
+        "required": false,
+        "automatic": false,
+        "description": "Путь к объекту"
+      },
+      {
+        "name": "object.process.cmdline",
+        "type": "String",
+        "required": false,
+        "automatic": false,
+        "description": "Командная строка запуска процесса"
+      },
+      {
+        "name": "object.process.cwd",
+        "type": "String",
+        "required": false,
+        "automatic": false,
+        "description": "Рабочая папка процесса"
+      },
+      {
+        "name": "object.process.fullpath",
+        "type": "String",
+        "required": false,
+        "automatic": false,
+        "description": "Полный путь к исполняемому файлу: `object.process.path` + `object.process.name`"
+      },
+      {
+        "name": "object.process.guid",
+        "type": "String",
+        "required": false,
+        "automatic": false,
+        "description": "GUID процесса"
+      },
+      {
+        "name": "object.process.hash",
+        "type": "String",
+        "required": false,
+        "automatic": false,
+        "description": "Алгоритмы и хеш-суммы исполняемого файла: `<Функция 1>:<Сумма 1> ... <Функция N>:<Сумма N>`"
+      },
+      {
+        "name": "object.process.id",
+        "type": "String",
+        "required": false,
+        "automatic": false,
+        "description": "PID процесса"
+      },
+      {
+        "name": "object.process.meta",
+        "type": "String",
+        "required": false,
+        "automatic": false,
+        "description": "Метаданные исполняемого файла: Description, Product и Company; блоки разделяются вертикальной чертой с пробелами"
+      },
+      {
+        "name": "object.process.name",
+        "type": "String",
+        "required": false,
+        "automatic": false,
+        "description": "Имя исполняемого файла процесса"
+      },
+      {
+        "name": "object.process.original_name",
+        "type": "String",
+        "required": false,
+        "automatic": false,
+        "description": "Имя исполняемого файла из метаданных разработчика"
+      },
+      {
+        "name": "object.process.parent.cmdline",
+        "type": "String",
+        "required": false,
+        "automatic": false,
+        "description": "Командная строка запуска родительского процесса"
+      },
+      {
+        "name": "object.process.parent.fullpath",
+        "type": "String",
+        "required": false,
+        "automatic": false,
+        "description": "Полный путь к исполняемому файлу родительского процесса"
+      },
+      {
+        "name": "object.process.parent.guid",
+        "type": "String",
+        "required": false,
+        "automatic": false,
+        "description": "GUID родительского процесса"
+      },
+      {
+        "name": "object.process.parent.hash",
+        "type": "String",
+        "required": false,
+        "automatic": false,
+        "description": "Алгоритмы и хеш-суммы исполняемого файла родительского процесса"
+      },
+      {
+        "name": "object.process.parent.id",
+        "type": "String",
+        "required": false,
+        "automatic": false,
+        "description": "PID родительского процесса"
+      },
+      {
+        "name": "object.process.parent.name",
+        "type": "String",
+        "required": false,
+        "automatic": false,
+        "description": "Имя исполняемого файла родительского процесса"
+      },
+      {
+        "name": "object.process.parent.path",
+        "type": "String",
+        "required": false,
+        "automatic": false,
+        "description": "Путь к папке исполняемого файла родительского процесса"
+      },
+      {
+        "name": "object.process.path",
+        "type": "String",
+        "required": false,
+        "automatic": false,
+        "description": "Путь к папке исполняемого файла процесса"
+      },
+      {
+        "name": "object.process.version",
+        "type": "String",
+        "required": false,
+        "automatic": false,
+        "description": "Версия исполняемого файла процесса"
+      },
+      {
+        "name": "object.property",
+        "type": "String",
+        "required": false,
+        "automatic": false,
+        "description": "Изменяемое свойство объекта"
+      },
+      {
+        "name": "object.query",
+        "type": "String",
+        "required": false,
+        "automatic": false,
+        "description": "Выполненный запрос"
+      },
+      {
+        "name": "object.state",
+        "type": "String",
+        "required": false,
+        "automatic": false,
+        "description": "Состояние объекта"
+      },
+      {
+        "name": "object.storage.fullpath",
+        "type": "String",
+        "required": false,
+        "automatic": false,
+        "description": "Полный путь к объекту в хранилище: `object.storage.path` + `object.storage.name`"
+      },
+      {
+        "name": "object.storage.id",
+        "type": "String",
+        "required": false,
+        "automatic": false,
+        "description": "Идентификатор или имя хранилища, например общей папки или диска"
+      },
+      {
+        "name": "object.storage.name",
+        "type": "String",
+        "required": false,
+        "automatic": false,
+        "description": "Имя объекта в хранилище, если отличается от публичного"
+      },
+      {
+        "name": "object.storage.path",
+        "type": "String",
+        "required": false,
+        "automatic": false,
+        "description": "Путь к объекту в хранилище, если отличается от публичного"
+      },
+      {
+        "name": "object.type",
+        "type": "String",
+        "required": false,
+        "automatic": false,
+        "description": "Тип объекта"
+      },
+      {
+        "name": "object.value",
+        "type": "String",
+        "required": false,
+        "automatic": false,
+        "description": "Значение изменяемого свойства объекта"
+      },
+      {
+        "name": "object.vendor",
+        "type": "String",
+        "required": false,
+        "automatic": false,
+        "description": "Производитель объекта"
+      },
+      {
+        "name": "object.version",
+        "type": "String",
+        "required": false,
+        "automatic": false,
+        "description": "Версия объекта"
+      },
+      {
+        "name": "origin_app_id",
+        "type": "UUID",
+        "required": false,
+        "automatic": true,
+        "description": "Идентификатор приложения, получившего или зарегистрировавшего событие"
+      },
+      {
+        "name": "original_time",
+        "type": "DateTime",
+        "required": false,
+        "automatic": true,
+        "description": "Время регистрации события на источнике"
+      },
+      {
+        "name": "primary_siem_app_id",
+        "type": "UUID",
+        "required": false,
+        "automatic": true,
+        "description": "Идентификатор приложения, обработавшего событие"
+      },
+      {
+        "name": "protocol",
+        "type": "String",
+        "required": false,
+        "automatic": false,
+        "description": "Протокол передачи данных"
+      },
+      {
+        "name": "protocol.layer7",
+        "type": "String",
+        "required": false,
+        "automatic": false,
+        "description": "Протокол уровня приложения по модели OSI"
+      },
+      {
+        "name": "reason",
+        "type": "String",
+        "required": false,
+        "automatic": false,
+        "description": "Причина события: обрыв соединения, неудачная аутентификация и т. п."
+      },
+      {
+        "name": "recv_asset",
+        "type": "UUID",
+        "required": false,
+        "automatic": false,
+        "description": "Идентификатор актива — передатчика события"
+      },
+      {
+        "name": "recv_host",
+        "type": "String",
+        "required": false,
+        "automatic": true,
+        "description": "Имя узла, от которого получено событие"
+      },
+      {
+        "name": "recv_ipv4",
+        "type": "IPAddress",
+        "required": false,
+        "automatic": true,
+        "description": "IPv4-адрес узла, от которого получено событие"
+      },
+      {
+        "name": "recv_ipv6",
+        "type": "IPAddress",
+        "required": false,
+        "automatic": true,
+        "description": "IPv6-адрес узла, от которого получено событие"
+      },
+      {
+        "name": "recv_time",
+        "type": "DateTime",
+        "required": false,
+        "automatic": true,
+        "description": "Время сбора события MP 10 Collector, UTC+0"
+      },
+      {
+        "name": "remote",
+        "type": "Bool",
+        "required": false,
+        "automatic": true,
+        "description": "Признак репликации события на другую площадку"
+      },
+      {
+        "name": "scope_id",
+        "type": "UUID",
+        "required": false,
+        "automatic": true,
+        "description": "Идентификатор пользовательской инфраструктуры в MP SIEM"
+      },
+      {
+        "name": "siem_id",
+        "type": "UUID",
+        "required": false,
+        "automatic": true,
+        "description": "Идентификатор MP SIEM Server"
+      },
+      {
+        "name": "site_id",
+        "type": "UUID",
+        "required": false,
+        "automatic": true,
+        "description": "Идентификатор площадки"
+      },
+      {
+        "name": "src.asset",
+        "type": "UUID",
+        "required": false,
+        "automatic": false,
+        "description": "Идентификатор актива — субъекта взаимодействия"
+      },
+      {
+        "name": "src.fqdn",
+        "type": "String",
+        "required": false,
+        "automatic": false,
+        "description": "FQDN узла-источника взаимодействия"
+      },
+      {
+        "name": "src.geo.asn",
+        "type": "Number",
+        "required": false,
+        "automatic": false,
+        "description": "Номер автономной системы источника"
+      },
+      {
+        "name": "src.geo.city",
+        "type": "String",
+        "required": false,
+        "automatic": false,
+        "description": "Город источника"
+      },
+      {
+        "name": "src.geo.country",
+        "type": "String",
+        "required": false,
+        "automatic": false,
+        "description": "Страна источника"
+      },
+      {
+        "name": "src.geo.org",
+        "type": "String",
+        "required": false,
+        "automatic": false,
+        "description": "Организация, которой принадлежит источник"
+      },
+      {
+        "name": "src.host",
+        "type": "String",
+        "required": false,
+        "automatic": false,
+        "description": "Заполняется автоматически на основании `src.ip` или `src.hostname`"
+      },
+      {
+        "name": "src.hostname",
+        "type": "String",
+        "required": false,
+        "automatic": false,
+        "description": "Имя узла-источника без имени домена"
+      },
+      {
+        "name": "src.ip",
+        "type": "IPAddress",
+        "required": false,
+        "automatic": false,
+        "description": "IPv4 или IPv6 источника взаимодействия"
+      },
+      {
+        "name": "src.mac",
+        "type": "MACAddress",
+        "required": false,
+        "automatic": false,
+        "description": "MAC-адрес источника"
+      },
+      {
+        "name": "src.port",
+        "type": "Number",
+        "required": false,
+        "automatic": false,
+        "description": "Порт источника"
+      },
+      {
+        "name": "start_time",
+        "type": "DateTime",
+        "required": false,
+        "automatic": false,
+        "description": "Время регистрации первого события в последовательности"
+      },
+      {
+        "name": "status",
+        "type": "Enum",
+        "required": true,
+        "automatic": false,
+        "description": "Конечный результат воздействия"
+      },
+      {
+        "name": "subevents",
+        "type": "UUIDList",
+        "required": false,
+        "automatic": true,
+        "description": "Идентификаторы событий, на основании которых зарегистрировано агрегированное или корреляционное событие"
+      },
+      {
+        "name": "subevents.time",
+        "type": "StringList",
+        "required": false,
+        "automatic": true,
+        "description": "Время регистрации событий, на основании которых зарегистрировано агрегированное или корреляционное событие"
+      },
+      {
+        "name": "subject",
+        "type": "Enum",
+        "required": false,
+        "automatic": false,
+        "description": "Субъект воздействия"
+      },
+      {
+        "name": "subject.account.contact",
+        "type": "String",
+        "required": false,
+        "automatic": false,
+        "description": "Контакты пользователя учётной записи: телефон, email и т. п."
+      },
+      {
+        "name": "subject.account.dn",
+        "type": "String",
+        "required": false,
+        "automatic": false,
+        "description": "Distinguished Name учётной записи"
+      },
+      {
+        "name": "subject.account.domain",
+        "type": "String",
+        "required": false,
+        "automatic": false,
+        "description": "Домен учётной записи"
+      },
+      {
+        "name": "subject.account.fullname",
+        "type": "String",
+        "required": false,
+        "automatic": false,
+        "description": "Данные пользователя учётной записи, например имя и фамилия"
+      },
+      {
+        "name": "subject.account.group",
+        "type": "String",
+        "required": false,
+        "automatic": false,
+        "description": "Группы учётной записи или их идентификаторы через вертикальную черту с пробелами"
+      },
+      {
+        "name": "subject.account.id",
+        "type": "String",
+        "required": false,
+        "automatic": false,
+        "description": "Идентификатор учётной записи"
+      },
+      {
+        "name": "subject.account.name",
+        "type": "String",
+        "required": false,
+        "automatic": false,
+        "description": "Логин учётной записи"
+      },
+      {
+        "name": "subject.account.privileges",
+        "type": "String",
+        "required": false,
+        "automatic": false,
+        "description": "Права и привилегии учётной записи"
+      },
+      {
+        "name": "subject.account.session_id",
+        "type": "String",
+        "required": false,
+        "automatic": false,
+        "description": "Идентификатор сессии, например Logon ID"
+      },
+      {
+        "name": "subject.domain",
+        "type": "String",
+        "required": false,
+        "automatic": false,
+        "description": "Название домена субъекта"
+      },
+      {
+        "name": "subject.group",
+        "type": "String",
+        "required": false,
+        "automatic": false,
+        "description": "Имя группы, в которую входит субъект"
+      },
+      {
+        "name": "subject.id",
+        "type": "String",
+        "required": false,
+        "automatic": false,
+        "description": "Идентификатор субъекта"
+      },
+      {
+        "name": "subject.name",
+        "type": "String",
+        "required": false,
+        "automatic": false,
+        "description": "Имя субъекта"
+      },
+      {
+        "name": "subject.privileges",
+        "type": "String",
+        "required": false,
+        "automatic": false,
+        "description": "Привилегии субъекта"
+      },
+      {
+        "name": "subject.process.cmdline",
+        "type": "String",
+        "required": false,
+        "automatic": false,
+        "description": "Команда запуска процесса, включая аргументы"
+      },
+      {
+        "name": "subject.process.cwd",
+        "type": "String",
+        "required": false,
+        "automatic": false,
+        "description": "Рабочая папка процесса"
+      },
+      {
+        "name": "subject.process.fullpath",
+        "type": "String",
+        "required": false,
+        "automatic": false,
+        "description": "Полный путь к исполняемому файлу: `subject.process.path` + `subject.process.name`"
+      },
+      {
+        "name": "subject.process.guid",
+        "type": "String",
+        "required": false,
+        "automatic": false,
+        "description": "GUID процесса"
+      },
+      {
+        "name": "subject.process.hash",
+        "type": "String",
+        "required": false,
+        "automatic": false,
+        "description": "Алгоритмы и хеш-суммы исполняемого файла: `<Функция 1>:<Сумма 1> ... <Функция N>:<Сумма N>`"
+      },
+      {
+        "name": "subject.process.id",
+        "type": "String",
+        "required": false,
+        "automatic": false,
+        "description": "PID процесса"
+      },
+      {
+        "name": "subject.process.meta",
+        "type": "String",
+        "required": false,
+        "automatic": false,
+        "description": "Метаданные исполняемого файла: Description, Product и Company; блоки разделяются вертикальной чертой с пробелами"
+      },
+      {
+        "name": "subject.process.name",
+        "type": "String",
+        "required": false,
+        "automatic": false,
+        "description": "Имя исполняемого файла процесса"
+      },
+      {
+        "name": "subject.process.original_name",
+        "type": "String",
+        "required": false,
+        "automatic": false,
+        "description": "Имя исполняемого файла из метаданных разработчика"
+      },
+      {
+        "name": "subject.process.parent.cmdline",
+        "type": "String",
+        "required": false,
+        "automatic": false,
+        "description": "Команда запуска родительского процесса, включая аргументы"
+      },
+      {
+        "name": "subject.process.parent.fullpath",
+        "type": "String",
+        "required": false,
+        "automatic": false,
+        "description": "Полный путь к исполняемому файлу родительского процесса"
+      },
+      {
+        "name": "subject.process.parent.guid",
+        "type": "String",
+        "required": false,
+        "automatic": false,
+        "description": "GUID родительского процесса"
+      },
+      {
+        "name": "subject.process.parent.hash",
+        "type": "String",
+        "required": false,
+        "automatic": false,
+        "description": "Алгоритмы и хеш-суммы исполняемого файла родительского процесса"
+      },
+      {
+        "name": "subject.process.parent.id",
+        "type": "String",
+        "required": false,
+        "automatic": false,
+        "description": "PID родительского процесса"
+      },
+      {
+        "name": "subject.process.parent.name",
+        "type": "String",
+        "required": false,
+        "automatic": false,
+        "description": "Имя исполняемого файла родительского процесса"
+      },
+      {
+        "name": "subject.process.parent.path",
+        "type": "String",
+        "required": false,
+        "automatic": false,
+        "description": "Путь к исполняемому файлу родительского процесса без имени"
+      },
+      {
+        "name": "subject.process.path",
+        "type": "String",
+        "required": false,
+        "automatic": false,
+        "description": "Путь к исполняемому файлу процесса без имени"
+      },
+      {
+        "name": "subject.process.version",
+        "type": "String",
+        "required": false,
+        "automatic": false,
+        "description": "Версия субъекта-процесса"
+      },
+      {
+        "name": "subject.state",
+        "type": "String",
+        "required": false,
+        "automatic": false,
+        "description": "Состояние субъекта"
+      },
+      {
+        "name": "subject.type",
+        "type": "String",
+        "required": false,
+        "automatic": false,
+        "description": "Тип субъекта"
+      },
+      {
+        "name": "subject.version",
+        "type": "String",
+        "required": false,
+        "automatic": false,
+        "description": "Версия субъекта"
+      },
+      {
+        "name": "tag",
+        "type": "String",
+        "required": false,
+        "automatic": true,
+        "description": "Название модуля MP 10 Collector, получившего необработанное событие"
+      },
+      {
+        "name": "task_id",
+        "type": "UUID",
+        "required": false,
+        "automatic": true,
+        "description": "Идентификатор задачи на сбор событий"
+      },
+      {
+        "name": "taxonomy_version",
+        "type": "String",
+        "required": false,
+        "automatic": true,
+        "description": "Версия схемы полей событий"
+      },
+      {
+        "name": "tcp_flag",
+        "type": "String",
+        "required": false,
+        "automatic": false,
+        "description": "TCP-флаги, например `ACK`, `URG`, `FIN`; может содержать несколько флагов"
+      },
+      {
+        "name": "tenant_id",
+        "type": "UUID",
+        "required": false,
+        "automatic": true,
+        "description": "Идентификатор дочерней организации в рамках площадки"
+      },
+      {
+        "name": "time",
+        "type": "DateTime",
+        "required": true,
+        "automatic": false,
+        "description": "Время события в MP SIEM, UTC+0"
+      },
+      {
+        "name": "type",
+        "type": "String",
+        "required": false,
+        "automatic": true,
+        "description": "Не используется"
+      },
+      {
+        "name": "uuid",
+        "type": "UUID",
+        "required": false,
+        "automatic": true,
+        "description": "Идентификатор события; необработанное и нормализованное представления имеют один UUID"
+      }
+    ],
+    "values": [
+      {
+        "field": "action",
+        "value": "access",
+        "description": "Получение доступа"
+      },
+      {
+        "field": "action",
+        "value": "alert",
+        "description": "Получение предупреждения"
+      },
+      {
+        "field": "action",
+        "value": "allow",
+        "description": "Разрешение"
+      },
+      {
+        "field": "action",
+        "value": "apply",
+        "description": "Применение"
+      },
+      {
+        "field": "action",
+        "value": "assign",
+        "description": "Сопоставление одного объекта с другим"
+      },
+      {
+        "field": "action",
+        "value": "backup",
+        "description": "Резервное копирование"
+      },
+      {
+        "field": "action",
+        "value": "bind",
+        "description": "Присвоение IP-адреса, добавление политики в группу"
+      },
+      {
+        "field": "action",
+        "value": "call",
+        "description": "Звонок"
+      },
+      {
+        "field": "action",
+        "value": "check",
+        "description": "Проверка"
+      },
+      {
+        "field": "action",
+        "value": "clean",
+        "description": "Очистка"
+      },
+      {
+        "field": "action",
+        "value": "close",
+        "description": "Закрытие"
+      },
+      {
+        "field": "action",
+        "value": "configure",
+        "description": "Настройка"
+      },
+      {
+        "field": "action",
+        "value": "connect",
+        "description": "Соединение"
+      },
+      {
+        "field": "action",
+        "value": "copy",
+        "description": "Копирование"
+      },
+      {
+        "field": "action",
+        "value": "create",
+        "description": "Создание"
+      },
+      {
+        "field": "action",
+        "value": "decrypt",
+        "description": "Расшифровка"
+      },
+      {
+        "field": "action",
+        "value": "deescalate",
+        "description": "Завершение сессии с повышенными привилегиями"
+      },
+      {
+        "field": "action",
+        "value": "deliver",
+        "description": "Доставка"
+      },
+      {
+        "field": "action",
+        "value": "deny",
+        "description": "Запрет"
+      },
+      {
+        "field": "action",
+        "value": "detect",
+        "description": "Обнаружение"
+      },
+      {
+        "field": "action",
+        "value": "disable",
+        "description": "Выключение"
+      },
+      {
+        "field": "action",
+        "value": "disconnect",
+        "description": "Разъединение"
+      },
+      {
+        "field": "action",
+        "value": "down",
+        "description": "Изменение состояния интерфейса на down"
+      },
+      {
+        "field": "action",
+        "value": "download",
+        "description": "Скачивание"
+      },
+      {
+        "field": "action",
+        "value": "enable",
+        "description": "Включение"
+      },
+      {
+        "field": "action",
+        "value": "encrypt",
+        "description": "Зашифровка"
+      },
+      {
+        "field": "action",
+        "value": "escalate",
+        "description": "Начало сессии с повышенными привилегиями"
+      },
+      {
+        "field": "action",
+        "value": "exclude",
+        "description": "Исключение"
+      },
+      {
+        "field": "action",
+        "value": "execute",
+        "description": "Выполнение"
+      },
+      {
+        "field": "action",
+        "value": "extract",
+        "description": "Извлечение"
+      },
+      {
+        "field": "action",
+        "value": "grant",
+        "description": "Предоставление права или привилегии"
+      },
+      {
+        "field": "action",
+        "value": "info",
+        "description": "Информационное событие без возможности выделить действие"
+      },
+      {
+        "field": "action",
+        "value": "initiate",
+        "description": "Инициирование"
+      },
+      {
+        "field": "action",
+        "value": "inject",
+        "description": "Внедрение внешнего содержимого"
+      },
+      {
+        "field": "action",
+        "value": "install",
+        "description": "Установка"
+      },
+      {
+        "field": "action",
+        "value": "leak",
+        "description": "Утечка данных"
+      },
+      {
+        "field": "action",
+        "value": "lock",
+        "description": "Блокирование"
+      },
+      {
+        "field": "action",
+        "value": "login",
+        "description": "Вход в систему"
+      },
+      {
+        "field": "action",
+        "value": "logout",
+        "description": "Выход из системы"
+      },
+      {
+        "field": "action",
+        "value": "modify",
+        "description": "Изменение"
+      },
+      {
+        "field": "action",
+        "value": "move",
+        "description": "Перемещение"
+      },
+      {
+        "field": "action",
+        "value": "open",
+        "description": "Открывание"
+      },
+      {
+        "field": "action",
+        "value": "print",
+        "description": "Распечатывание"
+      },
+      {
+        "field": "action",
+        "value": "protect",
+        "description": "Защита"
+      },
+      {
+        "field": "action",
+        "value": "quarantine",
+        "description": "Изолирование"
+      },
+      {
+        "field": "action",
+        "value": "read",
+        "description": "Чтение или загрузка содержимого"
+      },
+      {
+        "field": "action",
+        "value": "receive",
+        "description": "Принятие"
+      },
+      {
+        "field": "action",
+        "value": "reject",
+        "description": "Отмена"
+      },
+      {
+        "field": "action",
+        "value": "remove",
+        "description": "Удаление"
+      },
+      {
+        "field": "action",
+        "value": "rename",
+        "description": "Переименование"
+      },
+      {
+        "field": "action",
+        "value": "request",
+        "description": "Запрос на предоставление объекта или информации об объекте"
+      },
+      {
+        "field": "action",
+        "value": "reset",
+        "description": "Сброс к состоянию по умолчанию"
+      },
+      {
+        "field": "action",
+        "value": "restart",
+        "description": "Перезапуск"
+      },
+      {
+        "field": "action",
+        "value": "restore",
+        "description": "Восстановление"
+      },
+      {
+        "field": "action",
+        "value": "revoke",
+        "description": "Отзыв права или привилегии"
+      },
+      {
+        "field": "action",
+        "value": "rollback",
+        "description": "Откат к предыдущему состоянию"
+      },
+      {
+        "field": "action",
+        "value": "scan",
+        "description": "Сканирование"
+      },
+      {
+        "field": "action",
+        "value": "search",
+        "description": "Поиск"
+      },
+      {
+        "field": "action",
+        "value": "send",
+        "description": "Отправка"
+      },
+      {
+        "field": "action",
+        "value": "start",
+        "description": "Запуск"
+      },
+      {
+        "field": "action",
+        "value": "state",
+        "description": "Изменение состояния на другое из заранее заданного перечня"
+      },
+      {
+        "field": "action",
+        "value": "stop",
+        "description": "Остановка"
+      },
+      {
+        "field": "action",
+        "value": "sync",
+        "description": "Синхронизация"
+      },
+      {
+        "field": "action",
+        "value": "terminate",
+        "description": "Аварийное завершение"
+      },
+      {
+        "field": "action",
+        "value": "truncate",
+        "description": "Удаление содержимого объекта с сохранением объекта"
+      },
+      {
+        "field": "action",
+        "value": "unassign",
+        "description": "Отмена сопоставления одного объекта с другим"
+      },
+      {
+        "field": "action",
+        "value": "unbind",
+        "description": "Удаление политики из группы, освобождение IP-адреса"
+      },
+      {
+        "field": "action",
+        "value": "uninstall",
+        "description": "Удаление продукта"
+      },
+      {
+        "field": "action",
+        "value": "unlock",
+        "description": "Разблокирование"
+      },
+      {
+        "field": "action",
+        "value": "up",
+        "description": "Изменение состояния интерфейса на up"
+      },
+      {
+        "field": "action",
+        "value": "update",
+        "description": "Минорное обновление"
+      },
+      {
+        "field": "action",
+        "value": "upgrade",
+        "description": "Мажорное обновление"
+      },
+      {
+        "field": "action",
+        "value": "upload",
+        "description": "Загрузка"
+      },
+      {
+        "field": "action",
+        "value": "validate",
+        "description": "Валидация"
+      },
+      {
+        "field": "action",
+        "value": "view",
+        "description": "Просмотр"
+      },
+      {
+        "field": "correlation_type",
+        "value": "AAA",
+        "description": "Аутентификация, авторизация, учётные записи"
+      },
+      {
+        "field": "correlation_type",
+        "value": "Anti-virus",
+        "description": "Антивирусное ПО"
+      },
+      {
+        "field": "correlation_type",
+        "value": "Application security",
+        "description": "Защита приложений"
+      },
+      {
+        "field": "correlation_type",
+        "value": "Application server",
+        "description": "Сервер приложений, например SAP"
+      },
+      {
+        "field": "correlation_type",
+        "value": "Backup server",
+        "description": "Резервное копирование и восстановление"
+      },
+      {
+        "field": "correlation_type",
+        "value": "Certification authority",
+        "description": "Служба сертификации, например Microsoft Windows CA или OpenSSL"
+      },
+      {
+        "field": "correlation_type",
+        "value": "DHCP server",
+        "description": "Сервер DHCP"
+      },
+      {
+        "field": "correlation_type",
+        "value": "DLP",
+        "description": "Средство предотвращения утечек данных"
+      },
+      {
+        "field": "correlation_type",
+        "value": "DNS server",
+        "description": "Сервер DNS"
+      },
+      {
+        "field": "correlation_type",
+        "value": "DPI",
+        "description": "Система DPI"
+      },
+      {
+        "field": "correlation_type",
+        "value": "Database server",
+        "description": "Сервер баз данных"
+      },
+      {
+        "field": "correlation_type",
+        "value": "Directory service",
+        "description": "Служба каталогов, например Microsoft AD, Novell eDirectory, OpenLDAP"
+      },
+      {
+        "field": "correlation_type",
+        "value": "File service",
+        "description": "Файловая служба, например Samba"
+      },
+      {
+        "field": "correlation_type",
+        "value": "Firewall",
+        "description": "Межсетевой экран"
+      },
+      {
+        "field": "correlation_type",
+        "value": "Honeypot",
+        "description": "Honeypot"
+      },
+      {
+        "field": "correlation_type",
+        "value": "Host security",
+        "description": "Защита узлов"
+      },
+      {
+        "field": "correlation_type",
+        "value": "IDS/IPS",
+        "description": "IDS/IPS"
+      },
+      {
+        "field": "correlation_type",
+        "value": "Mail server",
+        "description": "Почтовый сервер"
+      },
+      {
+        "field": "correlation_type",
+        "value": "Mobile",
+        "description": "Мобильное устройство"
+      },
+      {
+        "field": "correlation_type",
+        "value": "Network device",
+        "description": "Сетевое оборудование"
+      },
+      {
+        "field": "correlation_type",
+        "value": "Network monitoring system",
+        "description": "Система мониторинга сети"
+      },
+      {
+        "field": "correlation_type",
+        "value": "Network security",
+        "description": "Защита сети"
+      },
+      {
+        "field": "correlation_type",
+        "value": "Operating system",
+        "description": "Операционная система"
+      },
+      {
+        "field": "correlation_type",
+        "value": "Other",
+        "description": "Другое"
+      },
+      {
+        "field": "correlation_type",
+        "value": "Physical security",
+        "description": "Физическая защита: СКУД, видеонаблюдение"
+      },
+      {
+        "field": "correlation_type",
+        "value": "Proxy server",
+        "description": "Прокси-сервер"
+      },
+      {
+        "field": "correlation_type",
+        "value": "SCADA",
+        "description": "Система SCADA"
+      },
+      {
+        "field": "correlation_type",
+        "value": "SIEM",
+        "description": "Система SIEM"
+      },
+      {
+        "field": "correlation_type",
+        "value": "Storage device",
+        "description": "Система хранения данных"
+      },
+      {
+        "field": "correlation_type",
+        "value": "Telecom",
+        "description": "Система связи"
+      },
+      {
+        "field": "correlation_type",
+        "value": "Terminal services",
+        "description": "Терминальные службы / службы удалённых рабочих столов"
+      },
+      {
+        "field": "correlation_type",
+        "value": "VPN",
+        "description": "VPN"
+      },
+      {
+        "field": "correlation_type",
+        "value": "Virtualization",
+        "description": "Система виртуализации"
+      },
+      {
+        "field": "correlation_type",
+        "value": "Voice over IP",
+        "description": "IP-телефония"
+      },
+      {
+        "field": "correlation_type",
+        "value": "Web security",
+        "description": "Сетевая защита"
+      },
+      {
+        "field": "correlation_type",
+        "value": "Web server",
+        "description": "Веб-сервер"
+      },
+      {
+        "field": "correlation_type",
+        "value": "Wireless",
+        "description": "Беспроводная сеть"
+      },
+      {
+        "field": "correlation_type",
+        "value": "event",
+        "description": "Корреляционное событие"
+      },
+      {
+        "field": "correlation_type",
+        "value": "incident",
+        "description": "Корреляционное событие и инцидент"
+      },
+      {
+        "field": "event_src.category",
+        "value": "AAA",
+        "description": "Категория приложения или узла, зарегистрировавшего событие: AAA."
+      },
+      {
+        "field": "event_src.category",
+        "value": "Anti-virus",
+        "description": "Категория приложения или узла, зарегистрировавшего событие: Anti-virus."
+      },
+      {
+        "field": "event_src.category",
+        "value": "Application security",
+        "description": "Категория приложения или узла, зарегистрировавшего событие: Application security."
+      },
+      {
+        "field": "event_src.category",
+        "value": "Application server",
+        "description": "Категория приложения или узла, зарегистрировавшего событие: Application server."
+      },
+      {
+        "field": "event_src.category",
+        "value": "Backup server",
+        "description": "Категория приложения или узла, зарегистрировавшего событие: Backup server."
+      },
+      {
+        "field": "event_src.category",
+        "value": "Certification authority",
+        "description": "Категория приложения или узла, зарегистрировавшего событие: Certification authority."
+      },
+      {
+        "field": "event_src.category",
+        "value": "DHCP server",
+        "description": "Категория приложения или узла, зарегистрировавшего событие: DHCP server."
+      },
+      {
+        "field": "event_src.category",
+        "value": "DLP",
+        "description": "Категория приложения или узла, зарегистрировавшего событие: DLP."
+      },
+      {
+        "field": "event_src.category",
+        "value": "DNS server",
+        "description": "Категория приложения или узла, зарегистрировавшего событие: DNS server."
+      },
+      {
+        "field": "event_src.category",
+        "value": "DPI",
+        "description": "Категория приложения или узла, зарегистрировавшего событие: DPI."
+      },
+      {
+        "field": "event_src.category",
+        "value": "Database server",
+        "description": "Категория приложения или узла, зарегистрировавшего событие: Database server."
+      },
+      {
+        "field": "event_src.category",
+        "value": "Directory service",
+        "description": "Категория приложения или узла, зарегистрировавшего событие: Directory service."
+      },
+      {
+        "field": "event_src.category",
+        "value": "File service",
+        "description": "Категория приложения или узла, зарегистрировавшего событие: File service."
+      },
+      {
+        "field": "event_src.category",
+        "value": "Firewall",
+        "description": "Категория приложения или узла, зарегистрировавшего событие: Firewall."
+      },
+      {
+        "field": "event_src.category",
+        "value": "Honeypot",
+        "description": "Категория приложения или узла, зарегистрировавшего событие: Honeypot."
+      },
+      {
+        "field": "event_src.category",
+        "value": "Host security",
+        "description": "Категория приложения или узла, зарегистрировавшего событие: Host security."
+      },
+      {
+        "field": "event_src.category",
+        "value": "IDS/IPS",
+        "description": "Категория приложения или узла, зарегистрировавшего событие: IDS/IPS."
+      },
+      {
+        "field": "event_src.category",
+        "value": "Mail server",
+        "description": "Категория приложения или узла, зарегистрировавшего событие: Mail server."
+      },
+      {
+        "field": "event_src.category",
+        "value": "Mobile",
+        "description": "Категория приложения или узла, зарегистрировавшего событие: Mobile."
+      },
+      {
+        "field": "event_src.category",
+        "value": "Network device",
+        "description": "Категория приложения или узла, зарегистрировавшего событие: Network device."
+      },
+      {
+        "field": "event_src.category",
+        "value": "Network monitoring system",
+        "description": "Категория приложения или узла, зарегистрировавшего событие: Network monitoring system."
+      },
+      {
+        "field": "event_src.category",
+        "value": "Network security",
+        "description": "Категория приложения или узла, зарегистрировавшего событие: Network security."
+      },
+      {
+        "field": "event_src.category",
+        "value": "Operating system",
+        "description": "Категория приложения или узла, зарегистрировавшего событие: Operating system."
+      },
+      {
+        "field": "event_src.category",
+        "value": "Other",
+        "description": "Категория приложения или узла, зарегистрировавшего событие: Other."
+      },
+      {
+        "field": "event_src.category",
+        "value": "Physical security",
+        "description": "Категория приложения или узла, зарегистрировавшего событие: Physical security."
+      },
+      {
+        "field": "event_src.category",
+        "value": "Proxy server",
+        "description": "Категория приложения или узла, зарегистрировавшего событие: Proxy server."
+      },
+      {
+        "field": "event_src.category",
+        "value": "SCADA",
+        "description": "Категория приложения или узла, зарегистрировавшего событие: SCADA."
+      },
+      {
+        "field": "event_src.category",
+        "value": "SIEM",
+        "description": "Категория приложения или узла, зарегистрировавшего событие: SIEM."
+      },
+      {
+        "field": "event_src.category",
+        "value": "Storage device",
+        "description": "Категория приложения или узла, зарегистрировавшего событие: Storage device."
+      },
+      {
+        "field": "event_src.category",
+        "value": "Telecom",
+        "description": "Категория приложения или узла, зарегистрировавшего событие: Telecom."
+      },
+      {
+        "field": "event_src.category",
+        "value": "Terminal services",
+        "description": "Категория приложения или узла, зарегистрировавшего событие: Terminal services."
+      },
+      {
+        "field": "event_src.category",
+        "value": "VPN",
+        "description": "Категория приложения или узла, зарегистрировавшего событие: VPN."
+      },
+      {
+        "field": "event_src.category",
+        "value": "Virtualization",
+        "description": "Категория приложения или узла, зарегистрировавшего событие: Virtualization."
+      },
+      {
+        "field": "event_src.category",
+        "value": "Voice over IP",
+        "description": "Категория приложения или узла, зарегистрировавшего событие: Voice over IP."
+      },
+      {
+        "field": "event_src.category",
+        "value": "Web security",
+        "description": "Категория приложения или узла, зарегистрировавшего событие: Web security."
+      },
+      {
+        "field": "event_src.category",
+        "value": "Web server",
+        "description": "Категория приложения или узла, зарегистрировавшего событие: Web server."
+      },
+      {
+        "field": "event_src.category",
+        "value": "Wireless",
+        "description": "Категория приложения или узла, зарегистрировавшего событие: Wireless."
+      },
+      {
+        "field": "importance",
+        "value": "high",
+        "description": "Высокая важность"
+      },
+      {
+        "field": "importance",
+        "value": "info",
+        "description": "Информационное событие"
+      },
+      {
+        "field": "importance",
+        "value": "low",
+        "description": "Низкая важность"
+      },
+      {
+        "field": "importance",
+        "value": "medium",
+        "description": "Средняя важность"
+      },
+      {
+        "field": "logon_auth_method",
+        "value": "local",
+        "description": "Локальное подключение"
+      },
+      {
+        "field": "logon_auth_method",
+        "value": "remote",
+        "description": "Удалённое подключение"
+      },
+      {
+        "field": "object",
+        "value": "account",
+        "description": "Учётная запись"
+      },
+      {
+        "field": "object",
+        "value": "alert",
+        "description": "Оповещение"
+      },
+      {
+        "field": "object",
+        "value": "application",
+        "description": "Приложение"
+      },
+      {
+        "field": "object",
+        "value": "arp_table",
+        "description": "Таблица ARP"
+      },
+      {
+        "field": "object",
+        "value": "attack",
+        "description": "Атака"
+      },
+      {
+        "field": "object",
+        "value": "certificate",
+        "description": "Сертификат"
+      },
+      {
+        "field": "object",
+        "value": "check",
+        "description": "Проверка"
+      },
+      {
+        "field": "object",
+        "value": "client",
+        "description": "Клиент"
+      },
+      {
+        "field": "object",
+        "value": "cmdlet",
+        "description": "Командлет"
+      },
+      {
+        "field": "object",
+        "value": "command",
+        "description": "Команда"
+      },
+      {
+        "field": "object",
+        "value": "compliance",
+        "description": "Соответствие требованиям безопасности"
+      },
+      {
+        "field": "object",
+        "value": "computer",
+        "description": "Компьютер"
+      },
+      {
+        "field": "object",
+        "value": "configuration",
+        "description": "Конфигурация"
+      },
+      {
+        "field": "object",
+        "value": "connection",
+        "description": "Соединение"
+      },
+      {
+        "field": "object",
+        "value": "database",
+        "description": "База данных"
+      },
+      {
+        "field": "object",
+        "value": "db_object",
+        "description": "Объект базы данных"
+      },
+      {
+        "field": "object",
+        "value": "device",
+        "description": "Устройство"
+      },
+      {
+        "field": "object",
+        "value": "ds_object",
+        "description": "Объект службы каталогов"
+      },
+      {
+        "field": "object",
+        "value": "file",
+        "description": "Файл"
+      },
+      {
+        "field": "object",
+        "value": "file_object",
+        "description": "Объект файловой системы"
+      },
+      {
+        "field": "object",
+        "value": "flow",
+        "description": "Поток данных"
+      },
+      {
+        "field": "object",
+        "value": "handle",
+        "description": "Ссылка на ресурс в памяти процесса, файловый дескриптор"
+      },
+      {
+        "field": "object",
+        "value": "host",
+        "description": "Узел, для которого известен только IP- или MAC-адрес"
+      },
+      {
+        "field": "object",
+        "value": "infected_object",
+        "description": "Инфицированный объект"
+      },
+      {
+        "field": "object",
+        "value": "interface",
+        "description": "Интерфейс"
+      },
+      {
+        "field": "object",
+        "value": "ip_address",
+        "description": "IP-адрес"
+      },
+      {
+        "field": "object",
+        "value": "link",
+        "description": "Ссылка"
+      },
+      {
+        "field": "object",
+        "value": "log",
+        "description": "Файл журнала записи событий"
+      },
+      {
+        "field": "object",
+        "value": "logging",
+        "description": "Журналирование"
+      },
+      {
+        "field": "object",
+        "value": "mailbox",
+        "description": "Почтовый ящик"
+      },
+      {
+        "field": "object",
+        "value": "malware",
+        "description": "Вредоносный объект"
+      },
+      {
+        "field": "object",
+        "value": "message",
+        "description": "Сообщение"
+      },
+      {
+        "field": "object",
+        "value": "mode",
+        "description": "Режим"
+      },
+      {
+        "field": "object",
+        "value": "module",
+        "description": "Модуль"
+      },
+      {
+        "field": "object",
+        "value": "network",
+        "description": "Сеть"
+      },
+      {
+        "field": "object",
+        "value": "node",
+        "description": "Сетевой узел"
+      },
+      {
+        "field": "object",
+        "value": "package",
+        "description": "Дистрибутив приложения"
+      },
+      {
+        "field": "object",
+        "value": "packet",
+        "description": "Пакет"
+      },
+      {
+        "field": "object",
+        "value": "policy",
+        "description": "Политика"
+      },
+      {
+        "field": "object",
+        "value": "port",
+        "description": "Порт"
+      },
+      {
+        "field": "object",
+        "value": "process",
+        "description": "Процесс"
+      },
+      {
+        "field": "object",
+        "value": "profile",
+        "description": "Профиль"
+      },
+      {
+        "field": "object",
+        "value": "reg_object",
+        "description": "Объект системного реестра"
+      },
+      {
+        "field": "object",
+        "value": "report",
+        "description": "Отчёт"
+      },
+      {
+        "field": "object",
+        "value": "request",
+        "description": "Запрос"
+      },
+      {
+        "field": "object",
+        "value": "resource",
+        "description": "Ресурс"
+      },
+      {
+        "field": "object",
+        "value": "rule",
+        "description": "Правило"
+      },
+      {
+        "field": "object",
+        "value": "scan",
+        "description": "Результат сканирования"
+      },
+      {
+        "field": "object",
+        "value": "service",
+        "description": "Сервис"
+      },
+      {
+        "field": "object",
+        "value": "session",
+        "description": "Сессия"
+      },
+      {
+        "field": "object",
+        "value": "socket",
+        "description": "Программный интерфейс для передачи данных"
+      },
+      {
+        "field": "object",
+        "value": "system",
+        "description": "Система"
+      },
+      {
+        "field": "object",
+        "value": "table",
+        "description": "Таблица"
+      },
+      {
+        "field": "object",
+        "value": "task",
+        "description": "Задача"
+      },
+      {
+        "field": "object",
+        "value": "thread",
+        "description": "Поток команд"
+      },
+      {
+        "field": "object",
+        "value": "transaction",
+        "description": "Транзакция"
+      },
+      {
+        "field": "object",
+        "value": "translation",
+        "description": "Запись трансляции сетевого адреса в таблице NAT"
+      },
+      {
+        "field": "object",
+        "value": "trust",
+        "description": "Доверительное отношение, например между доменами"
+      },
+      {
+        "field": "object",
+        "value": "tunnel",
+        "description": "Туннель"
+      },
+      {
+        "field": "object",
+        "value": "update",
+        "description": "Обновление"
+      },
+      {
+        "field": "object",
+        "value": "user_group",
+        "description": "Группа пользователей"
+      },
+      {
+        "field": "object",
+        "value": "virtual_key",
+        "description": "Цифровой сертификат, токен или ключ аутентификации"
+      },
+      {
+        "field": "object",
+        "value": "virtual_machine",
+        "description": "Виртуальная машина"
+      },
+      {
+        "field": "object",
+        "value": "volume",
+        "description": "Том"
+      },
+      {
+        "field": "object",
+        "value": "vulnerability",
+        "description": "Уязвимость"
+      },
+      {
+        "field": "status",
+        "value": "failure",
+        "description": "Неуспешная попытка"
+      },
+      {
+        "field": "status",
+        "value": "ongoing",
+        "description": "Действие происходит в данный момент; результат выполнения ещё неизвестен"
+      },
+      {
+        "field": "status",
+        "value": "success",
+        "description": "Успешная попытка"
+      },
+      {
+        "field": "subject",
+        "value": "account",
+        "description": "Пользователь; действия выполняются от имени учётной записи"
+      },
+      {
+        "field": "subject",
+        "value": "application",
+        "description": "Приложение"
+      },
+      {
+        "field": "subject",
+        "value": "host",
+        "description": "Узел"
+      },
+      {
+        "field": "subject",
+        "value": "process",
+        "description": "Процесс"
+      },
+      {
+        "field": "subject",
+        "value": "rule",
+        "description": "Правило"
+      },
+      {
+        "field": "subject",
+        "value": "service",
+        "description": "Служба"
+      },
+      {
+        "field": "subject",
+        "value": "system",
+        "description": "Система"
+      }
+    ],
+    "categories": [
+      {
+        "generic": "Access",
+        "high": "Authentication",
+        "low": "Default Credentials",
+        "description": "Категория события MP SIEM: Access → Authentication → Default Credentials."
+      },
+      {
+        "generic": "Access",
+        "high": "Authentication",
+        "low": "Host",
+        "description": "Категория события MP SIEM: Access → Authentication → Host."
+      },
+      {
+        "generic": "Access",
+        "high": "Authentication",
+        "low": "Local",
+        "description": "Категория события MP SIEM: Access → Authentication → Local."
+      },
+      {
+        "generic": "Access",
+        "high": "Authentication",
+        "low": "Remote",
+        "description": "Категория события MP SIEM: Access → Authentication → Remote."
+      },
+      {
+        "generic": "Access",
+        "high": "Authentication",
+        "low": "Service",
+        "description": "Категория события MP SIEM: Access → Authentication → Service."
+      },
+      {
+        "generic": "Access",
+        "high": "Authentication",
+        "low": "Unknown Type",
+        "description": "Категория события MP SIEM: Access → Authentication → Unknown Type."
+      },
+      {
+        "generic": "Access",
+        "high": "Authorization",
+        "low": "Host",
+        "description": "Категория события MP SIEM: Access → Authorization → Host."
+      },
+      {
+        "generic": "Access",
+        "high": "Authorization",
+        "low": "Network",
+        "description": "Категория события MP SIEM: Access → Authorization → Network."
+      },
+      {
+        "generic": "Access",
+        "high": "Authorization",
+        "low": "Object",
+        "description": "Категория события MP SIEM: Access → Authorization → Object."
+      },
+      {
+        "generic": "Access",
+        "high": "Authorization",
+        "low": "User",
+        "description": "Категория события MP SIEM: Access → Authorization → User."
+      },
+      {
+        "generic": "Accounting",
+        "high": "Network Accounting",
+        "low": "Address Translation",
+        "description": "Категория события MP SIEM: Accounting → Network Accounting → Address Translation."
+      },
+      {
+        "generic": "Accounting",
+        "high": "Network Accounting",
+        "low": "Connections & Sessions",
+        "description": "Категория события MP SIEM: Accounting → Network Accounting → Connections & Sessions."
+      },
+      {
+        "generic": "Accounting",
+        "high": "Network Accounting",
+        "low": "Firewall Rules Usage",
+        "description": "Категория события MP SIEM: Accounting → Network Accounting → Firewall Rules Usage."
+      },
+      {
+        "generic": "Accounting",
+        "high": "Network Accounting",
+        "low": "Traffic",
+        "description": "Категория события MP SIEM: Accounting → Network Accounting → Traffic."
+      },
+      {
+        "generic": "Accounting",
+        "high": "User Accounting",
+        "low": "Administrative Privilege Use",
+        "description": "Категория события MP SIEM: Accounting → User Accounting → Administrative Privilege Use."
+      },
+      {
+        "generic": "Accounting",
+        "high": "User Accounting",
+        "low": "Application & Component Launching",
+        "description": "Категория события MP SIEM: Accounting → User Accounting → Application & Component Launching."
+      },
+      {
+        "generic": "Accounting",
+        "high": "User Accounting",
+        "low": "Command Execution",
+        "description": "Категория события MP SIEM: Accounting → User Accounting → Command Execution."
+      },
+      {
+        "generic": "Accounting",
+        "high": "User Accounting",
+        "low": "Data Usage",
+        "description": "Категория события MP SIEM: Accounting → User Accounting → Data Usage."
+      },
+      {
+        "generic": "Accounting",
+        "high": "User Accounting",
+        "low": "System Accounts Use",
+        "description": "Категория события MP SIEM: Accounting → User Accounting → System Accounts Use."
+      },
+      {
+        "generic": "Accounting",
+        "high": "User Accounting",
+        "low": "System Application Launching",
+        "description": "Категория события MP SIEM: Accounting → User Accounting → System Application Launching."
+      },
+      {
+        "generic": "Anomaly",
+        "high": "Network Anomaly",
+        "low": "Detection",
+        "description": "Категория события MP SIEM: Anomaly → Network Anomaly → Detection."
+      },
+      {
+        "generic": "Asset & Asset Group Management",
+        "high": "Asset Group Management",
+        "low": "Activation",
+        "description": "Категория события MP SIEM: Asset & Asset Group Management → Asset Group Management → Activation."
+      },
+      {
+        "generic": "Asset & Asset Group Management",
+        "high": "Asset Group Management",
+        "low": "Creation",
+        "description": "Категория события MP SIEM: Asset & Asset Group Management → Asset Group Management → Creation."
+      },
+      {
+        "generic": "Asset & Asset Group Management",
+        "high": "Asset Group Management",
+        "low": "Deactivation",
+        "description": "Категория события MP SIEM: Asset & Asset Group Management → Asset Group Management → Deactivation."
+      },
+      {
+        "generic": "Asset & Asset Group Management",
+        "high": "Asset Group Management",
+        "low": "Deletion",
+        "description": "Категория события MP SIEM: Asset & Asset Group Management → Asset Group Management → Deletion."
+      },
+      {
+        "generic": "Asset & Asset Group Management",
+        "high": "Asset Group Management",
+        "low": "Modification",
+        "description": "Категория события MP SIEM: Asset & Asset Group Management → Asset Group Management → Modification."
+      },
+      {
+        "generic": "Asset & Asset Group Management",
+        "high": "Asset Management",
+        "low": "Domain Activation",
+        "description": "Категория события MP SIEM: Asset & Asset Group Management → Asset Management → Domain Activation."
+      },
+      {
+        "generic": "Asset & Asset Group Management",
+        "high": "Asset Management",
+        "low": "Domain Creation",
+        "description": "Категория события MP SIEM: Asset & Asset Group Management → Asset Management → Domain Creation."
+      },
+      {
+        "generic": "Asset & Asset Group Management",
+        "high": "Asset Management",
+        "low": "Domain Data Collection",
+        "description": "Категория события MP SIEM: Asset & Asset Group Management → Asset Management → Domain Data Collection."
+      },
+      {
+        "generic": "Asset & Asset Group Management",
+        "high": "Asset Management",
+        "low": "Domain Deactivation",
+        "description": "Категория события MP SIEM: Asset & Asset Group Management → Asset Management → Domain Deactivation."
+      },
+      {
+        "generic": "Asset & Asset Group Management",
+        "high": "Asset Management",
+        "low": "Domain Deletion",
+        "description": "Категория события MP SIEM: Asset & Asset Group Management → Asset Management → Domain Deletion."
+      },
+      {
+        "generic": "Asset & Asset Group Management",
+        "high": "Asset Management",
+        "low": "Host Activation",
+        "description": "Категория события MP SIEM: Asset & Asset Group Management → Asset Management → Host Activation."
+      },
+      {
+        "generic": "Asset & Asset Group Management",
+        "high": "Asset Management",
+        "low": "Host Creation",
+        "description": "Категория события MP SIEM: Asset & Asset Group Management → Asset Management → Host Creation."
+      },
+      {
+        "generic": "Asset & Asset Group Management",
+        "high": "Asset Management",
+        "low": "Host Data Collection",
+        "description": "Категория события MP SIEM: Asset & Asset Group Management → Asset Management → Host Data Collection."
+      },
+      {
+        "generic": "Asset & Asset Group Management",
+        "high": "Asset Management",
+        "low": "Host Deactivation",
+        "description": "Категория события MP SIEM: Asset & Asset Group Management → Asset Management → Host Deactivation."
+      },
+      {
+        "generic": "Asset & Asset Group Management",
+        "high": "Asset Management",
+        "low": "Host Deletion",
+        "description": "Категория события MP SIEM: Asset & Asset Group Management → Asset Management → Host Deletion."
+      },
+      {
+        "generic": "Asset & Asset Group Management",
+        "high": "Asset Management",
+        "low": "Hypervisor Activation",
+        "description": "Категория события MP SIEM: Asset & Asset Group Management → Asset Management → Hypervisor Activation."
+      },
+      {
+        "generic": "Asset & Asset Group Management",
+        "high": "Asset Management",
+        "low": "Hypervisor Creation",
+        "description": "Категория события MP SIEM: Asset & Asset Group Management → Asset Management → Hypervisor Creation."
+      },
+      {
+        "generic": "Asset & Asset Group Management",
+        "high": "Asset Management",
+        "low": "Hypervisor Data Collection",
+        "description": "Категория события MP SIEM: Asset & Asset Group Management → Asset Management → Hypervisor Data Collection."
+      },
+      {
+        "generic": "Asset & Asset Group Management",
+        "high": "Asset Management",
+        "low": "Hypervisor Deactivation",
+        "description": "Категория события MP SIEM: Asset & Asset Group Management → Asset Management → Hypervisor Deactivation."
+      },
+      {
+        "generic": "Asset & Asset Group Management",
+        "high": "Asset Management",
+        "low": "Hypervisor Deletion",
+        "description": "Категория события MP SIEM: Asset & Asset Group Management → Asset Management → Hypervisor Deletion."
+      },
+      {
+        "generic": "Asset & Asset Group Management",
+        "high": "Asset Management",
+        "low": "Link Activation",
+        "description": "Категория события MP SIEM: Asset & Asset Group Management → Asset Management → Link Activation."
+      },
+      {
+        "generic": "Asset & Asset Group Management",
+        "high": "Asset Management",
+        "low": "Link Creation",
+        "description": "Категория события MP SIEM: Asset & Asset Group Management → Asset Management → Link Creation."
+      },
+      {
+        "generic": "Asset & Asset Group Management",
+        "high": "Asset Management",
+        "low": "Link Data Collection",
+        "description": "Категория события MP SIEM: Asset & Asset Group Management → Asset Management → Link Data Collection."
+      },
+      {
+        "generic": "Asset & Asset Group Management",
+        "high": "Asset Management",
+        "low": "Link Deactivation",
+        "description": "Категория события MP SIEM: Asset & Asset Group Management → Asset Management → Link Deactivation."
+      },
+      {
+        "generic": "Asset & Asset Group Management",
+        "high": "Asset Management",
+        "low": "Link Deletion",
+        "description": "Категория события MP SIEM: Asset & Asset Group Management → Asset Management → Link Deletion."
+      },
+      {
+        "generic": "Asset & Asset Group Management",
+        "high": "Asset Management",
+        "low": "Network Activation",
+        "description": "Категория события MP SIEM: Asset & Asset Group Management → Asset Management → Network Activation."
+      },
+      {
+        "generic": "Asset & Asset Group Management",
+        "high": "Asset Management",
+        "low": "Network Creation",
+        "description": "Категория события MP SIEM: Asset & Asset Group Management → Asset Management → Network Creation."
+      },
+      {
+        "generic": "Asset & Asset Group Management",
+        "high": "Asset Management",
+        "low": "Network Data Collection",
+        "description": "Категория события MP SIEM: Asset & Asset Group Management → Asset Management → Network Data Collection."
+      },
+      {
+        "generic": "Asset & Asset Group Management",
+        "high": "Asset Management",
+        "low": "Network Deactivation",
+        "description": "Категория события MP SIEM: Asset & Asset Group Management → Asset Management → Network Deactivation."
+      },
+      {
+        "generic": "Asset & Asset Group Management",
+        "high": "Asset Management",
+        "low": "Network Deletion",
+        "description": "Категория события MP SIEM: Asset & Asset Group Management → Asset Management → Network Deletion."
+      },
+      {
+        "generic": "Asset & Asset Group Management",
+        "high": "Asset Management",
+        "low": "Virtual Host Activation",
+        "description": "Категория события MP SIEM: Asset & Asset Group Management → Asset Management → Virtual Host Activation."
+      },
+      {
+        "generic": "Asset & Asset Group Management",
+        "high": "Asset Management",
+        "low": "Virtual Host Creation",
+        "description": "Категория события MP SIEM: Asset & Asset Group Management → Asset Management → Virtual Host Creation."
+      },
+      {
+        "generic": "Asset & Asset Group Management",
+        "high": "Asset Management",
+        "low": "Virtual Host Data Collection",
+        "description": "Категория события MP SIEM: Asset & Asset Group Management → Asset Management → Virtual Host Data Collection."
+      },
+      {
+        "generic": "Asset & Asset Group Management",
+        "high": "Asset Management",
+        "low": "Virtual Host Deactivation",
+        "description": "Категория события MP SIEM: Asset & Asset Group Management → Asset Management → Virtual Host Deactivation."
+      },
+      {
+        "generic": "Asset & Asset Group Management",
+        "high": "Asset Management",
+        "low": "Virtual Host Deletion",
+        "description": "Категория события MP SIEM: Asset & Asset Group Management → Asset Management → Virtual Host Deletion."
+      },
+      {
+        "generic": "Attacks & Recon",
+        "high": "Attack",
+        "low": "Bruteforce",
+        "description": "Категория события MP SIEM: Attacks & Recon → Attack → Bruteforce."
+      },
+      {
+        "generic": "Attacks & Recon",
+        "high": "Attack",
+        "low": "Complex Attack",
+        "description": "Категория события MP SIEM: Attacks & Recon → Attack → Complex Attack."
+      },
+      {
+        "generic": "Attacks & Recon",
+        "high": "Attack",
+        "low": "DDoS",
+        "description": "Категория события MP SIEM: Attacks & Recon → Attack → DDoS."
+      },
+      {
+        "generic": "Attacks & Recon",
+        "high": "Attack",
+        "low": "DoS",
+        "description": "Категория события MP SIEM: Attacks & Recon → Attack → DoS."
+      },
+      {
+        "generic": "Attacks & Recon",
+        "high": "Attack",
+        "low": "HIPS Alert",
+        "description": "Категория события MP SIEM: Attacks & Recon → Attack → HIPS Alert."
+      },
+      {
+        "generic": "Attacks & Recon",
+        "high": "Attack",
+        "low": "IDS/IPS Alert",
+        "description": "Категория события MP SIEM: Attacks & Recon → Attack → IDS/IPS Alert."
+      },
+      {
+        "generic": "Attacks & Recon",
+        "high": "Attack",
+        "low": "Identity Theft",
+        "description": "Категория события MP SIEM: Attacks & Recon → Attack → Identity Theft."
+      },
+      {
+        "generic": "Attacks & Recon",
+        "high": "Attack",
+        "low": "Miscellaneous",
+        "description": "Категория события MP SIEM: Attacks & Recon → Attack → Miscellaneous."
+      },
+      {
+        "generic": "Attacks & Recon",
+        "high": "Attack",
+        "low": "Network Attack",
+        "description": "Категория события MP SIEM: Attacks & Recon → Attack → Network Attack."
+      },
+      {
+        "generic": "Attacks & Recon",
+        "high": "Attack",
+        "low": "Post Compromise",
+        "description": "Категория события MP SIEM: Attacks & Recon → Attack → Post Compromise."
+      },
+      {
+        "generic": "Attacks & Recon",
+        "high": "Attack",
+        "low": "Potential Attack",
+        "description": "Категория события MP SIEM: Attacks & Recon → Attack → Potential Attack."
+      },
+      {
+        "generic": "Attacks & Recon",
+        "high": "Attack",
+        "low": "Privilege Escalation",
+        "description": "Категория события MP SIEM: Attacks & Recon → Attack → Privilege Escalation."
+      },
+      {
+        "generic": "Attacks & Recon",
+        "high": "Attack",
+        "low": "Spam Attack",
+        "description": "Категория события MP SIEM: Attacks & Recon → Attack → Spam Attack."
+      },
+      {
+        "generic": "Attacks & Recon",
+        "high": "Attack",
+        "low": "Vulnerability Exploitation",
+        "description": "Категория события MP SIEM: Attacks & Recon → Attack → Vulnerability Exploitation."
+      },
+      {
+        "generic": "Attacks & Recon",
+        "high": "Recon",
+        "low": "Crawling/Dictionary Bruteforce",
+        "description": "Категория события MP SIEM: Attacks & Recon → Recon → Crawling/Dictionary Bruteforce."
+      },
+      {
+        "generic": "Attacks & Recon",
+        "high": "Recon",
+        "low": "Enumeration",
+        "description": "Категория события MP SIEM: Attacks & Recon → Recon → Enumeration."
+      },
+      {
+        "generic": "Attacks & Recon",
+        "high": "Recon",
+        "low": "Fingerprinting",
+        "description": "Категория события MP SIEM: Attacks & Recon → Recon → Fingerprinting."
+      },
+      {
+        "generic": "Attacks & Recon",
+        "high": "Recon",
+        "low": "Network Scan",
+        "description": "Категория события MP SIEM: Attacks & Recon → Recon → Network Scan."
+      },
+      {
+        "generic": "Attacks & Recon",
+        "high": "Recon",
+        "low": "OS Discovery",
+        "description": "Категория события MP SIEM: Attacks & Recon → Recon → OS Discovery."
+      },
+      {
+        "generic": "Attacks & Recon",
+        "high": "Recon",
+        "low": "Port Discovery",
+        "description": "Категория события MP SIEM: Attacks & Recon → Recon → Port Discovery."
+      },
+      {
+        "generic": "Attacks & Recon",
+        "high": "Recon",
+        "low": "Service Discovery",
+        "description": "Категория события MP SIEM: Attacks & Recon → Recon → Service Discovery."
+      },
+      {
+        "generic": "Business Continuity",
+        "high": "Backup/Restore",
+        "low": "Backup Jobs",
+        "description": "Категория события MP SIEM: Business Continuity → Backup/Restore → Backup Jobs."
+      },
+      {
+        "generic": "Business Continuity",
+        "high": "Backup/Restore",
+        "low": "Backup Schedule",
+        "description": "Категория события MP SIEM: Business Continuity → Backup/Restore → Backup Schedule."
+      },
+      {
+        "generic": "Business Continuity",
+        "high": "Backup/Restore",
+        "low": "Restore Jobs",
+        "description": "Категория события MP SIEM: Business Continuity → Backup/Restore → Restore Jobs."
+      },
+      {
+        "generic": "Business Continuity",
+        "high": "Cluster Nodes",
+        "low": "Connection",
+        "description": "Категория события MP SIEM: Business Continuity → Cluster Nodes → Connection."
+      },
+      {
+        "generic": "Business Continuity",
+        "high": "Cluster Nodes",
+        "low": "Creation",
+        "description": "Категория события MP SIEM: Business Continuity → Cluster Nodes → Creation."
+      },
+      {
+        "generic": "Business Continuity",
+        "high": "Cluster Nodes",
+        "low": "Deletion",
+        "description": "Категория события MP SIEM: Business Continuity → Cluster Nodes → Deletion."
+      },
+      {
+        "generic": "Business Continuity",
+        "high": "Cluster Nodes",
+        "low": "Replication",
+        "description": "Категория события MP SIEM: Business Continuity → Cluster Nodes → Replication."
+      },
+      {
+        "generic": "Business Continuity",
+        "high": "Replication",
+        "low": "Data",
+        "description": "Категория события MP SIEM: Business Continuity → Replication → Data."
+      },
+      {
+        "generic": "Compliance",
+        "high": "Policy Violation",
+        "low": "AV Policy Violation",
+        "description": "Категория события MP SIEM: Compliance → Policy Violation → AV Policy Violation."
+      },
+      {
+        "generic": "Compliance",
+        "high": "Policy Violation",
+        "low": "Application Policy Violation",
+        "description": "Категория события MP SIEM: Compliance → Policy Violation → Application Policy Violation."
+      },
+      {
+        "generic": "Compliance",
+        "high": "Policy Violation",
+        "low": "Confidentiality Policy Violation",
+        "description": "Категория события MP SIEM: Compliance → Policy Violation → Confidentiality Policy Violation."
+      },
+      {
+        "generic": "Compliance",
+        "high": "Policy Violation",
+        "low": "Database Policy Violation",
+        "description": "Категория события MP SIEM: Compliance → Policy Violation → Database Policy Violation."
+      },
+      {
+        "generic": "Compliance",
+        "high": "Policy Violation",
+        "low": "IM Policy Violation",
+        "description": "Категория события MP SIEM: Compliance → Policy Violation → IM Policy Violation."
+      },
+      {
+        "generic": "Compliance",
+        "high": "Policy Violation",
+        "low": "IP Access Policy Violation",
+        "description": "Категория события MP SIEM: Compliance → Policy Violation → IP Access Policy Violation."
+      },
+      {
+        "generic": "Compliance",
+        "high": "Policy Violation",
+        "low": "Mail Policy Violation",
+        "description": "Категория события MP SIEM: Compliance → Policy Violation → Mail Policy Violation."
+      },
+      {
+        "generic": "Compliance",
+        "high": "Policy Violation",
+        "low": "P2P Policy Violation",
+        "description": "Категория события MP SIEM: Compliance → Policy Violation → P2P Policy Violation."
+      },
+      {
+        "generic": "Compliance",
+        "high": "Policy Violation",
+        "low": "Remote Access Policy Violation",
+        "description": "Категория события MP SIEM: Compliance → Policy Violation → Remote Access Policy Violation."
+      },
+      {
+        "generic": "Compliance",
+        "high": "Policy Violation",
+        "low": "System Update Policy Violation",
+        "description": "Категория события MP SIEM: Compliance → Policy Violation → System Update Policy Violation."
+      },
+      {
+        "generic": "Compliance",
+        "high": "Policy Violation",
+        "low": "Web Policy Violation",
+        "description": "Категория события MP SIEM: Compliance → Policy Violation → Web Policy Violation."
+      },
+      {
+        "generic": "Configuration Management",
+        "high": "Network Configuration",
+        "low": "Access Rule Modification",
+        "description": "Категория события MP SIEM: Configuration Management → Network Configuration → Access Rule Modification."
+      },
+      {
+        "generic": "Configuration Management",
+        "high": "Network Configuration",
+        "low": "Interface Modification",
+        "description": "Категория события MP SIEM: Configuration Management → Network Configuration → Interface Modification."
+      },
+      {
+        "generic": "Configuration Management",
+        "high": "Network Configuration",
+        "low": "Link Modification",
+        "description": "Категория события MP SIEM: Configuration Management → Network Configuration → Link Modification."
+      },
+      {
+        "generic": "Configuration Management",
+        "high": "Network Configuration",
+        "low": "Port Detection",
+        "description": "Категория события MP SIEM: Configuration Management → Network Configuration → Port Detection."
+      },
+      {
+        "generic": "Configuration Management",
+        "high": "Network Configuration",
+        "low": "Port State Change",
+        "description": "Категория события MP SIEM: Configuration Management → Network Configuration → Port State Change."
+      },
+      {
+        "generic": "Configuration Management",
+        "high": "Network Configuration",
+        "low": "Routing Changes",
+        "description": "Категория события MP SIEM: Configuration Management → Network Configuration → Routing Changes."
+      },
+      {
+        "generic": "Configuration Management",
+        "high": "Rights Management",
+        "low": "Critical Privileges",
+        "description": "Категория события MP SIEM: Configuration Management → Rights Management → Critical Privileges."
+      },
+      {
+        "generic": "Configuration Management",
+        "high": "Rights Management",
+        "low": "Group Assignment",
+        "description": "Категория события MP SIEM: Configuration Management → Rights Management → Group Assignment."
+      },
+      {
+        "generic": "Configuration Management",
+        "high": "Rights Management",
+        "low": "Group Creation",
+        "description": "Категория события MP SIEM: Configuration Management → Rights Management → Group Creation."
+      },
+      {
+        "generic": "Configuration Management",
+        "high": "Rights Management",
+        "low": "Group Deletion",
+        "description": "Категория события MP SIEM: Configuration Management → Rights Management → Group Deletion."
+      },
+      {
+        "generic": "Configuration Management",
+        "high": "Rights Management",
+        "low": "Group Modification",
+        "description": "Категория события MP SIEM: Configuration Management → Rights Management → Group Modification."
+      },
+      {
+        "generic": "Configuration Management",
+        "high": "Rights Management",
+        "low": "Object Rights Modification",
+        "description": "Категория события MP SIEM: Configuration Management → Rights Management → Object Rights Modification."
+      },
+      {
+        "generic": "Configuration Management",
+        "high": "Rights Management",
+        "low": "Rights Assignment",
+        "description": "Категория события MP SIEM: Configuration Management → Rights Management → Rights Assignment."
+      },
+      {
+        "generic": "Configuration Management",
+        "high": "Rights Management",
+        "low": "Rights Revocation",
+        "description": "Категория события MP SIEM: Configuration Management → Rights Management → Rights Revocation."
+      },
+      {
+        "generic": "Configuration Management",
+        "high": "Rights Management",
+        "low": "Role Assignment",
+        "description": "Категория события MP SIEM: Configuration Management → Rights Management → Role Assignment."
+      },
+      {
+        "generic": "Configuration Management",
+        "high": "Rights Management",
+        "low": "Role Creation",
+        "description": "Категория события MP SIEM: Configuration Management → Rights Management → Role Creation."
+      },
+      {
+        "generic": "Configuration Management",
+        "high": "Rights Management",
+        "low": "Role Deletion",
+        "description": "Категория события MP SIEM: Configuration Management → Rights Management → Role Deletion."
+      },
+      {
+        "generic": "Configuration Management",
+        "high": "Rights Management",
+        "low": "Role Modification",
+        "description": "Категория события MP SIEM: Configuration Management → Rights Management → Role Modification."
+      },
+      {
+        "generic": "Configuration Management",
+        "high": "Rights Management",
+        "low": "Role Revocation",
+        "description": "Категория события MP SIEM: Configuration Management → Rights Management → Role Revocation."
+      },
+      {
+        "generic": "Configuration Management",
+        "high": "Rights Management",
+        "low": "User Membership Modification",
+        "description": "Категория события MP SIEM: Configuration Management → Rights Management → User Membership Modification."
+      },
+      {
+        "generic": "Configuration Management",
+        "high": "System Configuration Management",
+        "low": "Application Object Modification",
+        "description": "Категория события MP SIEM: Configuration Management → System Configuration Management → Application Object Modification."
+      },
+      {
+        "generic": "Configuration Management",
+        "high": "System Configuration Management",
+        "low": "Application Settings Modification",
+        "description": "Категория события MP SIEM: Configuration Management → System Configuration Management → Application Settings Modification."
+      },
+      {
+        "generic": "Configuration Management",
+        "high": "System Configuration Management",
+        "low": "Network Service Detection",
+        "description": "Категория события MP SIEM: Configuration Management → System Configuration Management → Network Service Detection."
+      },
+      {
+        "generic": "Configuration Management",
+        "high": "System Configuration Management",
+        "low": "Network Service Modification",
+        "description": "Категория события MP SIEM: Configuration Management → System Configuration Management → Network Service Modification."
+      },
+      {
+        "generic": "Configuration Management",
+        "high": "System Configuration Management",
+        "low": "Network Service Resumption",
+        "description": "Категория события MP SIEM: Configuration Management → System Configuration Management → Network Service Resumption."
+      },
+      {
+        "generic": "Configuration Management",
+        "high": "System Configuration Management",
+        "low": "Network Service Stoppage",
+        "description": "Категория события MP SIEM: Configuration Management → System Configuration Management → Network Service Stoppage."
+      },
+      {
+        "generic": "Configuration Management",
+        "high": "System Configuration Management",
+        "low": "OS Service Detection",
+        "description": "Категория события MP SIEM: Configuration Management → System Configuration Management → OS Service Detection."
+      },
+      {
+        "generic": "Configuration Management",
+        "high": "System Configuration Management",
+        "low": "OS Service Modification",
+        "description": "Категория события MP SIEM: Configuration Management → System Configuration Management → OS Service Modification."
+      },
+      {
+        "generic": "Configuration Management",
+        "high": "System Configuration Management",
+        "low": "OS Service Resumption",
+        "description": "Категория события MP SIEM: Configuration Management → System Configuration Management → OS Service Resumption."
+      },
+      {
+        "generic": "Configuration Management",
+        "high": "System Configuration Management",
+        "low": "OS Service Stoppage",
+        "description": "Категория события MP SIEM: Configuration Management → System Configuration Management → OS Service Stoppage."
+      },
+      {
+        "generic": "Configuration Management",
+        "high": "System Configuration Management",
+        "low": "OS Settings Modification",
+        "description": "Категория события MP SIEM: Configuration Management → System Configuration Management → OS Settings Modification."
+      },
+      {
+        "generic": "Configuration Management",
+        "high": "System Configuration Management",
+        "low": "Security Settings Modification",
+        "description": "Категория события MP SIEM: Configuration Management → System Configuration Management → Security Settings Modification."
+      },
+      {
+        "generic": "Configuration Management",
+        "high": "User Management",
+        "low": "Creation",
+        "description": "Категория события MP SIEM: Configuration Management → User Management → Creation."
+      },
+      {
+        "generic": "Configuration Management",
+        "high": "User Management",
+        "low": "Deletion",
+        "description": "Категория события MP SIEM: Configuration Management → User Management → Deletion."
+      },
+      {
+        "generic": "Configuration Management",
+        "high": "User Management",
+        "low": "Detection",
+        "description": "Категория события MP SIEM: Configuration Management → User Management → Detection."
+      },
+      {
+        "generic": "Configuration Management",
+        "high": "User Management",
+        "low": "External User Connection",
+        "description": "Категория события MP SIEM: Configuration Management → User Management → External User Connection."
+      },
+      {
+        "generic": "Configuration Management",
+        "high": "User Management",
+        "low": "Locking",
+        "description": "Категория события MP SIEM: Configuration Management → User Management → Locking."
+      },
+      {
+        "generic": "Configuration Management",
+        "high": "User Management",
+        "low": "Modification",
+        "description": "Категория события MP SIEM: Configuration Management → User Management → Modification."
+      },
+      {
+        "generic": "Configuration Management",
+        "high": "User Management",
+        "low": "Unlocking",
+        "description": "Категория события MP SIEM: Configuration Management → User Management → Unlocking."
+      },
+      {
+        "generic": "Hacktool",
+        "high": "Bruteforcer",
+        "low": "Deletion",
+        "description": "Категория события MP SIEM: Hacktool → Bruteforcer → Deletion."
+      },
+      {
+        "generic": "Hacktool",
+        "high": "Bruteforcer",
+        "low": "Detection",
+        "description": "Категория события MP SIEM: Hacktool → Bruteforcer → Detection."
+      },
+      {
+        "generic": "Hacktool",
+        "high": "Bruteforcer",
+        "low": "Exploitation",
+        "description": "Категория события MP SIEM: Hacktool → Bruteforcer → Exploitation."
+      },
+      {
+        "generic": "Hacktool",
+        "high": "Bruteforcer",
+        "low": "Installation",
+        "description": "Категория события MP SIEM: Hacktool → Bruteforcer → Installation."
+      },
+      {
+        "generic": "Hardware Management",
+        "high": "CPU Management",
+        "low": "CPU Detection",
+        "description": "Категория события MP SIEM: Hardware Management → CPU Management → CPU Detection."
+      },
+      {
+        "generic": "Hardware Management",
+        "high": "CPU Management",
+        "low": "CPU Resources Change",
+        "description": "Категория события MP SIEM: Hardware Management → CPU Management → CPU Resources Change."
+      },
+      {
+        "generic": "Hardware Management",
+        "high": "External Device Management",
+        "low": "Bluetooth pairing",
+        "description": "Категория события MP SIEM: Hardware Management → External Device Management → Bluetooth pairing."
+      },
+      {
+        "generic": "Hardware Management",
+        "high": "External Device Management",
+        "low": "Mobile device",
+        "description": "Категория события MP SIEM: Hardware Management → External Device Management → Mobile device."
+      },
+      {
+        "generic": "Hardware Management",
+        "high": "External Device Management",
+        "low": "Printer",
+        "description": "Категория события MP SIEM: Hardware Management → External Device Management → Printer."
+      },
+      {
+        "generic": "Hardware Management",
+        "high": "External Device Management",
+        "low": "Scanner",
+        "description": "Категория события MP SIEM: Hardware Management → External Device Management → Scanner."
+      },
+      {
+        "generic": "Hardware Management",
+        "high": "External Device Management",
+        "low": "USB Device",
+        "description": "Категория события MP SIEM: Hardware Management → External Device Management → USB Device."
+      },
+      {
+        "generic": "Hardware Management",
+        "high": "External Storage Management",
+        "low": "External Disk Detection",
+        "description": "Категория события MP SIEM: Hardware Management → External Storage Management → External Disk Detection."
+      },
+      {
+        "generic": "Hardware Management",
+        "high": "External Storage Management",
+        "low": "External Disk Mounting",
+        "description": "Категория события MP SIEM: Hardware Management → External Storage Management → External Disk Mounting."
+      },
+      {
+        "generic": "Hardware Management",
+        "high": "External Storage Management",
+        "low": "External Disk Unmounting",
+        "description": "Категория события MP SIEM: Hardware Management → External Storage Management → External Disk Unmounting."
+      },
+      {
+        "generic": "Hardware Management",
+        "high": "External Storage Management",
+        "low": "SAN/NAS Detection",
+        "description": "Категория события MP SIEM: Hardware Management → External Storage Management → SAN/NAS Detection."
+      },
+      {
+        "generic": "Hardware Management",
+        "high": "External Storage Management",
+        "low": "SAN/NAS Mounting",
+        "description": "Категория события MP SIEM: Hardware Management → External Storage Management → SAN/NAS Mounting."
+      },
+      {
+        "generic": "Hardware Management",
+        "high": "External Storage Management",
+        "low": "SAN/NAS Unmounting",
+        "description": "Категория события MP SIEM: Hardware Management → External Storage Management → SAN/NAS Unmounting."
+      },
+      {
+        "generic": "Hardware Management",
+        "high": "Hardware inventory",
+        "low": "Hardware Configuration Errors",
+        "description": "Категория события MP SIEM: Hardware Management → Hardware inventory → Hardware Configuration Errors."
+      },
+      {
+        "generic": "Hardware Management",
+        "high": "Hardware inventory",
+        "low": "Hardware Detection",
+        "description": "Категория события MP SIEM: Hardware Management → Hardware inventory → Hardware Detection."
+      },
+      {
+        "generic": "Hardware Management",
+        "high": "Hardware inventory",
+        "low": "Hardware Installation",
+        "description": "Категория события MP SIEM: Hardware Management → Hardware inventory → Hardware Installation."
+      },
+      {
+        "generic": "Hardware Management",
+        "high": "Hardware inventory",
+        "low": "Hardware Removal",
+        "description": "Категория события MP SIEM: Hardware Management → Hardware inventory → Hardware Removal."
+      },
+      {
+        "generic": "Hardware Management",
+        "high": "Memory Management",
+        "low": "Memory Resizing",
+        "description": "Категория события MP SIEM: Hardware Management → Memory Management → Memory Resizing."
+      },
+      {
+        "generic": "Hardware Management",
+        "high": "Storage Management",
+        "low": "Local Storage",
+        "description": "Категория события MP SIEM: Hardware Management → Storage Management → Local Storage."
+      },
+      {
+        "generic": "Hardware Management",
+        "high": "Storage Management",
+        "low": "Network Storage",
+        "description": "Категория события MP SIEM: Hardware Management → Storage Management → Network Storage."
+      },
+      {
+        "generic": "Incident Management",
+        "high": "Incident",
+        "low": "Creation",
+        "description": "Категория события MP SIEM: Incident Management → Incident → Creation."
+      },
+      {
+        "generic": "Incident Management",
+        "high": "Incident",
+        "low": "Deletion",
+        "description": "Категория события MP SIEM: Incident Management → Incident → Deletion."
+      },
+      {
+        "generic": "Incident Management",
+        "high": "Incident",
+        "low": "Detection",
+        "description": "Категория события MP SIEM: Incident Management → Incident → Detection."
+      },
+      {
+        "generic": "Incident Management",
+        "high": "Incident",
+        "low": "Modification",
+        "description": "Категория события MP SIEM: Incident Management → Incident → Modification."
+      },
+      {
+        "generic": "Incident Management",
+        "high": "Incident",
+        "low": "Remediation",
+        "description": "Категория события MP SIEM: Incident Management → Incident → Remediation."
+      },
+      {
+        "generic": "Information Management",
+        "high": "Data Loss",
+        "low": "Accidental",
+        "description": "Категория события MP SIEM: Information Management → Data Loss → Accidental."
+      },
+      {
+        "generic": "Information Management",
+        "high": "Data Loss",
+        "low": "Deliberate",
+        "description": "Категория события MP SIEM: Information Management → Data Loss → Deliberate."
+      },
+      {
+        "generic": "Information Management",
+        "high": "Data Modification",
+        "low": "By System",
+        "description": "Категория события MP SIEM: Information Management → Data Modification → By System."
+      },
+      {
+        "generic": "Information Management",
+        "high": "Data Modification",
+        "low": "By User",
+        "description": "Категория события MP SIEM: Information Management → Data Modification → By User."
+      },
+      {
+        "generic": "Information Management",
+        "high": "Information Access Control",
+        "low": "Assignment",
+        "description": "Категория события MP SIEM: Information Management → Information Access Control → Assignment."
+      },
+      {
+        "generic": "Information Management",
+        "high": "Information Access Control",
+        "low": "Object Access",
+        "description": "Категория события MP SIEM: Information Management → Information Access Control → Object Access."
+      },
+      {
+        "generic": "Information Management",
+        "high": "Information Access Control",
+        "low": "Settings",
+        "description": "Категория события MP SIEM: Information Management → Information Access Control → Settings."
+      },
+      {
+        "generic": "Information Management",
+        "high": "Information Labeling",
+        "low": "Label Assignment",
+        "description": "Категория события MP SIEM: Information Management → Information Labeling → Label Assignment."
+      },
+      {
+        "generic": "Information Management",
+        "high": "Information Labeling",
+        "low": "Label Management",
+        "description": "Категория события MP SIEM: Information Management → Information Labeling → Label Management."
+      },
+      {
+        "generic": "Information Management",
+        "high": "Information Leak",
+        "low": "Confidential Information",
+        "description": "Категория события MP SIEM: Information Management → Information Leak → Confidential Information."
+      },
+      {
+        "generic": "Information Management",
+        "high": "Information Leak",
+        "low": "Critical Information",
+        "description": "Категория события MP SIEM: Information Management → Information Leak → Critical Information."
+      },
+      {
+        "generic": "Information Management",
+        "high": "Leakage Channel",
+        "low": "External Drive",
+        "description": "Категория события MP SIEM: Information Management → Leakage Channel → External Drive."
+      },
+      {
+        "generic": "Information Management",
+        "high": "Leakage Channel",
+        "low": "Mail",
+        "description": "Категория события MP SIEM: Information Management → Leakage Channel → Mail."
+      },
+      {
+        "generic": "Information Management",
+        "high": "Leakage Channel",
+        "low": "Mobile Device",
+        "description": "Категория события MP SIEM: Information Management → Leakage Channel → Mobile Device."
+      },
+      {
+        "generic": "Information Management",
+        "high": "Leakage Channel",
+        "low": "Printer",
+        "description": "Категория события MP SIEM: Information Management → Leakage Channel → Printer."
+      },
+      {
+        "generic": "Information Management",
+        "high": "Leakage Channel",
+        "low": "Web",
+        "description": "Категория события MP SIEM: Information Management → Leakage Channel → Web."
+      },
+      {
+        "generic": "Malware",
+        "high": "Backdoor",
+        "low": "Curing",
+        "description": "Категория события MP SIEM: Malware → Backdoor → Curing."
+      },
+      {
+        "generic": "Malware",
+        "high": "Backdoor",
+        "low": "Detection",
+        "description": "Категория события MP SIEM: Malware → Backdoor → Detection."
+      },
+      {
+        "generic": "Malware",
+        "high": "Backdoor",
+        "low": "Epidemic",
+        "description": "Категория события MP SIEM: Malware → Backdoor → Epidemic."
+      },
+      {
+        "generic": "Malware",
+        "high": "Backdoor",
+        "low": "Mitigation",
+        "description": "Категория события MP SIEM: Malware → Backdoor → Mitigation."
+      },
+      {
+        "generic": "Monitoring",
+        "high": "Errors",
+        "low": "Application",
+        "description": "Категория события MP SIEM: Monitoring → Errors → Application."
+      },
+      {
+        "generic": "Monitoring",
+        "high": "Errors",
+        "low": "Hardware",
+        "description": "Категория события MP SIEM: Monitoring → Errors → Hardware."
+      },
+      {
+        "generic": "Monitoring",
+        "high": "Errors",
+        "low": "Network",
+        "description": "Категория события MP SIEM: Monitoring → Errors → Network."
+      },
+      {
+        "generic": "Monitoring",
+        "high": "Errors",
+        "low": "System",
+        "description": "Категория события MP SIEM: Monitoring → Errors → System."
+      },
+      {
+        "generic": "Monitoring",
+        "high": "Network Monitoring",
+        "low": "Interface State",
+        "description": "Категория события MP SIEM: Monitoring → Network Monitoring → Interface State."
+      },
+      {
+        "generic": "Monitoring",
+        "high": "Network Monitoring",
+        "low": "Performance",
+        "description": "Категория события MP SIEM: Monitoring → Network Monitoring → Performance."
+      },
+      {
+        "generic": "Monitoring",
+        "high": "System Monitoring",
+        "low": "Notification",
+        "description": "Категория события MP SIEM: Monitoring → System Monitoring → Notification."
+      },
+      {
+        "generic": "Monitoring",
+        "high": "System Monitoring",
+        "low": "Performance",
+        "description": "Категория события MP SIEM: Monitoring → System Monitoring → Performance."
+      },
+      {
+        "generic": "Monitoring",
+        "high": "System Monitoring",
+        "low": "Processes",
+        "description": "Категория события MP SIEM: Monitoring → System Monitoring → Processes."
+      },
+      {
+        "generic": "Monitoring",
+        "high": "System Monitoring",
+        "low": "System State",
+        "description": "Категория события MP SIEM: Monitoring → System Monitoring → System State."
+      },
+      {
+        "generic": "Network Interaction",
+        "high": "Network Interaction",
+        "low": "Application",
+        "description": "Категория события MP SIEM: Network Interaction → Network Interaction → Application."
+      },
+      {
+        "generic": "Network Interaction",
+        "high": "Network Interaction",
+        "low": "Database",
+        "description": "Категория события MP SIEM: Network Interaction → Network Interaction → Database."
+      },
+      {
+        "generic": "Network Interaction",
+        "high": "Network Interaction",
+        "low": "File transfer",
+        "description": "Категория события MP SIEM: Network Interaction → Network Interaction → File transfer."
+      },
+      {
+        "generic": "Network Interaction",
+        "high": "Network Interaction",
+        "low": "Mail transfer",
+        "description": "Категория события MP SIEM: Network Interaction → Network Interaction → Mail transfer."
+      },
+      {
+        "generic": "Network Interaction",
+        "high": "Network Interaction",
+        "low": "Remote Management",
+        "description": "Категория события MP SIEM: Network Interaction → Network Interaction → Remote Management."
+      },
+      {
+        "generic": "Network Interaction",
+        "high": "Network Interaction",
+        "low": "Suspicious",
+        "description": "Категория события MP SIEM: Network Interaction → Network Interaction → Suspicious."
+      },
+      {
+        "generic": "Network Interaction",
+        "high": "Network Interaction",
+        "low": "Unknown",
+        "description": "Категория события MP SIEM: Network Interaction → Network Interaction → Unknown."
+      },
+      {
+        "generic": "Network Interaction",
+        "high": "Network Interaction",
+        "low": "VPN",
+        "description": "Категория события MP SIEM: Network Interaction → Network Interaction → VPN."
+      },
+      {
+        "generic": "Network Interaction",
+        "high": "Network Interaction",
+        "low": "Web",
+        "description": "Категория события MP SIEM: Network Interaction → Network Interaction → Web."
+      },
+      {
+        "generic": "Software Management",
+        "high": "Operating System Management",
+        "low": "Deletion",
+        "description": "Категория события MP SIEM: Software Management → Operating System Management → Deletion."
+      },
+      {
+        "generic": "Software Management",
+        "high": "Operating System Management",
+        "low": "Detection",
+        "description": "Категория события MP SIEM: Software Management → Operating System Management → Detection."
+      },
+      {
+        "generic": "Software Management",
+        "high": "Operating System Management",
+        "low": "Installation",
+        "description": "Категория события MP SIEM: Software Management → Operating System Management → Installation."
+      },
+      {
+        "generic": "Software Management",
+        "high": "Operating System Management",
+        "low": "Update",
+        "description": "Категория события MP SIEM: Software Management → Operating System Management → Update."
+      },
+      {
+        "generic": "Software Management",
+        "high": "Patch Management",
+        "low": "Deletion",
+        "description": "Категория события MP SIEM: Software Management → Patch Management → Deletion."
+      },
+      {
+        "generic": "Software Management",
+        "high": "Patch Management",
+        "low": "Installation",
+        "description": "Категория события MP SIEM: Software Management → Patch Management → Installation."
+      },
+      {
+        "generic": "Software Management",
+        "high": "Security Software Management",
+        "low": "Deletion",
+        "description": "Категория события MP SIEM: Software Management → Security Software Management → Deletion."
+      },
+      {
+        "generic": "Software Management",
+        "high": "Security Software Management",
+        "low": "Detection",
+        "description": "Категория события MP SIEM: Software Management → Security Software Management → Detection."
+      },
+      {
+        "generic": "Software Management",
+        "high": "Security Software Management",
+        "low": "Installation",
+        "description": "Категория события MP SIEM: Software Management → Security Software Management → Installation."
+      },
+      {
+        "generic": "Software Management",
+        "high": "Security Software Management",
+        "low": "Update",
+        "description": "Категория события MP SIEM: Software Management → Security Software Management → Update."
+      },
+      {
+        "generic": "Software Management",
+        "high": "Software Inventory",
+        "low": "Deletion",
+        "description": "Категория события MP SIEM: Software Management → Software Inventory → Deletion."
+      },
+      {
+        "generic": "Software Management",
+        "high": "Software Inventory",
+        "low": "Detection",
+        "description": "Категория события MP SIEM: Software Management → Software Inventory → Detection."
+      },
+      {
+        "generic": "Software Management",
+        "high": "Software Inventory",
+        "low": "Installation",
+        "description": "Категория события MP SIEM: Software Management → Software Inventory → Installation."
+      },
+      {
+        "generic": "Software Management",
+        "high": "Software Inventory",
+        "low": "Update",
+        "description": "Категория события MP SIEM: Software Management → Software Inventory → Update."
+      },
+      {
+        "generic": "Vulnerability Management",
+        "high": "Vulnerability",
+        "low": "Knowledge Base Updates",
+        "description": "Категория события MP SIEM: Vulnerability Management → Vulnerability → Knowledge Base Updates."
+      },
+      {
+        "generic": "Vulnerability Management",
+        "high": "Vulnerability",
+        "low": "Potential Exploit Detection",
+        "description": "Категория события MP SIEM: Vulnerability Management → Vulnerability → Potential Exploit Detection."
+      },
+      {
+        "generic": "Vulnerability Management",
+        "high": "Vulnerability",
+        "low": "Vulnerability Detection",
+        "description": "Категория события MP SIEM: Vulnerability Management → Vulnerability → Vulnerability Detection."
+      },
+      {
+        "generic": "Vulnerability Management",
+        "high": "Vulnerability",
+        "low": "Vulnerability Exception",
+        "description": "Категория события MP SIEM: Vulnerability Management → Vulnerability → Vulnerability Exception."
+      },
+      {
+        "generic": "Vulnerability Management",
+        "high": "Vulnerability",
+        "low": "Vulnerability Remediation",
+        "description": "Категория события MP SIEM: Vulnerability Management → Vulnerability → Vulnerability Remediation."
+      }
+    ]
+  },
+  "compatibility_hash": "7eb983911cbfb0735c6d432e528d1cd92fd1425e44c5af71ff395d92f11415cb"
+}

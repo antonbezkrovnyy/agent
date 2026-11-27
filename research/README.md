@@ -37,7 +37,11 @@
 | [R030](030-rust-data-plane-review.md) | Можно ли исполнять утверждённые revisions в Rust и быстро выбирать Family? | Native Rust pipeline и Aho–Corasick shortlist работают; 10/10 tests, 4/4 exact Python parity; определён dispatch design для 10 000 Families | Rust execution baseline; масштабный индекс требует следующего этапа |
 | [R031](031-cisco-end-to-end-pipeline-review.md) | Как одна Cisco-строка проходит весь путь от пустого Registry до выхода Rust? | Подробно восстановлены parser/normalizer/mapper, Bundle export, Rust startup, dispatch, 21 capture, 18 normalization descriptions, 29 mappings и финальный event | Сквозной методический отчёт на фактическом Bundle 4/2/4 |
 | [R032](032-cisco-full-rust-regression-review.md) | Пройдёт ли весь Cisco corpus через Rust? | 1763/1763 mapped, failed=0; полный Python/Rust parity по captures/normalized/event без mismatches; исправлены nested duplicate captures | Полный Rust execution baseline для текущего Cisco corpus |
+| [R033](033-juniper-full-rust-review.md) | Перенесётся ли полный Rust pipeline на Juniper? | 26/26 mapped, golden 3/3, полный parity без mismatches; mapping rev2 предпочитает concrete fields: username → subject.account.name, numeric protocol → protocol | Rust pipeline подтверждён на втором источнике |
+| [R034](034-symantec-full-rust-review.md) | Выдержит ли Rust сложный Symantec KV corpus? | 997/997 mapped, три KV Families, golden 8/8, полный parity без mismatches; evidence-driven rev3 закрыл UDP/Outbound/Blocked/IPv6 | Полный KV execution baseline; staged learning рекомендован для corpus |
+| [R035](035-self-learning-architecture-review.md) | Как система может сообщать об ограничениях и самостоятельно расширять свои capabilities? | Проект самообучающихся Registries, Taxonomy, Operations/parsing tools, reconcile, безопасной генерации кода и критериев полной автономности | Базовый Feedback Registry реализован; остальное остаётся архитектурным проектом |
 | [R036](036-cisco-batch-agent-review.md) | Даст ли Drain3 + batch agent выигрыш над построчным R020 без изменения одиночного режима? | 1763/1763 покрыто; Research 9 против 10, но 7 Family вместо 3, 903 строки требуют historical fallback; найдены regression и потерянный Research | Прототип работает; преимущество и production-качество не подтверждены |
+| [R037](037-logicore-mp-normalizer-production-review.md) | Как существующему агенту выпускать TEXT-правила `mp_normalizer` и fallback CONF для Saturn? | Осмотрены 8 репозиториев; зафиксированы VRL/MP capabilities, TEXT DSL, Syslog lifecycle, runtime differences, AxelNAC shadowing и отладка через saturn-tools | Подтверждён production contract и обязательные native/end-to-end gates |
 
 ## Общие условия ранних экспериментов
 
@@ -65,6 +69,6 @@
 
 **Текущий исследовательский parser baseline — R023.** Cisco, Juniper, Unix и Solaris подтверждают работу на четырёх corpus: 1999 исходных строк, 77 ReAct-исследований, 60 Families, 290 Grok. Quality gates, latest-first dispatch и global/Family consistency проходят независимый аудит.
 
-**Текущий execution baseline — R032:** три versioned Family Bundles исполняют весь Cisco corpus в native Rust: 1763/1763 mapped, failed=0 и полный Python/Rust parity без mismatches. Масштаб 10 000 Families и production ReDoS-hardening пока не проверены; timestamp года/timezone для Firepower задаются внешней лабораторной конфигурацией.
+**Текущий execution baseline — R032 + R033 + R034:** семь versioned Family Bundles исполняют Cisco, Juniper и Symantec KV в native Rust: 2786/2786 mapped, failed=0 и полный Python/Rust parity без mismatches. Масштаб 10 000 Families и production ReDoS-hardening пока не проверены; недостающие год/timezone задаются внешней лабораторной конфигурацией.
 
 Эталонная точность всех captures, универсальность для других источников и production-качество не доказаны.

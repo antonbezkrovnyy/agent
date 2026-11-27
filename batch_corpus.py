@@ -19,8 +19,8 @@ class SourceLog:
     raw: str
 
 
-def matching_parser(raw: str) -> dict | None:
-    matches = matching_parsers(raw)
+def matching_parser(raw: str, target: str = "research") -> dict | None:
+    matches = matching_parsers(raw, target)
     if len({match["family_id"] for match in matches}) > 1:
         raise RuntimeError(f"ambiguous_family_match: {matches}; raw={raw!r}")
     return matches[0] if matches else None
@@ -99,6 +99,7 @@ def apply_downstream(
 def main() -> None:
     parser = argparse.ArgumentParser(description="Пакетное исследование непокрытых RAW через Drain3 и batch agent.")
     parser.add_argument("file", type=Path, help="UTF-8 файл с одной RAW-строкой на строку.")
+    parser.add_argument("--target", choices=["research", "mp_text"], default="research")
     parser.add_argument("--samples-per-cluster", type=int, default=5)
     parser.add_argument("--similarity-threshold", type=float, default=0.4)
     parser.add_argument("--depth", type=int, default=4)
@@ -124,7 +125,7 @@ def main() -> None:
         for index in range(start_line, end_line + 1)
     ]
 
-    agent = make_batch_agent()
+    agent = make_batch_agent(args.target)
     normalization_agent = None
     mapping_agent = None
     if args.map_taxonomy:
@@ -140,7 +141,7 @@ def main() -> None:
     initially_covered = 0
     uncovered = []
     for source in lines:
-        if matching_parser(source.raw):
+        if matching_parser(source.raw, args.target):
             initially_covered += 1
         else:
             uncovered.append(source)
@@ -166,7 +167,7 @@ def main() -> None:
         if fingerprint in completed:
             skipped_batches += 1
             continue
-        if all(matching_parser(source.raw) for source in member_sources):
+        if all(matching_parser(source.raw, args.target) for source in member_sources):
             skipped_batches += 1
             append_progress(progress_path, {
                 "status": "batch_covered",
@@ -213,7 +214,7 @@ def main() -> None:
 
     uncovered_lines = []
     for source in lines:
-        match = matching_parser(source.raw)
+        match = matching_parser(source.raw, args.target)
         if not match:
             uncovered_lines.append(source.line)
             continue
@@ -236,6 +237,7 @@ def main() -> None:
     summary = {
         "file": str(args.file),
         "database": str(database),
+        "target": args.target,
         "total_lines": len(lines),
         "initially_covered": initially_covered,
         "input_uncovered": len(uncovered),

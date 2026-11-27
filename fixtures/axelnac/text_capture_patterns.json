@@ -1,0 +1,54 @@
+{
+  "rules": [
+    {
+      "name": "login_ok",
+      "pattern": "{\"<\"NUMBER\">\"?} {$time=DATETIME_SYSLOG|$time=DATETIME} {$host=HOSTNAME} auth{\"[\"$procid=NUMBER\"]\"}: ({$request_id=NUMBER}) Login OK: [{$user=UNTIL(\"]\")} (from client {$nas=WORDDASH} port {$port=NUMBER} cli {$src_mac=MACADDR})",
+      "positive": [
+        {
+          "name": "login_ok",
+          "raw": "<34>Oct 27 2024 12:00:00 nas01 auth[123]: (456) Login OK: [alice] (from client nas01 port 1 cli aa:bb:cc:dd:ee:ff)",
+          "expected": {"host": "nas01", "request_id": "456", "user": "alice", "port": "1", "src_mac": "aa:bb:cc:dd:ee:ff"}
+        }
+      ],
+      "negative": [
+        {"name": "truncated", "raw": "<34>Oct 27 2024 12:00:00 nas01 auth[123]: Login OK", "expected": {}}
+      ]
+    },
+    {
+      "name": "login_ok_tls",
+      "pattern": "{\"<\"NUMBER\">\"?} {$time=DATETIME_SYSLOG|$time=DATETIME} {$host=HOSTNAME} auth{\"[\"$procid=NUMBER\"]\"}: ({$request_id=NUMBER})   Login OK: [{$user=UNTIL(\"]\")} (from client {$nas=WORDDASH} port {$port=NUMBER} cli {$src_mac=MACADDR} via TLS tunnel)",
+      "positive": [
+        {
+          "name": "login_ok_tls",
+          "raw": "<34>Oct 27 2024 12:00:02 nas01 auth[123]: (458)   Login OK: [alice] (from client nas01 port 3 cli aa:bb:cc:dd:ee:ff via TLS tunnel)",
+          "expected": {"request_id": "458", "user": "alice", "port": "3"}
+        }
+      ],
+      "negative": []
+    },
+    {
+      "name": "login_incorrect",
+      "pattern": "{\"<\"NUMBER\">\"?} {$time=DATETIME_SYSLOG|$time=DATETIME} {$host=HOSTNAME} auth{\"[\"$procid=NUMBER\"]\"}: ({$request_id=NUMBER}) Login incorrect ({$reason=UNTIL(\"): [\")}{$user=UNTIL(\"]\")} (from client {$nas=WORDDASH} port {$port=NUMBER} cli {$src_mac=MACADDR})",
+      "positive": [
+        {
+          "name": "login_incorrect",
+          "raw": "<34>Oct 27 2024 12:00:03 nas01 auth[123]: (459) Login incorrect (bad password): [alice] (from client nas01 port 4 cli aa:bb:cc:dd:ee:ff)",
+          "expected": {"request_id": "459", "reason": "bad password", "user": "alice", "port": "4"}
+        }
+      ],
+      "negative": []
+    },
+    {
+      "name": "login_incorrect_nocli",
+      "pattern": "{\"<\"NUMBER\">\"?} {$time=DATETIME_SYSLOG|$time=DATETIME} {$host=HOSTNAME} auth{\"[\"$procid=NUMBER\"]\"}: ({$request_id=NUMBER}) Login incorrect ({$reason=UNTIL(\"): [\")}{$user=UNTIL(\"]\")} (from client {$nas=WORDDASH} port {$port=NUMBER})",
+      "positive": [
+        {
+          "name": "login_incorrect_nocli",
+          "raw": "<34>Oct 27 2024 12:00:01 nas01 auth[123]: (457) Login incorrect (bad password): [alice] (from client nas01 port 2)",
+          "expected": {"request_id": "457", "reason": "bad password", "user": "alice", "port": "2"}
+        }
+      ],
+      "negative": []
+    }
+  ]
+}

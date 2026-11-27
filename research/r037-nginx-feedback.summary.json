@@ -1,0 +1,21 @@
+{
+  "file": "research\\r037-nginx-synthetic.log",
+  "database": "research\\r037-nginx-feedback.db",
+  "total_lines": 3,
+  "source_start_line": 1,
+  "source_end_line": 3,
+  "covered_without_model": 1,
+  "researched_with_model": 2,
+  "uncovered_lines": [],
+  "families": 2,
+  "parser_revisions": 2,
+  "grok_patterns": 22,
+  "research_results": 6,
+  "normalization_revisions": 2,
+  "mapping_revisions": 2,
+  "feedback": 11,
+  "open_feedback": 5,
+  "blocking_feedback": 0,
+  "duration_seconds": 0.148,
+  "completed_at": "2026-11-25T11:01:32.695438+00:00"
+}

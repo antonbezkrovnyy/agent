@@ -121,11 +121,11 @@ class PipelineStage(SchemaModel):
 
 
 class ParserDefinition(SchemaModel):
-    """Grok-слои либо детерминированный pipeline и межполевые ограничения одной revision."""
+    """Grok-слои, детерминированный pipeline либо native MP TEXT и ограничения одной revision."""
 
-    kind: Literal["grok", "pipeline"] = Field(
+    kind: Literal["grok", "pipeline", "mp_text"] = Field(
         default="grok",
-        description="grok — patterns/layers; pipeline — детерминированные stages. Режимы нельзя смешивать.",
+        description="grok — patterns/layers; pipeline — stages; mp_text — native MP TEXT text_pattern. Режимы нельзя смешивать.",
     )
     patterns: list[GrokPattern] = Field(
         default_factory=list,
@@ -139,6 +139,14 @@ class ParserDefinition(SchemaModel):
         default_factory=list,
         description="Упорядоченные детерминированные стадии; обязательны и только для kind=pipeline.",
     )
+    text_pattern: str | None = Field(
+        default=None,
+        description="Полный native MP TEXT pattern с temporary $captures; обязателен и только для kind=mp_text.",
+    )
+    negative_evidence: list[str] = Field(
+        default_factory=list,
+        description="RAW, которые MP TEXT pattern обязан отклонить; сохраняются вместе с Family.",
+    )
     constraints: list[FieldConstraint] = Field(
         default_factory=list,
         description="Межполевые ограничения, которые невозможно выразить одной конструкцией без ложных комбинаций.",
@@ -147,15 +155,20 @@ class ParserDefinition(SchemaModel):
     @model_validator(mode="after")
     def check_parser_mode(self):
         if self.kind == "grok":
-            if self.stages:
-                raise ValueError("Для kind=grok stages должен быть пустым; для stages используйте kind=pipeline.")
+            if self.stages or self.text_pattern is not None:
+                raise ValueError("Для kind=grok stages/text_pattern должны быть пустыми.")
             if not self.layers:
                 raise ValueError("Для kind=grok layers не должен быть пустым.")
-        else:
+        elif self.kind == "pipeline":
             if not self.stages:
                 raise ValueError("Для kind=pipeline stages не должен быть пустым.")
-            if self.patterns or self.layers:
-                raise ValueError("Для kind=pipeline patterns и layers должны быть пустыми.")
+            if self.patterns or self.layers or self.text_pattern is not None:
+                raise ValueError("Для kind=pipeline patterns/layers/text_pattern должны быть пустыми.")
+        else:
+            if not self.text_pattern:
+                raise ValueError("Для kind=mp_text text_pattern обязателен.")
+            if self.patterns or self.layers or self.stages:
+                raise ValueError("Для kind=mp_text patterns/layers/stages должны быть пустыми.")
         return self
 
 
@@ -243,7 +256,8 @@ class Observation(SchemaModel):
 class ParserBaseline(SchemaModel):
     """Прежняя Grok- или pipeline-ревизия и её наблюдения для независимой регрессии."""
 
-    kind: Literal["grok", "pipeline"] = Field(default="grok", description="Тип прежнего parser; должен совпадать с candidate.")
+    kind: Literal["grok", "pipeline", "mp_text"] = Field(default="grok", description="Тип прежнего parser; должен совпадать с candidate.")
+    text_pattern: str | None = Field(default=None, description="Прежний native MP TEXT pattern для kind=mp_text.")
     layers: list[GrokLayer] = Field(default_factory=list, description="Слои прежнего Grok-парсера без изменений.")
     patterns: dict[str, str] = Field(
         default_factory=dict,
@@ -255,6 +269,7 @@ class ParserBaseline(SchemaModel):
         description="Схема прежнего парсера; пустой список означает использование схемы кандидата.",
     )
     observations: list[Observation] = Field(description="Строки, на которых прежний парсер обязан сохранить результат.")
+    negative_evidence: list[str] = Field(default_factory=list, description="Negative RAW прежнего MP TEXT parser.")
     constraints: list[FieldConstraint] = Field(
         default_factory=list,
         description="Межполевые ограничения прежнего parser; пустой список означает отсутствие дополнительных правил.",

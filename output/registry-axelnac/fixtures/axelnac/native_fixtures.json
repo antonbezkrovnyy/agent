@@ -1,0 +1,136 @@
+{
+  "positive": [
+    {
+      "name": "syslog_auth_login_ok_nas_client:0",
+      "event": {
+        "message": "<34>Oct 27 2024 12:00:00 nas01 auth[123]: (456) Login OK: [alice] (from client nas01 port 1 cli aa:bb:cc:dd:ee:ff)",
+        "mime": "TEXT"
+      },
+      "required_fields": [
+        "action",
+        "category_generic",
+        "category_high",
+        "category_low",
+        "event_src_category",
+        "event_src_subsys",
+        "event_src_title",
+        "event_src_vendor",
+        "id",
+        "importance",
+        "logon_auth_method",
+        "numfield2",
+        "numfield4",
+        "object",
+        "src_mac",
+        "status",
+        "subject",
+        "subject_account_name",
+        "time"
+      ],
+      "expected": {
+        "time": "2024-10-27T12:00:00.000Z",
+        "id": "PT_unknown_syslog_syslog_login",
+        "event_src_vendor": "unknown",
+        "event_src_title": "syslog",
+        "event_src_category": "AAA",
+        "action": "login",
+        "object": "session",
+        "status": "success",
+        "importance": "info",
+        "category_generic": "Access",
+        "category_high": "Authentication",
+        "category_low": "Remote",
+        "subject": "account",
+        "subject_account_name": "alice",
+        "src_hostname": "nas01",
+        "src_mac": "AA:BB:CC:DD:EE:FF",
+        "event_src_hostname": "nas01",
+        "event_src_subsys": "auth",
+        "logon_auth_method": "remote",
+        "numfield1": 456,
+        "numfield2": 1,
+        "numfield3": 123,
+        "numfield4": 34
+      },
+      "expected_saturn": {
+        "time": "2024-10-27T09:00:00.000Z",
+        "id": "PT_unknown_syslog_syslog_login",
+        "event_src_vendor": "unknown",
+        "event_src_title": "syslog",
+        "event_src_category": "AAA",
+        "action": "login",
+        "object": "session",
+        "status": "success",
+        "importance": "info",
+        "category_generic": "Access",
+        "category_high": "Authentication",
+        "category_low": "Remote",
+        "subject": "account",
+        "subject_account_name": "alice",
+        "src_hostname": "nas01",
+        "src_mac": "AA:BB:CC:DD:EE:FF",
+        "event_src_hostname": "nas01",
+        "event_src_subsys": "auth",
+        "logon_auth_method": "remote",
+        "numfield1": 456,
+        "numfield2": 1,
+        "numfield3": 123,
+        "numfield4": 34
+      },
+      "unexpected_fields": [
+        "$pri",
+        "$ts",
+        "$host",
+        "$program",
+        "$pid",
+        "$reqid",
+        "$user",
+        "$nas",
+        "$port",
+        "$mac"
+      ]
+    }
+  ],
+  "negative": [
+    {
+      "name": "syslog_auth_login_ok_nas_client:negative:0",
+      "event": {
+        "message": "<34>Oct 27 2024 12:00:00 nas01 auth[9]: Login incorrect: [alice] (from client nas01 port 1 cli aa:bb:cc:dd:ee:ff)",
+        "mime": "TEXT"
+      },
+      "status": "unparsed"
+    },
+    {
+      "name": "syslog_auth_login_ok_nas_client:negative:1",
+      "event": {
+        "message": "Oct 27 2024 12:00:00 nas01 auth: Login OK: [alice] (from client nas01 port 1 cli aa:bb:cc:dd:ee:ff)",
+        "mime": "TEXT"
+      },
+      "status": "unparsed"
+    },
+    {
+      "name": "syslog_auth_login_ok_nas_client:negative:2",
+      "event": {
+        "message": "{\"ts\":\"2024-10-27T12:00:00Z\",\"host\":\"nas01\",\"message\":\"Login OK: [alice] (from client nas01 port 1 cli aa:bb:cc:dd:ee:ff)\"}",
+        "mime": "TEXT"
+      },
+      "status": "unparsed"
+    },
+    {
+      "name": "syslog_auth_login_ok_nas_client:negative:3",
+      "event": {
+        "message": "<34>Oct 27 2024 12:00:00 nas01 auth[123]: (456) Login OK: [alice] (from client nas01 port 1)",
+        "mime": "TEXT"
+      },
+      "status": "unparsed"
+    },
+    {
+      "name": "syslog_auth_login_ok_nas_client:negative:4",
+      "event": {
+        "message": "<34>Oct 27 2024 12:00:00 nas01 auth[123]: (456) Login OK: [alice] (from client nas01 port 1 cli aa:bb:cc:dd:ee)",
+        "mime": "TEXT"
+      },
+      "status": "unparsed"
+    }
+  ]
+}

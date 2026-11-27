@@ -1,0 +1,64 @@
+{
+  "schema_version": 1,
+  "family_id": "symantec_endpoint_system_event_symantecserver",
+  "compatibility_hash": "7eb983911cbfb0735c6d432e528d1cd92fd1425e44c5af71ff395d92f11415cb",
+  "cases": [
+    {
+      "raw": "<6>Jul 26 21:38:49 OAK-SYM-V01 SymantecServer: FULL-PF00BE8C,Category: 0,CVE,\"Event Description: Failed to connect to all GUPs, now trying to connect SEPM\",Event time: 2024-07-26 21:37:04,Group Name: My Company\\Clients\\Fulton",
+      "expected": {
+        "ok": true,
+        "status": "mapped",
+        "captures": {
+          "pri": "6",
+          "timestamp": "Jul 26 21:38:49",
+          "host": "OAK-SYM-V01",
+          "msg_id": "SymantecServer",
+          "body": "FULL-PF00BE8C,Category: 0,CVE,\"Event Description: Failed to connect to all GUPs, now trying to connect SEPM\",Event time: 2024-07-26 21:37:04,Group Name: My Company\\Clients\\Fulton",
+          "column_1": "FULL-PF00BE8C",
+          "Category": "0",
+          "column_3": "CVE",
+          "Event Description": "Failed to connect to all GUPs, now trying to connect SEPM",
+          "Event time": "2024-07-26 21:37:04",
+          "Group Name": "My Company\\Clients\\Fulton"
+        },
+        "normalized": {
+          "pri": 6,
+          "timestamp": "2024-07-26T21:38:49",
+          "host": "OAK-SYM-V01",
+          "msg_id": "SymantecServer",
+          "body": "FULL-PF00BE8C,Category: 0,CVE,\"Event Description: Failed to connect to all GUPs, now trying to connect SEPM\",Event time: 2024-07-26 21:37:04,Group Name: My Company\\Clients\\Fulton",
+          "column_1": "FULL-PF00BE8C",
+          "Category": 0,
+          "column_3": "CVE",
+          "Event Description": "Failed to connect to all GUPs, now trying to connect SEPM",
+          "Event time": "2024-07-26T21:37:04",
+          "Group Name": "My Company\\Clients\\Fulton"
+        },
+        "event": {
+          "time": "2024-07-26T21:37:04Z",
+          "id": "mp_siem_symantec_symantecserver_syslog_system_event",
+          "event_src.vendor": "symantec",
+          "event_src.title": "symantecserver",
+          "event_src.category": "Anti-virus",
+          "action": "connect",
+          "object": "connection",
+          "status": "failure",
+          "importance": "info",
+          "category.generic": "Monitoring",
+          "category.high": "Errors",
+          "category.low": "Application",
+          "subject": "host",
+          "subject.name": "OAK-SYM-V01",
+          "subject.group": "My Company\\Clients\\Fulton",
+          "event_src.hostname": "OAK-SYM-V01",
+          "reason": "Failed to connect to all GUPs, now trying to connect SEPM",
+          "msgid": "FULL-PF00BE8C",
+          "datafield1": "CVE",
+          "numfield1": 0,
+          "numfield2": 6
+        },
+        "errors": []
+      }
+    }
+  ]
+}

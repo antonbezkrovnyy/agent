@@ -178,10 +178,47 @@ RESEARCH_BATCH_SYSTEM_PROMPT = (
 )
 
 
+def feedback_instructions(agent: str) -> str:
+    return (
+        f"Если остаётся неоднозначность, недостаток данных или конфигурации, "
+        f"неподдерживаемая операция либо другое ограничение результата, вызови "
+        f"report_feedback с agent={agent}. Укажи стабильный category, конкретный summary, "
+        "evidence, известные revisions и field, что нужно для разрешения и blocking=true "
+        "только если результат нельзя безопасно применить. Если Family известна, проверь "
+        "list_open_feedback и не дублируй уже открытую проблему. Не сообщай о временных "
+        "ошибках, которые удалось исправить: runner фиксирует их сам. Feedback не заменяет "
+        "исправление и проверку результата и не входит в финальный JSON. "
+    )
+
+
 SYSTEM_PROMPT = (
-    "После завершения исследования верни только JSON-объект без markdown "
+    feedback_instructions("parser")
+    + "После завершения исследования верни только JSON-объект без markdown "
     "по следующей схеме Response: "
 )
+
+
+MP_TEXT_TARGET_PROMPT = """
+Выбран дополнительный production target Logicore mp_normalizer: target=mp_text.
+Это режим того же parser-агента: все правила исследования, semantic reuse, Families, revisions,
+evidence, baseline, feedback и полный Response сохраняются. Не заменяй исследование готовым YAML.
+
+Для parser в этом режиме замени требования исследовательского Grok/pipeline следующими:
+- parser.kind=mp_text; patterns/layers/stages пустые;
+- parser.text_pattern — полный native MP TEXT pattern с temporary $captures;
+- syntax capture строго `{$user=STRING}`, `{$time=DATETIME_SYSLOG}`, `{$user=UNTIL("]")}`;
+  необязательная группа `{"["$procid=NUMBER"]"}?`, alternatives `{$x=IPV4|$x=IPV6}`;
+  никогда не используй `$user:WORD`, `%{WORD:user}` или `$user WORD`;
+- используй execute_mp_text_parser для фактических captures и validate_grok_result для schema;
+- обязательно evaluate_mp_text_parser на всех observations и baseline того же kind;
+- negative RAW передавай в negative_evidence; они обязаны не совпасть;
+- сохраняй через save_mp_text_family и проверяй get_parser_family;
+- не используй %{CUSTOM_REGEX:capture}, пользовательские Grok patterns или несуществующие MP tokens;
+- не добавляй normalization, mapping, id, taxonomy, YAML, VRL body и CONF в parser Response.
+
+Сначала получи точные возможности runtime из MP TEXT tools/инструкций и исследуй грамматику
+полностью. Не выдавай частичное совпадение за parser. Остальные этапы отчёта не меняются.
+"""
 
 
 NORMALIZATION_PROMPT = """Нормализуй существующую parser Family {family_id}@{parser_revision}.
@@ -222,7 +259,11 @@ corpus, а не выводится из RAW. Используй её как defa
 если настройка не задана, год не выдумывай. Если год уже присутствует в формате, игнорируй
 эту настройку. Timezone из неё не следует.
 
-Сохрани parser evidence без изменений в NormalizationRevision.evidence. Сначала вызови
+Сохрани parser evidence без изменений в NormalizationRevision.evidence. Дополнительные RAW
+для расширения evidence от runner:
+{additional_evidence}
+Если они заданы, добавь их к исходному evidence без дублей; они расширяют регрессию, а не
+заменяют прежние наблюдения. Сначала вызови
 preview_normalization на реальной строке, затем evaluate_normalization на всех evidence.
 Исправляй конкретные ошибки инструментов. После успешной проверки вызови
 save_normalization с точным parser_revision. Если прежней normalization нет, используй
@@ -234,7 +275,8 @@ parser_revision, fields, evidence, description. Внутренний reasoning �
 """
 
 NORMALIZATION_SYSTEM_PROMPT = (
-    "После завершения нормализации верни только JSON-объект без markdown "
+    feedback_instructions("normalization")
+    + "После завершения нормализации верни только JSON-объект без markdown "
     "по следующей схеме NormalizationRevision: "
 )
 
@@ -273,8 +315,21 @@ MappingField.source — имя normalized capture. Для констант Famil
 Составное 'устройство/интерфейс' не является hostname: не записывай его туда без отдельного
 обоснованного разбора. Не приписывай source-интерфейсу ingress-семантику без доказательств.
 
-Не придумывай назначение opaque полей. datafield1..10 и numfield1..5 существуют в Registry:
-используй их для значимых данных без стандартного поля после семантического поиска.
+Приоритет target — сначала конкретные поля таксономии и их атрибуты, а не универсальные
+datafield/numfield. Если normalized source описывает участника, идентичность, адрес,
+протокол, счётчик или другое значение, для которого есть подходящее конкретное поле,
+выбирай это поле. Не прячь осмысленное значение в datafield/numfield только из-за
+осторожной формулировки или неполной уверенности в роли: используй смысл всего события.
+Например, username в событии о сессии пользователя обычно задаёт subject=account и
+subject.account.name, а не datafield. Числовой protocol допустимо преобразовать через
+полный value_map в строковый protocol, если коды известны; незнакомый код должен дать ошибку.
+
+datafield1..10 и numfield1..5 — резерв только после семантического поиска и явного
+исключения подходящих конкретных полей. В description такого mapping укажи, почему
+конкретного target нет. Не дублируй одно значение в concrete и generic без отдельной
+причины, например сохранения исходного написания при нормализованном concrete значении.
+Не придумывай назначение opaque полей: если смысл действительно неизвестен, оставь
+значение в подходящем generic field, а не присваивай ему ложную конкретную семантику.
 Не делай новый парсинг.
 
 Внешняя настройка source_timezone для этого запуска: {source_timezone}.
@@ -285,6 +340,11 @@ id формируй по правилу MP SIEM: namespace_vendor_title_transpor
 Отдельный namespace обязателен: vendor/title/transport/event-type сам по себе недостаточен.
 Нормализованные timestamp уже ISO; не меняй его смысл.
 
+Дополнительные RAW для расширения mapping evidence от runner:
+{additional_evidence}
+Если они заданы, добавь их к normalization evidence без дублей. Они представляют новые
+наблюдённые варианты; прежние evidence обязаны сохраниться.
+
 Сначала preview_mapping на реальной строке, затем evaluate_mapping на всех evidence.
 Исправляй все missing/invalid/unknown/enum/category ошибки. После успеха вызови
 save_mapping: revision=1, если прежней нет, иначе следующий свободный номер. Проверь
@@ -294,6 +354,16 @@ source_timezone, mappings, evidence, description.
 """
 
 MAPPING_SYSTEM_PROMPT = (
-    "После завершения маппинга верни только JSON-объект без markdown "
+    feedback_instructions("mapping")
+    + "После завершения маппинга верни только JSON-объект без markdown "
     "по следующей схеме MappingRevision: "
 )
+
+
+MP_TEXT_MAPPING_TARGET_PROMPT = """
+Для этой Family выбран Logicore target=mp_text. Общий mapping workflow не меняется, но
+production id должен начинаться с namespace PT и соответствовать
+^PT_[A-Za-z0-9]+_[A-Za-z0-9]+_[A-Za-z0-9]+_[A-Za-z0-9_]+$.
+Пример для неизвестного vendor/title: PT_unknown_syslog_syslog_login.
+Не используй normalization, research или другой namespace. Остальные правила mapping не меняются.
+"""

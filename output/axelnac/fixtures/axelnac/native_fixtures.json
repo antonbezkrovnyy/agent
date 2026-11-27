@@ -1,0 +1,231 @@
+{
+  "positive": [
+    {
+      "name": "login_ok:0",
+      "event": {
+        "message": "<34>Oct 27 2024 12:00:00 nas01 auth[123]: (456) Login OK: [alice] (from client nas01 port 1 cli aa:bb:cc:dd:ee:ff)",
+        "mime": "TEXT"
+      },
+      "required_fields": [
+        "action",
+        "category_generic",
+        "category_high",
+        "category_low",
+        "datafield1",
+        "event_src_category",
+        "event_src_hostname",
+        "event_src_title",
+        "event_src_vendor",
+        "id",
+        "importance",
+        "logon_auth_method",
+        "msgid",
+        "numfield1",
+        "object",
+        "object_name",
+        "protocol_layer7",
+        "reason",
+        "src_mac",
+        "start_time",
+        "status",
+        "subject",
+        "subject_account_name",
+        "time"
+      ],
+      "expected": {
+        "id": "PT_Axel_AxelNAC_syslog_login_ok",
+        "subject": "account",
+        "action": "login",
+        "object": "application",
+        "status": "success",
+        "subject_account_name": "alice",
+        "numfield1": 1,
+        "event_src_title": "axelnac",
+        "event_src_hostname": "nas01",
+        "src_mac": "AA:BB:CC:DD:EE:FF",
+        "time": "2024-10-27T09:00:00.000Z"
+      },
+      "unexpected_fields": [
+        "$time",
+        "$host",
+        "$procid",
+        "$request_id",
+        "$user",
+        "$nas",
+        "$port",
+        "$src_mac"
+      ]
+    },
+    {
+      "name": "login_ok_tls:0",
+      "event": {
+        "message": "<34>Oct 27 2024 12:00:02 nas01 auth[123]: (458)   Login OK: [alice] (from client nas01 port 3 cli aa:bb:cc:dd:ee:ff via TLS tunnel)",
+        "mime": "TEXT"
+      },
+      "required_fields": [
+        "action",
+        "category_generic",
+        "category_high",
+        "category_low",
+        "datafield1",
+        "event_src_category",
+        "event_src_hostname",
+        "event_src_title",
+        "event_src_vendor",
+        "id",
+        "importance",
+        "logon_auth_method",
+        "msgid",
+        "numfield1",
+        "object",
+        "object_name",
+        "protocol_layer7",
+        "reason",
+        "src_mac",
+        "start_time",
+        "status",
+        "subject",
+        "subject_account_name",
+        "time"
+      ],
+      "expected": {
+        "id": "PT_Axel_AxelNAC_syslog_login_ok_tls",
+        "status": "success",
+        "msgid": "login_ok_tls",
+        "numfield1": 3,
+        "time": "2024-10-27T09:00:02.000Z"
+      },
+      "unexpected_fields": [
+        "$time",
+        "$host",
+        "$procid",
+        "$request_id",
+        "$user",
+        "$nas",
+        "$port",
+        "$src_mac"
+      ]
+    },
+    {
+      "name": "login_incorrect:0",
+      "event": {
+        "message": "<34>Oct 27 2024 12:00:03 nas01 auth[123]: (459) Login incorrect (bad password): [alice] (from client nas01 port 4 cli aa:bb:cc:dd:ee:ff)",
+        "mime": "TEXT"
+      },
+      "required_fields": [
+        "action",
+        "category_generic",
+        "category_high",
+        "category_low",
+        "datafield1",
+        "event_src_category",
+        "event_src_hostname",
+        "event_src_title",
+        "event_src_vendor",
+        "id",
+        "importance",
+        "logon_auth_method",
+        "msgid",
+        "numfield1",
+        "object",
+        "object_name",
+        "protocol_layer7",
+        "reason",
+        "src_mac",
+        "start_time",
+        "status",
+        "subject",
+        "subject_account_name",
+        "time"
+      ],
+      "expected": {
+        "id": "PT_Axel_AxelNAC_syslog_login_incorrect",
+        "status": "failure",
+        "subject_account_name": "alice",
+        "reason": "bad password",
+        "numfield1": 4,
+        "src_mac": "AA:BB:CC:DD:EE:FF",
+        "time": "2024-10-27T09:00:03.000Z"
+      },
+      "unexpected_fields": [
+        "$time",
+        "$host",
+        "$procid",
+        "$request_id",
+        "$reason",
+        "$user",
+        "$nas",
+        "$port",
+        "$src_mac"
+      ]
+    },
+    {
+      "name": "login_incorrect_nocli:0",
+      "event": {
+        "message": "<34>Oct 27 2024 12:00:01 nas01 auth[123]: (457) Login incorrect (bad password): [alice] (from client nas01 port 2)",
+        "mime": "TEXT"
+      },
+      "required_fields": [
+        "action",
+        "category_generic",
+        "category_high",
+        "category_low",
+        "datafield1",
+        "event_src_category",
+        "event_src_hostname",
+        "event_src_title",
+        "event_src_vendor",
+        "id",
+        "importance",
+        "logon_auth_method",
+        "msgid",
+        "numfield1",
+        "object",
+        "object_name",
+        "protocol_layer7",
+        "reason",
+        "start_time",
+        "status",
+        "subject",
+        "subject_account_name",
+        "time"
+      ],
+      "expected": {
+        "id": "PT_Axel_AxelNAC_syslog_login_incorrect",
+        "status": "failure",
+        "subject_account_name": "alice",
+        "reason": "bad password",
+        "numfield1": 2,
+        "time": "2024-10-27T09:00:01.000Z"
+      },
+      "unexpected_fields": [
+        "$time",
+        "$host",
+        "$procid",
+        "$request_id",
+        "$reason",
+        "$user",
+        "$nas",
+        "$port"
+      ]
+    }
+  ],
+  "negative": [
+    {
+      "name": "login_ok:negative:0",
+      "event": {
+        "message": "<34>Oct 27 2024 12:00:00 nas01 auth[123]: Login OK",
+        "mime": "TEXT"
+      },
+      "status": "unparsed"
+    },
+    {
+      "name": "login_incorrect:negative:0",
+      "event": {
+        "message": "<34>Oct 27 2024 12:00:00 nas01 auth[123]: Login incorrect",
+        "mime": "TEXT"
+      },
+      "status": "unparsed"
+    }
+  ]
+}

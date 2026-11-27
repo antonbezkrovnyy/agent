@@ -6,3 +6,10 @@ __pycache__/
 .rustup/
 .tools/
 rust/**/target/
+webui/.venv/
+webui/frontend/node_modules/
+webui/frontend/dist/
+webui/frontend/*.tsbuildinfo
+webui/runtime/
+.tmp_logicore/
+generated/

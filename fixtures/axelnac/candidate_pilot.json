@@ -1,0 +1,265 @@
+{
+  "schema_version": 1,
+  "source": "axelnac",
+  "revision": 1,
+  "dispatch_contains": ["Login OK:", "Login incorrect"],
+  "source_timezone": "Europe/Moscow",
+  "assumptions": [
+    "Пилотный candidate для login_ok, login_ok_tls и login_incorrect с необязательным CLI; остальные семейства AxelNAC добавляются отдельными rules."
+  ],
+  "rules": [
+    {
+      "rule_key": "login_ok",
+      "description": "AxelNAC FreeRADIUS successful login over Syslog.",
+      "pattern": "{\"<\"NUMBER\">\"?} {$time=DATETIME_SYSLOG|$time=DATETIME} {$host=HOSTNAME} auth{\"[\"$procid=NUMBER\"]\"}: ({$request_id=NUMBER}) Login OK: [{$user=UNTIL(\"]\")} (from client {$nas=WORDDASH} port {$port=NUMBER} cli {$src_mac=MACADDR})",
+      "condition": null,
+      "record_schema": [
+        {"name": "time", "category": "dynamic", "type": "timestamp", "required": true, "source": "$.time"},
+        {"name": "host", "category": "dynamic", "type": "hostname", "required": true, "source": "$.host"},
+        {"name": "procid", "category": "dynamic", "type": "integer", "required": false, "source": "$.procid"},
+        {"name": "request_id", "category": "dynamic", "type": "string", "required": true, "source": "$.request_id"},
+        {"name": "user", "category": "dynamic", "type": "string", "required": true, "source": "$.user"},
+        {"name": "nas", "category": "dynamic", "type": "string", "required": true, "source": "$.nas"},
+        {"name": "port", "category": "dynamic", "type": "integer", "required": true, "source": "$.port"},
+        {"name": "src_mac", "category": "dynamic", "type": "macaddr", "required": true, "source": "$.src_mac"}
+      ],
+      "normalization": [
+        {"source": "time", "description": "Event timestamp with year from the syslog envelope.", "operations": [], "required": true},
+        {"source": "host", "description": "Hostname of the AxelNAC node.", "operations": [{"op": "lowercase", "params": {}}], "required": true},
+        {"source": "procid", "description": "FreeRADIUS process identifier.", "operations": [], "required": false},
+        {"source": "request_id", "description": "FreeRADIUS request identifier retained as source data.", "operations": [], "required": true},
+        {"source": "user", "description": "Authenticated account name.", "operations": [{"op": "lowercase", "params": {}}], "required": true},
+        {"source": "nas", "description": "Network access server identifier.", "operations": [], "required": true},
+        {"source": "port", "description": "NAS client port number.", "operations": [{"op": "to_integer", "params": {}}, {"op": "validate_range", "params": {"min": 0, "max": 65535}}], "required": true},
+        {"source": "src_mac", "description": "Client MAC address.", "operations": [], "required": true}
+      ],
+      "mappings": [
+        {"source": "time", "target": "time", "description": "Event time from the message envelope."},
+        {"source": "time", "target": "start_time", "description": "Authentication event start time."},
+        {"source": null, "target": "id", "constant": "PT_Axel_AxelNAC_syslog_login_ok", "description": "Stable MP SIEM normalization event identifier."},
+        {"source": null, "target": "event_src.category", "constant": "AAA", "description": "AxelNAC provides authentication, authorization and accounting."},
+        {"source": null, "target": "event_src.title", "constant": "axelnac", "description": "Logicore source title."},
+        {"source": null, "target": "event_src.vendor", "constant": "AxelPRO", "description": "AxelNAC vendor."},
+        {"source": "host", "target": "event_src.hostname", "description": "AxelNAC node that generated the event."},
+        {"source": null, "target": "subject", "constant": "account", "description": "An account performs authentication."},
+        {"source": null, "target": "object", "constant": "application", "description": "Authentication targets the application."},
+        {"source": null, "target": "action", "constant": "login", "description": "The event is an account login."},
+        {"source": null, "target": "status", "constant": "success", "description": "Login OK is successful authentication."},
+        {"source": null, "target": "importance", "constant": "info", "description": "Successful routine authentication has informational importance."},
+        {"source": "user", "target": "subject_account_name", "description": "Authenticated account."},
+        {"source": "port", "target": "numfield1", "description": "Source-specific NAS port retained in numeric field 1."},
+        {"source": "request_id", "target": "datafield1", "description": "Source-specific FreeRADIUS request identifier."},
+        {"source": "src_mac", "target": "src_mac", "description": "Authenticated client MAC address."},
+        {"source": null, "target": "protocol_layer7", "constant": "radius", "description": "AxelNAC authentication uses RADIUS."},
+        {"source": null, "target": "object_name", "constant": "axelnac", "description": "Target application name."},
+        {"source": null, "target": "msgid", "constant": "login_ok", "description": "Stable source message identifier."},
+        {"source": null, "target": "reason", "constant": "successful authentication", "description": "Human-readable result reason."},
+        {"source": null, "target": "category.generic", "constant": "Application", "description": "MP SIEM event category."},
+        {"source": null, "target": "category.high", "constant": "Access Management", "description": "MP SIEM event category."},
+        {"source": null, "target": "category.low", "constant": "Communication", "description": "MP SIEM event category."},
+        {"source": null, "target": "logon_auth_method", "constant": "remote", "description": "Network authentication."}
+      ],
+      "evidence": [
+        "<34>Oct 27 2024 12:00:00 nas01 auth[123]: (456) Login OK: [alice] (from client nas01 port 1 cli aa:bb:cc:dd:ee:ff)"
+      ],
+      "expected_events": [
+        {
+          "id": "PT_Axel_AxelNAC_syslog_login_ok",
+          "subject": "account",
+          "action": "login",
+          "object": "application",
+          "status": "success",
+          "subject_account_name": "alice",
+          "numfield1": 1,
+          "event_src_title": "axelnac",
+          "event_src_hostname": "nas01",
+          "src_mac": "AA:BB:CC:DD:EE:FF",
+          "time": "2024-10-27T09:00:00.000Z"
+        }
+      ],
+      "negative_evidence": [
+        "<34>Oct 27 2024 12:00:00 nas01 auth[123]: Login OK"
+      ]
+    },
+    {
+      "rule_key": "login_ok_tls",
+      "description": "AxelNAC successful login through a TLS tunnel.",
+      "pattern": "{\"<\"NUMBER\">\"?} {$time=DATETIME_SYSLOG|$time=DATETIME} {$host=HOSTNAME} auth{\"[\"$procid=NUMBER\"]\"}: ({$request_id=NUMBER})   Login OK: [{$user=UNTIL(\"]\")} (from client {$nas=WORDDASH} port {$port=NUMBER} cli {$src_mac=MACADDR} via TLS tunnel)",
+      "condition": null,
+      "record_schema": [
+        {"name": "time", "category": "dynamic", "type": "timestamp", "required": true, "source": "$.time"},
+        {"name": "host", "category": "dynamic", "type": "hostname", "required": true, "source": "$.host"},
+        {"name": "procid", "category": "dynamic", "type": "integer", "required": false, "source": "$.procid"},
+        {"name": "request_id", "category": "dynamic", "type": "string", "required": true, "source": "$.request_id"},
+        {"name": "user", "category": "dynamic", "type": "string", "required": true, "source": "$.user"},
+        {"name": "nas", "category": "dynamic", "type": "string", "required": true, "source": "$.nas"},
+        {"name": "port", "category": "dynamic", "type": "integer", "required": true, "source": "$.port"},
+        {"name": "src_mac", "category": "dynamic", "type": "macaddr", "required": true, "source": "$.src_mac"}
+      ],
+      "normalization": [
+        {"source": "time", "description": "Event timestamp.", "operations": [], "required": true},
+        {"source": "host", "description": "AxelNAC node hostname.", "operations": [{"op": "lowercase", "params": {}}], "required": true},
+        {"source": "procid", "description": "FreeRADIUS process identifier.", "operations": [], "required": false},
+        {"source": "request_id", "description": "FreeRADIUS request identifier.", "operations": [], "required": true},
+        {"source": "user", "description": "Authenticated account.", "operations": [{"op": "lowercase", "params": {}}], "required": true},
+        {"source": "nas", "description": "Network access server.", "operations": [], "required": true},
+        {"source": "port", "description": "NAS port.", "operations": [{"op": "to_integer", "params": {}}, {"op": "validate_range", "params": {"min": 0, "max": 65535}}], "required": true},
+        {"source": "src_mac", "description": "Client MAC address.", "operations": [], "required": true}
+      ],
+      "mappings": [
+        {"source": "time", "target": "time", "description": "Event time."},
+        {"source": "time", "target": "start_time", "description": "Authentication start time."},
+        {"source": null, "target": "id", "constant": "PT_Axel_AxelNAC_syslog_login_ok_tls", "description": "Stable event identifier."},
+        {"source": null, "target": "event_src.category", "constant": "AAA", "description": "Source category."},
+        {"source": null, "target": "event_src.title", "constant": "axelnac", "description": "Source title."},
+        {"source": null, "target": "event_src.vendor", "constant": "AxelPRO", "description": "Source vendor."},
+        {"source": "host", "target": "event_src.hostname", "description": "Event source hostname."},
+        {"source": null, "target": "subject", "constant": "account", "description": "Authenticated account."},
+        {"source": null, "target": "object", "constant": "application", "description": "Target application."},
+        {"source": null, "target": "action", "constant": "login", "description": "Login action."},
+        {"source": null, "target": "status", "constant": "success", "description": "Successful login."},
+        {"source": null, "target": "importance", "constant": "info", "description": "Informational event."},
+        {"source": "user", "target": "subject_account_name", "description": "Authenticated account name."},
+        {"source": "port", "target": "numfield1", "description": "NAS port."},
+        {"source": "request_id", "target": "datafield1", "description": "Request identifier."},
+        {"source": "src_mac", "target": "src_mac", "description": "Client MAC."},
+        {"source": null, "target": "protocol_layer7", "constant": "radius", "description": "RADIUS protocol."},
+        {"source": null, "target": "object_name", "constant": "axelnac", "description": "Target application."},
+        {"source": null, "target": "msgid", "constant": "login_ok_tls", "description": "TLS login message."},
+        {"source": null, "target": "reason", "constant": "successful authentication via TLS tunnel", "description": "Result reason."},
+        {"source": null, "target": "category.generic", "constant": "Application", "description": "Event category."},
+        {"source": null, "target": "category.high", "constant": "Access Management", "description": "Event category."},
+        {"source": null, "target": "category.low", "constant": "Communication", "description": "Event category."},
+        {"source": null, "target": "logon_auth_method", "constant": "remote", "description": "Remote authentication."}
+      ],
+      "evidence": [
+        "<34>Oct 27 2024 12:00:02 nas01 auth[123]: (458)   Login OK: [alice] (from client nas01 port 3 cli aa:bb:cc:dd:ee:ff via TLS tunnel)"
+      ],
+      "expected_events": [
+        {"id": "PT_Axel_AxelNAC_syslog_login_ok_tls", "status": "success", "msgid": "login_ok_tls", "numfield1": 3, "time": "2024-10-27T09:00:02.000Z"}
+      ],
+      "negative_evidence": []
+    },
+    {
+      "rule_key": "login_incorrect",
+      "description": "AxelNAC failed login with client MAC address.",
+      "pattern": "{\"<\"NUMBER\">\"?} {$time=DATETIME_SYSLOG|$time=DATETIME} {$host=HOSTNAME} auth{\"[\"$procid=NUMBER\"]\"}: ({$request_id=NUMBER}) Login incorrect ({$reason=UNTIL(\"): [\")}{$user=UNTIL(\"]\")} (from client {$nas=WORDDASH} port {$port=NUMBER} cli {$src_mac=MACADDR})",
+      "condition": null,
+      "record_schema": [
+        {"name": "time", "category": "dynamic", "type": "timestamp", "required": true, "source": "$.time"},
+        {"name": "host", "category": "dynamic", "type": "hostname", "required": true, "source": "$.host"},
+        {"name": "procid", "category": "dynamic", "type": "integer", "required": false, "source": "$.procid"},
+        {"name": "request_id", "category": "dynamic", "type": "string", "required": true, "source": "$.request_id"},
+        {"name": "reason", "category": "dynamic", "type": "string", "required": true, "source": "$.reason"},
+        {"name": "user", "category": "dynamic", "type": "string", "required": true, "source": "$.user"},
+        {"name": "nas", "category": "dynamic", "type": "string", "required": true, "source": "$.nas"},
+        {"name": "port", "category": "dynamic", "type": "integer", "required": true, "source": "$.port"},
+        {"name": "src_mac", "category": "dynamic", "type": "macaddr", "required": true, "source": "$.src_mac"}
+      ],
+      "normalization": [
+        {"source": "time", "description": "Event timestamp.", "operations": [], "required": true},
+        {"source": "host", "description": "AxelNAC node hostname.", "operations": [{"op": "lowercase", "params": {}}], "required": true},
+        {"source": "procid", "description": "FreeRADIUS process identifier.", "operations": [], "required": false},
+        {"source": "request_id", "description": "FreeRADIUS request identifier.", "operations": [], "required": true},
+        {"source": "reason", "description": "Authentication failure reason.", "operations": [{"op": "trim", "params": {}}], "required": true},
+        {"source": "user", "description": "Account that failed authentication.", "operations": [{"op": "lowercase", "params": {}}], "required": true},
+        {"source": "nas", "description": "Network access server.", "operations": [], "required": true},
+        {"source": "port", "description": "NAS port.", "operations": [{"op": "to_integer", "params": {}}, {"op": "validate_range", "params": {"min": 0, "max": 65535}}], "required": true},
+        {"source": "src_mac", "description": "Client MAC address.", "operations": [], "required": true}
+      ],
+      "mappings": [
+        {"source": "time", "target": "time", "description": "Event time."},
+        {"source": "time", "target": "start_time", "description": "Authentication start time."},
+        {"source": null, "target": "id", "constant": "PT_Axel_AxelNAC_syslog_login_incorrect", "description": "Stable event identifier."},
+        {"source": null, "target": "event_src.category", "constant": "AAA", "description": "Source category."},
+        {"source": null, "target": "event_src.title", "constant": "axelnac", "description": "Source title."},
+        {"source": null, "target": "event_src.vendor", "constant": "AxelPRO", "description": "Source vendor."},
+        {"source": "host", "target": "event_src.hostname", "description": "Event source hostname."},
+        {"source": null, "target": "subject", "constant": "account", "description": "Account subject."},
+        {"source": null, "target": "object", "constant": "application", "description": "Target application."},
+        {"source": null, "target": "action", "constant": "login", "description": "Login action."},
+        {"source": null, "target": "status", "constant": "failure", "description": "Failed login."},
+        {"source": null, "target": "importance", "constant": "low", "description": "Failure importance."},
+        {"source": "user", "target": "subject_account_name", "description": "Account name."},
+        {"source": "port", "target": "numfield1", "description": "NAS port."},
+        {"source": "request_id", "target": "datafield1", "description": "Request identifier."},
+        {"source": "src_mac", "target": "src_mac", "description": "Optional client MAC."},
+        {"source": null, "target": "protocol_layer7", "constant": "radius", "description": "RADIUS protocol."},
+        {"source": null, "target": "object_name", "constant": "axelnac", "description": "Target application."},
+        {"source": null, "target": "msgid", "constant": "login_incorrect", "description": "Failed login message."},
+        {"source": "reason", "target": "reason", "description": "Failure reason."},
+        {"source": null, "target": "category.generic", "constant": "Application", "description": "Event category."},
+        {"source": null, "target": "category.high", "constant": "Access Management", "description": "Event category."},
+        {"source": null, "target": "category.low", "constant": "Communication", "description": "Event category."},
+        {"source": null, "target": "logon_auth_method", "constant": "remote", "description": "Remote authentication."}
+      ],
+      "evidence": [
+        "<34>Oct 27 2024 12:00:03 nas01 auth[123]: (459) Login incorrect (bad password): [alice] (from client nas01 port 4 cli aa:bb:cc:dd:ee:ff)"
+      ],
+      "expected_events": [
+        {"id": "PT_Axel_AxelNAC_syslog_login_incorrect", "status": "failure", "subject_account_name": "alice", "reason": "bad password", "numfield1": 4, "src_mac": "AA:BB:CC:DD:EE:FF", "time": "2024-10-27T09:00:03.000Z"}
+      ],
+      "negative_evidence": [
+        "<34>Oct 27 2024 12:00:00 nas01 auth[123]: Login incorrect"
+      ]
+    },
+    {
+      "rule_key": "login_incorrect_nocli",
+      "description": "AxelNAC failed login without a client MAC address.",
+      "pattern": "{\"<\"NUMBER\">\"?} {$time=DATETIME_SYSLOG|$time=DATETIME} {$host=HOSTNAME} auth{\"[\"$procid=NUMBER\"]\"}: ({$request_id=NUMBER}) Login incorrect ({$reason=UNTIL(\"): [\")}{$user=UNTIL(\"]\")} (from client {$nas=WORDDASH} port {$port=NUMBER})",
+      "condition": null,
+      "record_schema": [
+        {"name": "time", "category": "dynamic", "type": "timestamp", "required": true, "source": "$.time"},
+        {"name": "host", "category": "dynamic", "type": "hostname", "required": true, "source": "$.host"},
+        {"name": "procid", "category": "dynamic", "type": "integer", "required": false, "source": "$.procid"},
+        {"name": "request_id", "category": "dynamic", "type": "string", "required": true, "source": "$.request_id"},
+        {"name": "reason", "category": "dynamic", "type": "string", "required": true, "source": "$.reason"},
+        {"name": "user", "category": "dynamic", "type": "string", "required": true, "source": "$.user"},
+        {"name": "nas", "category": "dynamic", "type": "string", "required": true, "source": "$.nas"},
+        {"name": "port", "category": "dynamic", "type": "integer", "required": true, "source": "$.port"}
+      ],
+      "normalization": [
+        {"source": "time", "description": "Event timestamp.", "operations": [], "required": true},
+        {"source": "host", "description": "AxelNAC node hostname.", "operations": [{"op": "lowercase", "params": {}}], "required": true},
+        {"source": "procid", "description": "FreeRADIUS process identifier.", "operations": [], "required": false},
+        {"source": "request_id", "description": "FreeRADIUS request identifier.", "operations": [], "required": true},
+        {"source": "reason", "description": "Authentication failure reason.", "operations": [{"op": "trim", "params": {}}], "required": true},
+        {"source": "user", "description": "Account that failed authentication.", "operations": [{"op": "lowercase", "params": {}}], "required": true},
+        {"source": "nas", "description": "Network access server.", "operations": [], "required": true},
+        {"source": "port", "description": "NAS port.", "operations": [{"op": "to_integer", "params": {}}, {"op": "validate_range", "params": {"min": 0, "max": 65535}}], "required": true}
+      ],
+      "mappings": [
+        {"source": "time", "target": "time", "description": "Event time."},
+        {"source": "time", "target": "start_time", "description": "Authentication start time."},
+        {"source": null, "target": "id", "constant": "PT_Axel_AxelNAC_syslog_login_incorrect", "description": "Stable event identifier."},
+        {"source": null, "target": "event_src.category", "constant": "AAA", "description": "Source category."},
+        {"source": null, "target": "event_src.title", "constant": "axelnac", "description": "Source title."},
+        {"source": null, "target": "event_src.vendor", "constant": "AxelPRO", "description": "Source vendor."},
+        {"source": "host", "target": "event_src.hostname", "description": "Event source hostname."},
+        {"source": null, "target": "subject", "constant": "account", "description": "Account subject."},
+        {"source": null, "target": "object", "constant": "application", "description": "Target application."},
+        {"source": null, "target": "action", "constant": "login", "description": "Login action."},
+        {"source": null, "target": "status", "constant": "failure", "description": "Failed login."},
+        {"source": null, "target": "importance", "constant": "low", "description": "Failure importance."},
+        {"source": "user", "target": "subject_account_name", "description": "Account name."},
+        {"source": "port", "target": "numfield1", "description": "NAS port."},
+        {"source": "request_id", "target": "datafield1", "description": "Request identifier."},
+        {"source": null, "target": "protocol_layer7", "constant": "radius", "description": "RADIUS protocol."},
+        {"source": null, "target": "object_name", "constant": "axelnac", "description": "Target application."},
+        {"source": null, "target": "msgid", "constant": "login_incorrect", "description": "Failed login message."},
+        {"source": "reason", "target": "reason", "description": "Failure reason."},
+        {"source": null, "target": "category.generic", "constant": "Application", "description": "Event category."},
+        {"source": null, "target": "category.high", "constant": "Access Management", "description": "Event category."},
+        {"source": null, "target": "category.low", "constant": "Communication", "description": "Event category."},
+        {"source": null, "target": "logon_auth_method", "constant": "remote", "description": "Remote authentication."}
+      ],
+      "evidence": [
+        "<34>Oct 27 2024 12:00:01 nas01 auth[123]: (457) Login incorrect (bad password): [alice] (from client nas01 port 2)"
+      ],
+      "expected_events": [
+        {"id": "PT_Axel_AxelNAC_syslog_login_incorrect", "status": "failure", "subject_account_name": "alice", "reason": "bad password", "numfield1": 2, "time": "2024-10-27T09:00:01.000Z"}
+      ],
+      "negative_evidence": []
+    }
+  ]
+}

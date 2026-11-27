@@ -9,15 +9,17 @@ from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, ToolMe
 from langchain_deepseek import ChatDeepSeek
 from pydantic import ValidationError
 
+import feedback
 from prompts import (
     RESEARCH_BATCH_PROMPT,
     RESEARCH_BATCH_SYSTEM_PROMPT,
     RESEARCH_PROMPT,
+    MP_TEXT_TARGET_PROMPT,
     SYSTEM_PROMPT,
 )
 from schemas import ResearchBatch, ResearchBatchResponse, Response
 import storage
-from tools import TOOLS, error_response, handle_tool_errors, validation_error_response
+from tools import MP_TEXT_TOOLS, TOOLS, error_response, handle_tool_errors, validation_error_response
 from validation import check_batch_response, check_response
 
 
@@ -42,6 +44,7 @@ def run_step(
     compact_tools: bool = False,
 ) -> Response:
     messages = history
+    runner_feedback_ids = []
     while True:
         final_state = None
         for chunk in agent.stream(
@@ -76,17 +79,36 @@ def run_step(
         try:
             response = Response.model_validate_json(content or "")
         except ValidationError as error:
+            recovery = (
+                "Не повторяй исследование и не вызывай инструменты. Исправь только финальный "
+                "Response и верни полный JSON-объект без markdown и пояснений."
+            )
+            reported = feedback.runner_problem(
+                agent="parser",
+                category="invalid_response",
+                message="Parser-агент вернул Response, не соответствующий схеме.",
+                recovery=recovery,
+                evidence=[raw],
+                details={"validation_errors": error.errors()},
+            )
+            runner_feedback_ids.append(reported["id"])
             messages = list(final_state["messages"])
             messages.append(HumanMessage(content=validation_error_response(
                 error,
-                recovery=(
-                    "Не повторяй исследование и не вызывай инструменты. Исправь только финальный "
-                    "Response и верни полный JSON-объект без markdown и пояснений."
-                ),
+                recovery=recovery,
             )))
             continue
         problem = check_response(response, raw)
         if problem:
+            reported = feedback.runner_problem(
+                agent="parser",
+                category=problem["error"],
+                message=problem["message"],
+                recovery=problem["recovery"],
+                evidence=[raw],
+                details=problem["details"],
+            )
+            runner_feedback_ids.append(reported["id"])
             messages = list(final_state["messages"])
             messages.append(HumanMessage(content=error_response(
                 problem["error"],
@@ -95,6 +117,10 @@ def run_step(
                 details=problem["details"],
             )))
             continue
+        feedback.resolve_recovered(
+            runner_feedback_ids,
+            "Финальный Response прошёл независимую проверку схемы, RAW и сохранения.",
+        )
         history.append(AIMessage(content=response.model_dump_json()))
         if show_response:
             print(f"Агент: {response.model_dump_json(indent=2)}")
@@ -108,15 +134,25 @@ def run_observation(
     show_tools: bool = True,
     compact_tools: bool = False,
 ) -> tuple[Response, int]:
-    response = run_step(
-        agent,
-        [HumanMessage(content=RESEARCH_PROMPT.format(log=raw))],
-        raw,
-        show_response=show_response,
-        show_tools=show_tools,
-        compact_tools=compact_tools,
-    )
-    saved = storage.save_research(response.model_dump(mode="json"))
+    try:
+        response = run_step(
+            agent,
+            [HumanMessage(content=RESEARCH_PROMPT.format(log=raw))],
+            raw,
+            show_response=show_response,
+            show_tools=show_tools,
+            compact_tools=compact_tools,
+        )
+        saved = storage.save_research(response.model_dump(mode="json"))
+    except Exception as error:
+        feedback.runner_problem(
+            agent="parser",
+            category="research_failed",
+            message=f"Исследование parser-агента завершилось ошибкой: {type(error).__name__}: {error}",
+            evidence=[raw],
+            details={"exception_type": type(error).__name__},
+        )
+        raise
     print(f"Research result saved: id={saved['id']}")
     return response, saved["id"]
 
@@ -212,21 +248,23 @@ def run_research_batch(
     return response, research_ids
 
 
-def make_agent():
+def make_agent(target: str = "research"):
+    target_prompt = MP_TEXT_TARGET_PROMPT if target == "mp_text" else ""
     return create_agent(
         make_model(),
-        tools=TOOLS,
+        tools=TOOLS + (MP_TEXT_TOOLS if target == "mp_text" else []),
         middleware=[handle_tool_errors],
-        system_prompt=SYSTEM_PROMPT + json.dumps(Response.model_json_schema(), ensure_ascii=False),
+        system_prompt=SYSTEM_PROMPT + target_prompt + json.dumps(Response.model_json_schema(), ensure_ascii=False),
     )
 
 
-def make_batch_agent():
+def make_batch_agent(target: str = "research"):
+    target_prompt = MP_TEXT_TARGET_PROMPT if target == "mp_text" else ""
     return create_agent(
         make_model(),
-        tools=TOOLS,
+        tools=TOOLS + (MP_TEXT_TOOLS if target == "mp_text" else []),
         middleware=[handle_tool_errors],
-        system_prompt=RESEARCH_BATCH_SYSTEM_PROMPT + json.dumps(
+        system_prompt=RESEARCH_BATCH_SYSTEM_PROMPT + target_prompt + json.dumps(
             ResearchBatchResponse.model_json_schema(),
             ensure_ascii=False,
         ),
@@ -236,9 +274,10 @@ def make_batch_agent():
 def main() -> None:
     parser = argparse.ArgumentParser(description="Исследование одной RAW-строки лога.")
     parser.add_argument("raw", nargs="?", help="RAW-строка; без аргумента запускается диалог.")
+    parser.add_argument("--target", choices=["research", "mp_text"], default="research")
     args = parser.parse_args()
 
-    agent = make_agent()
+    agent = make_agent(args.target)
     if args.raw is not None:
         run_observation(agent, args.raw)
 
